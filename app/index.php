@@ -2,7 +2,7 @@
 
 require __DIR__ . '/timezone.php';
 require __DIR__ . '/config.php';
-if ($c['debug']) {
+if (!empty($c['debug'] ?? false)) {
     require __DIR__ . '/debug.php';
 }
 require __DIR__ . '/calc.php';
@@ -52,8 +52,8 @@ switch (true) {
             $_GET = array_merge($_GET, $t);
         }
         $type    = $_GET['t'] ?? 'pac';
-        $address = $_GET['a'] ?: '127.0.0.1';
-        $port    = $_GET['p'] ?: '1080';
+        $address = !empty($_GET['a'] ?? '') ? $_GET['a'] : '127.0.0.1';
+        $port    = !empty($_GET['p'] ?? '') ? $_GET['p'] : '1080';
         switch ($type) {
             case 's':
             case 'si':

@@ -2589,6 +2589,20 @@ class Bot
             'autodeny' => 0,
             'silence' => 0,
             'reset_monthly' => 0,
+            'outbound' => 'proxy',
+            'linkdomain' => '',
+            'includelist' => [],
+            'blocklist' => [],
+            'warplist' => [],
+            'processlist' => [],
+            'packagelist' => [],
+            'subnetlist' => [],
+            'defaultv2raytemplate' => '',
+            'defaultsingtemplate' => '',
+            'defaultclashtemplate' => '',
+            'v2raytemplates' => [],
+            'singtemplates' => [],
+            'classtemplates' => [],
             'white' => [],
             'deny' => [],
         ];
@@ -8055,7 +8069,7 @@ DNS-over-HTTPS with IP:
         }
         $pac    = $this->getPacConf();
         $useCdnDomain = !in_array(($pac['transport'] ?? ''), ['Reality', 'Both'], true);
-        $domain = $_GET['cdn'] ?: ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
+        $domain = !empty($_GET['cdn'] ?? '') ? $_GET['cdn'] : ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
         $xr     = $this->getXray();
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
@@ -8073,7 +8087,7 @@ DNS-over-HTTPS with IP:
                 if (empty($v['off'])) {
                     $flag = false;
                 }
-                $template = base64_decode($v["{$type}template"]);
+                $template = base64_decode($v["{$type}template"] ?? '');
                 $uid      = $v['id'];
                 $subscriptionId = $subId;
                 $email    = $v['email'];
@@ -8160,22 +8174,51 @@ DNS-over-HTTPS with IP:
                 break;
         }
 
-        $outbound = $pac['outbound'] ?: 'proxy';
+        $outbound = ($pac['outbound'] ?? '') ?: 'proxy';
         $c = json_decode($this->replaceTags(json_encode($c), [
             '~outbound~' => $outbound,
         ]), true);
-        foreach ($c['outbounds'] as $k => $v) {
-            if ($v['tag'] == $outbound) {
+        if (!is_array($c)) {
+            $c = [];
+        }
+
+        $outbounds = $c['outbounds'] ?? [];
+        if (!is_array($outbounds)) {
+            $outbounds = [];
+        }
+
+        $index = null;
+        foreach ($outbounds as $k => $v) {
+            if (($v['tag'] ?? '') == $outbound) {
                 $index = $k;
                 break;
             }
         }
-        if (!isset($index)) {
-            foreach ($c['proxies'] as $k => $v) {
-                if ($v['name'] == $outbound) {
-                    $index = $k;
-                    break;
+        if ($index === null) {
+            $proxies = $c['proxies'] ?? [];
+            if (is_array($proxies)) {
+                foreach ($proxies as $k => $v) {
+                    if (($v['name'] ?? '') == $outbound) {
+                        $index = $k;
+                        break;
+                    }
                 }
+            }
+        }
+        if ($index === null) {
+            if (!empty($outbounds)) {
+                $index = 0;
+            } else {
+                header('500', true, 500);
+                exit;
+            }
+        }
+        if (!isset($c['outbounds'][$index])) {
+            if (!empty($outbounds)) {
+                $index = 0;
+            } else {
+                header('500', true, 500);
+                exit;
             }
         }
 
@@ -8478,18 +8521,18 @@ DNS-over-HTTPS with IP:
             ?? $xr['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
             ?? $domain;
         $c = json_decode($this->replaceTags(json_encode($c), [
-            '"~pac~"'        => json_encode(array_keys(array_filter($pac['includelist'] ?: []))),
-            '"~block~"'      => json_encode(array_keys(array_filter($pac['blocklist'] ?: []))),
-            '"~warp~"'       => json_encode(array_keys(array_filter($pac['warplist'] ?: []))),
-            '"~process~"'    => json_encode(array_keys(array_filter($pac['processlist'] ?: []))),
-            '"~package~"'    => json_encode(array_keys(array_filter($pac['packagelist'] ?: []))),
-            '"~subnet~"'     => json_encode(array_keys(array_filter($pac['subnetlist'] ?: []))),
+            '"~pac~"'        => json_encode(array_keys(array_filter($pac['includelist'] ?? []))),
+            '"~block~"'      => json_encode(array_keys(array_filter($pac['blocklist'] ?? []))),
+            '"~warp~"'       => json_encode(array_keys(array_filter($pac['warplist'] ?? []))),
+            '"~process~"'    => json_encode(array_keys(array_filter($pac['processlist'] ?? []))),
+            '"~package~"'    => json_encode(array_keys(array_filter($pac['packagelist'] ?? []))),
+            '"~subnet~"'     => json_encode(array_keys(array_filter($pac['subnetlist'] ?? []))),
             '~dns~'          => "https://$domain/dns-query$hash/$uid",
             '~dnspath~'      => "/dns-query$hash/$uid",
             '~uid~'          => $uid,
             '~domain~'       => $domain,
             '~directdomain~' => $pac['domain'],
-            '~cdndomain~'    => $pac['linkdomain'],
+            '~cdndomain~'    => $pac['linkdomain'] ?? '',
             '~short_id~'     => $realityShortId,
             '~email~'        => $email,
             '~public_key~'   => $pac['xray'],
