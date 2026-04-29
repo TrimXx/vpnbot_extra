@@ -6,7 +6,7 @@ require __DIR__ . '/bot.php';
 require __DIR__ . '/config.php';
 require __DIR__ . '/i18n.php';
 
-if ($c['debug']) {
+if (!empty($c['debug'] ?? false)) {
     require __DIR__ . '/debug.php';
 }
 

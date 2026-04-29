@@ -15,6 +15,7 @@ class Bot
     public $reg;
     public $pool;
     public $hwid;
+    public $last = '';
 
     public function __construct($key, $i18n)
     {
@@ -26,10 +27,11 @@ class Bot
         $this->pac      = '/config/pac.json';
         $this->ip       = getenv('IP');
         $this->i18n     = $i18n;
-        $this->language = $this->getPacConf()['language'] ?: 'en';
+        $pac            = $this->getPacConf();
+        $this->language = $pac['language'] ?? 'en';
         $this->dns      = '1.1.1.1, 8.8.8.8';
         $this->mtu      = 1350;
-        $this->limit    = $this->getPacConf()['limitpage'] ?: 5;
+        $this->limit    = $pac['limitpage'] ?? 5;
         $this->adguard  = '/config/AdGuardHome.yaml';
         $this->update   = '/update/json';
         $this->hwid     = '/config/hwid.json';
@@ -1478,8 +1480,10 @@ class Bot
             $this->time_xray_stats = time();
             try {
                 $x  = $this->getXray();
-                $td = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "inbound>>>vless_tls>>>traffic>>>downlink" 2>&1', 'xr'), true)['stat']['value'] ?: 0;
-                $tu = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "inbound>>>vless_tls>>>traffic>>>uplink" 2>&1', 'xr'), true)['stat']['value'] ?: 0;
+                $downResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "inbound>>>vless_tls>>>traffic>>>downlink" 2>&1', 'xr'), true);
+                $td = is_array($downResp) ? (int)($downResp['stat']['value'] ?? 0) : 0;
+                $upResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "inbound>>>vless_tls>>>traffic>>>uplink" 2>&1', 'xr'), true);
+                $tu = is_array($upResp) ? (int)($upResp['stat']['value'] ?? 0) : 0;
                 $p  = $this->getXrayStats();
                 $p['session'] = [
                     'download' => $td,
@@ -1489,13 +1493,21 @@ class Bot
                     $tmp = [];
                     $tmpById = [];
                     foreach ($users as $k => $v) {
-                        $d = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "user>>>' . $v['email'] . '>>>traffic>>>downlink" 2>&1', 'xr'), true)['stat']['value'] ?: 0;
-                        $u = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "user>>>' . $v['email'] . '>>>traffic>>>uplink" 2>&1', 'xr'), true)['stat']['value'] ?: 0;
-                        $globalDownload = (int) ($p['users'][$k]['global']['download'] ?? 0);
-                        $globalUpload = (int) ($p['users'][$k]['global']['upload'] ?? 0);
+                        $userDownResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "user>>>' . $v['email'] . '>>>traffic>>>downlink" 2>&1', 'xr'), true);
+                        $d = is_array($userDownResp) ? (int)($userDownResp['stat']['value'] ?? 0) : 0;
+                        $userUpResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "user>>>' . $v['email'] . '>>>traffic>>>uplink" 2>&1', 'xr'), true);
+                        $u = is_array($userUpResp) ? (int)($userUpResp['stat']['value'] ?? 0) : 0;
+                        $prevUserRaw = $p['users'][$k] ?? [];
+                        $prevUser = is_array($prevUserRaw) ? $prevUserRaw : [];
+                        $prevGlobal = is_array($prevUser['global'] ?? null) ? $prevUser['global'] : [];
+                        $globalDownload = (int) ($prevGlobal['download'] ?? 0);
+                        $globalUpload = (int) ($prevGlobal['upload'] ?? 0);
                         if (!empty($v['id']) && !empty($p['users_by_id'][$v['id']])) {
-                            $globalDownload = (int) ($p['users_by_id'][$v['id']]['global']['download'] ?? $globalDownload);
-                            $globalUpload = (int) ($p['users_by_id'][$v['id']]['global']['upload'] ?? $globalUpload);
+                            $prevByIdRaw = $p['users_by_id'][$v['id']] ?? [];
+                            $prevById = is_array($prevByIdRaw) ? $prevByIdRaw : [];
+                            $prevByIdGlobal = is_array($prevById['global'] ?? null) ? $prevById['global'] : [];
+                            $globalDownload = (int) ($prevByIdGlobal['download'] ?? $globalDownload);
+                            $globalUpload = (int) ($prevByIdGlobal['upload'] ?? $globalUpload);
                         }
                         $tmp[$k] = [
                             'session' => [
@@ -1530,6 +1542,10 @@ class Bot
                     $this->time3 = time();
                     $r = $this->analysisIp(return: 1);
                     if (!empty($r)) {
+                        $t = [];
+                        $text = '';
+                        $ips = [];
+                        $ban = 0;
                         foreach ($r as $k => $v) {
                             foreach ($v as $i) {
                                 $t[$i['title']][$k] = 1;
@@ -2539,7 +2555,45 @@ class Bot
 
     public function getPacConf()
     {
-        return json_decode(file_get_contents($this->pac), true);
+        $raw = json_decode(file_get_contents($this->pac), true);
+        if (!is_array($raw)) {
+            $raw = [];
+        }
+
+        // Defaults to prevent PHP warnings when pac.json is empty/minimal.
+        $defaults = [
+            'language' => 'en',
+            'limitpage' => 5,
+            'domain' => '',
+            'transport' => 'Websocket',
+            'reality' => [
+                'domain' => '',
+                'destination' => '',
+            ],
+            'wg' => 0,
+            'wg1' => 0,
+            'amnezia' => 0,
+            'wg1_amnezia' => 0,
+            'xray' => '',
+            'ad' => 0,
+            'ss' => 0,
+            'tg' => 0,
+            'hy' => 0,
+            'hysteria' => 0,
+            'dnstt' => 0,
+            'showdnstt' => 0,
+            'backup' => '',
+            'autoupdate' => 0,
+            'autoscan' => 0,
+            'autoscan_timeout' => 600,
+            'autodeny' => 0,
+            'silence' => 0,
+            'reset_monthly' => 0,
+            'white' => [],
+            'deny' => [],
+        ];
+
+        return array_replace_recursive($defaults, $raw);
     }
 
     public function setPacConf(array $conf)
@@ -4631,7 +4685,7 @@ DNS-over-HTTPS with IP:
 
     public function i18n(string $menu): string
     {
-        return $this->i18n[$menu][$this->language] ?: $menu;
+        return $this->i18n[$menu][$this->language] ?? ($this->i18n[$menu]['en'] ?? $menu);
     }
 
     public function changeWG($i)
@@ -5758,7 +5812,11 @@ DNS-over-HTTPS with IP:
 
     public function suspicious($regexp, $file, $ranges, $title, $reverse = false)
     {
-        if ($r = fopen($file, 'r')) {
+        $ret = [];
+        if (!is_readable($file)) {
+            return $ret;
+        }
+        if (($r = fopen($file, 'r')) !== false) {
             while (feof($r) === false) {
                 $l = fgets($r);
                 if (preg_match('~(\d+\.\d+\.\d+\.\d+)~', $l, $m)) {
@@ -5790,7 +5848,7 @@ DNS-over-HTTPS with IP:
             }
             fclose($r);
         }
-        return $ret ?: [];
+        return $ret;
     }
 
     public function analysisIp(int $page = 0, $return = false)
@@ -5799,8 +5857,8 @@ DNS-over-HTTPS with IP:
         $xr  = [];
         foreach (array_merge($pac['white'] ?: [], $pac['deny'] ?: [], ['10.10.0.0/23']) as $v) {
             if (preg_match('~^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?:(/\d{1,2}))?$~', $v, $m)) {
-                if (!in_array($m[1] . ($m[2] ?: '/32'), $xr)) {
-                    $xr[] = $m[1] . ($m[2] ?: '/32');
+                if (!in_array($m[1] . ($m[2] ?? '/32'), $xr)) {
+                    $xr[] = $m[1] . ($m[2] ?? '/32');
                 }
             }
         }
@@ -6208,6 +6266,8 @@ DNS-over-HTTPS with IP:
 
     public function syncDeny()
     {
+        $text = '';
+        $xr = [];
         $pac = $this->getPacConf();
         if ($r = fopen('/logs/nginx_tlgrm_access', 'r')) {
             while (feof($r) === false) {
