@@ -8699,7 +8699,7 @@ DNS-over-HTTPS with IP:
             case 'si':
                 $route = $c['route'] ?? [];
                 $route = $this->addRuleSet($route);
-                $route = $this->createRuleSet($route, $uid, $domain);
+                $route = $this->createRuleSet($route, $subscriptionId, $domain);
                 if (!empty($route['rules'])) {
                     foreach ($route['rules'] as $k => $v) {
                         if (count($v) == 1 && array_key_exists('outbound', $v)) {
@@ -8717,7 +8717,7 @@ DNS-over-HTTPS with IP:
             case 'cl':
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
-                    $c = $this->clashRules($c, $uid, $domain);
+                    $c = $this->clashRules($c, $subscriptionId, $domain);
                     if (count($c['rules']) == 1) {
                         unset($c['rules']);
                     }
@@ -8781,7 +8781,7 @@ DNS-over-HTTPS with IP:
         return $c;
     }
 
-    public function clashRules($c, $uid, $domain)
+    public function clashRules($c, $subscriptionId, $domain)
     {
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
@@ -8815,7 +8815,7 @@ DNS-over-HTTPS with IP:
                         'url'      => "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
                             'h' => $hash,
                             't' => 'cl',
-                            's' => $uid,
+                            's' => $subscriptionId,
                             'r' => $v['name'],
                         ])),
                         'interval' => $v['interval'],
@@ -8932,7 +8932,7 @@ DNS-over-HTTPS with IP:
         exit;
     }
 
-    public function createRuleSet($route, $uid, $domain)
+    public function createRuleSet($route, $subscriptionId, $domain)
     {
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
@@ -8948,7 +8948,7 @@ DNS-over-HTTPS with IP:
                         "url"             => "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
                             'h' => $hash,
                             't' => 'si',
-                            's' => $uid,
+                            's' => $subscriptionId,
                             'r' => $r['name'],
                         ])),
                         "update_interval" => $r['interval'],
