@@ -752,6 +752,7 @@ class Bot
     public function restartXray($c, $norestart = false)
     {
         $c['inbounds'][0]['settings']['clients'] = array_values($c['inbounds'][0]['settings']['clients']);
+        $this->ensureUniqueXrayClientEmails($c);
         $pac = $this->getPacConf();
         if (($pac['transport'] ?? '') === 'Both' && !empty($c['inbounds'][1]['settings'])) {
             $realityClients = [];
@@ -5484,6 +5485,40 @@ DNS-over-HTTPS with IP:
         return null;
     }
 
+    protected function ensureUniqueXrayClientEmails(array &$xray): void
+    {
+        $clients = &$xray['inbounds'][0]['settings']['clients'];
+        if (!is_array($clients)) {
+            return;
+        }
+
+        $seen = [];
+        foreach ($clients as &$client) {
+            $email = (string) ($client['email'] ?? '');
+            if ($email === '') {
+                $email = 'user-' . substr((string) ($client['id'] ?? uniqid('', true)), 0, 8);
+            }
+
+            if (!isset($seen[$email])) {
+                $seen[$email] = 1;
+                $client['email'] = $email;
+                continue;
+            }
+
+            $base = $email;
+            $suffix = $seen[$base];
+            do {
+                $candidate = $base . '-' . $suffix;
+                $suffix++;
+            } while (isset($seen[$candidate]));
+
+            $seen[$base] = $suffix;
+            $seen[$candidate] = 1;
+            $client['email'] = $candidate;
+        }
+        unset($client);
+    }
+
     protected function ensureOwnerSubscriptionAnchor(array &$xray, int $ownerIndex): bool
     {
         if (!isset($xray['inbounds'][0]['settings']['clients'][$ownerIndex])) {
@@ -5514,8 +5549,9 @@ DNS-over-HTTPS with IP:
     {
         $pac = $this->getPacConf();
         $email = (string) ($owner['email'] ?? 'user');
+        $ownerSuffix = substr(hash('sha1', $ownerSubId), 0, 6);
         $suffix = substr(hash('sha1', $hwid), 0, 8);
-        $deviceEmail = $email . '#dev-' . $suffix;
+        $deviceEmail = $email . '#dev-' . $ownerSuffix . '-' . $suffix;
 
         $client = [
             'id' => $deviceUuid,
