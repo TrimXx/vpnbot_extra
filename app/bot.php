@@ -207,6 +207,9 @@ class Bot
             case preg_match('~^/hwidUserDel (\d+)_(\d+) (.+)$~', $this->input['callback'], $m):
                 $this->hwidUserDel($m[1], $m[2], $m[3]);
                 break;
+            case preg_match('~^/resetDeviceDeletePassword (\d+)$~', $this->input['callback'], $m):
+                $this->resetDeviceDeletePassword($m[1]);
+                break;
             case preg_match('~^/searchLogs (.+)$~', $this->input['message'], $m):
                 $this->searchLogs($m[1]);
                 break;
@@ -5429,6 +5432,33 @@ DNS-over-HTTPS with IP:
         return (string) ($client['subscription_id'] ?? $client['id'] ?? '');
     }
 
+    protected function findOwnerClientBySubscriptionId(array $xray, string $requestedId): array
+    {
+        foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $idx => $client) {
+            if (!empty($client['device_parent_id'])) {
+                continue;
+            }
+            if ($this->isSubscriptionIdMatch($client, $requestedId)) {
+                return [$idx, $client];
+            }
+        }
+        return [null, null];
+    }
+
+    protected function getSubscriptionDevicePasswordHash(array $client): string
+    {
+        return (string) ($client['device_delete_password_md5'] ?? '');
+    }
+
+    protected function isSubscriptionDevicePasswordValid(array $client, string $password): bool
+    {
+        $hash = $this->getSubscriptionDevicePasswordHash($client);
+        if ($hash === '' || $password === '') {
+            return false;
+        }
+        return strtolower($hash) === md5($password);
+    }
+
     protected function isSubscriptionIdMatch(array $client, string $requestedId): bool
     {
         if ($requestedId === '') {
@@ -7829,6 +7859,16 @@ DNS-over-HTTPS with IP:
                 'callback_data' => "/hwidUserRuntimeMode $i",
             ],
         ];
+        $hasDeletePassword = $this->getSubscriptionDevicePasswordHash($c) !== '';
+        $data[] = [
+            [
+                'text'          => ($hasDeletePassword ? '🔐' : '🔓') . ' ' . ($hasDeletePassword ? 'reset delete password' : 'delete password not set'),
+                'callback_data' => "/resetDeviceDeletePassword $i",
+            ],
+        ];
+        if ($hasDeletePassword) {
+            $text[] = 'If password is forgotten, ask support to reset it.';
+        }
         $data[] = [
             [
                 'text'          => $this->i18n('rename'),
@@ -7851,6 +7891,19 @@ DNS-over-HTTPS with IP:
             implode("\n", $text ?: ['...']),
             $data ?: false,
         );
+    }
+
+    public function resetDeviceDeletePassword($i)
+    {
+        $xray = $this->getXray();
+        if (!isset($xray['inbounds'][0]['settings']['clients'][$i])) {
+            $this->answer($this->input['callback_id'], 'user not found', true);
+            return;
+        }
+        unset($xray['inbounds'][0]['settings']['clients'][$i]['device_delete_password_md5']);
+        file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $this->answer($this->input['callback_id'], 'device delete password reset', true);
+        $this->userXr($i);
     }
 
     public function hwidUser($i, $page = 0)
@@ -8121,6 +8174,82 @@ DNS-over-HTTPS with IP:
             echo "<html><body><h2>Subscription not found or disabled</h2><p>Please open the bot and request a new subscription link.</p></body></html>";
             exit;
         }
+
+        $action = (string) ($_GET['action'] ?? '');
+        if ($action !== '') {
+            header('Content-Type: application/json; charset=utf-8');
+            $ownerSubId = $this->getClientSubscriptionId($client);
+            switch ($action) {
+                case 'device_password_status':
+                    echo json_encode([
+                        'ok' => true,
+                        'has_password' => $this->getSubscriptionDevicePasswordHash($client) !== '',
+                    ]);
+                    exit;
+                case 'device_password_set':
+                    $idx = $clientIndex;
+                    if ($idx === null || !isset($xr['inbounds'][0]['settings']['clients'][$idx])) {
+                        http_response_code(404);
+                        echo json_encode(['ok' => false, 'message' => 'subscription not found']);
+                        exit;
+                    }
+
+                    $password = trim((string) ($_POST['password'] ?? ''));
+                    if ($password === '') {
+                        http_response_code(400);
+                        echo json_encode(['ok' => false, 'message' => 'empty password']);
+                        exit;
+                    }
+
+                    // Always validate against current hash stored in xray.json
+                    $currentHash = strtolower((string) ($xr['inbounds'][0]['settings']['clients'][$idx]['device_delete_password_md5'] ?? ''));
+                    if ($currentHash !== '') {
+                        $currentPassword = trim((string) ($_POST['current_password'] ?? ''));
+                        if ($currentPassword === '' || md5($currentPassword) !== $currentHash) {
+                            http_response_code(403);
+                            echo json_encode(['ok' => false, 'message' => 'invalid current password']);
+                            exit;
+                        }
+                    }
+                    $xr['inbounds'][0]['settings']['clients'][$idx]['device_delete_password_md5'] = md5($password);
+                    file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                    echo json_encode(['ok' => true, 'has_password' => true]);
+                    exit;
+                case 'device_delete':
+                    $password = trim((string) ($_POST['password'] ?? ''));
+                    $hwid = trim((string) ($_POST['hwid'] ?? ''));
+                    if ($hwid === '') {
+                        http_response_code(400);
+                        echo json_encode(['ok' => false, 'message' => 'empty hwid']);
+                        exit;
+                    }
+                    if (!$this->isSubscriptionDevicePasswordValid($client, $password)) {
+                        http_response_code(403);
+                        echo json_encode(['ok' => false, 'message' => 'invalid password']);
+                        exit;
+                    }
+                    $devices = $this->getHwidDevicesByUser($ownerSubId);
+                    $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
+                    $this->deleteHwidDevice($ownerSubId, $hwid);
+                    if ($deviceUuid !== '') {
+                        $idx = $this->findXrayClientIndexById($xr, $deviceUuid);
+                        if ($idx !== null) {
+                            unset($xr['inbounds'][0]['settings']['clients'][$idx]);
+                            $this->restartXray($xr);
+                        } else {
+                            file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                        }
+                    } else {
+                        file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                    }
+                    echo json_encode(['ok' => true]);
+                    exit;
+            }
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'message' => 'unknown action']);
+            exit;
+        }
+
         if (!$flag && !$this->processHwidRequest($client, $clientIndex)) {
             exit;
         }
@@ -8129,6 +8258,7 @@ DNS-over-HTTPS with IP:
         $download = $this->getBytes($traffic['download']);
         $upload   = $this->getBytes($traffic['upload']);
         $deviceTrafficMap = $this->getHwidDeviceTraffic($uid);
+        $hasDeviceDeletePassword = $this->getSubscriptionDevicePasswordHash($client) !== '';
         $singbox  = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
             'h' => $hash,
             't' => 'si',
