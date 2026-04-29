@@ -8197,39 +8197,39 @@ DNS-over-HTTPS with IP:
         if (!is_array($outbounds)) {
             $outbounds = [];
         }
+        $proxies = $c['proxies'] ?? [];
+        if (!is_array($proxies)) {
+            $proxies = [];
+        }
 
         $index = null;
-        foreach ($outbounds as $k => $v) {
-            if (($v['tag'] ?? '') == $outbound) {
-                $index = $k;
-                break;
-            }
-        }
-        if ($index === null) {
-            $proxies = $c['proxies'] ?? [];
-            if (is_array($proxies)) {
-                foreach ($proxies as $k => $v) {
-                    if (($v['name'] ?? '') == $outbound) {
-                        $index = $k;
-                        break;
-                    }
+        if (($_GET['t'] ?? '') === 'cl') {
+            foreach ($proxies as $k => $v) {
+                if (($v['name'] ?? '') == $outbound) {
+                    $index = $k;
+                    break;
                 }
             }
-        }
-        if ($index === null) {
-            if (!empty($outbounds)) {
+            if ($index === null && !empty($proxies)) {
                 $index = 0;
-            } else {
+            }
+            if ($index === null || !isset($c['proxies'][$index])) {
                 http_response_code(500);
                 header('Content-Type: text/plain; charset=utf-8');
-                echo "Configuration template is invalid: no outbounds or proxies defined.";
+                echo "Configuration template is invalid: proxy index missing.";
                 exit;
             }
-        }
-        if (!isset($c['outbounds'][$index])) {
-            if (!empty($outbounds)) {
+        } else {
+            foreach ($outbounds as $k => $v) {
+                if (($v['tag'] ?? '') == $outbound) {
+                    $index = $k;
+                    break;
+                }
+            }
+            if ($index === null && !empty($outbounds)) {
                 $index = 0;
-            } else {
+            }
+            if ($index === null || !isset($c['outbounds'][$index])) {
                 http_response_code(500);
                 header('Content-Type: text/plain; charset=utf-8');
                 echo "Configuration template is invalid: outbound index missing.";
