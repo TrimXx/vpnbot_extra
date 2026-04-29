@@ -359,8 +359,6 @@ services:
             dockerfile: dockerfile/xray.dockerfile
             args:
                 image: ${IMAGE}
-        ports:
-            - 33443:33443
         volumes:
             - ./config/.profile:/root/.ashrc:ro
             - ./ssh:/ssh
