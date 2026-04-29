@@ -10,7 +10,21 @@
 /sftp-config.json
 /tg.pyr
 /config/wg0.conf
+/config/wg1.conf
 /config/hwid.json
+/config/xray.json
+/config/xray_backup.json
+/config/xray.stats
+/config/clients.json
+/config/clients1.json
+/config/mtprotosecret
+/config/mtprotodomain
+/config/pac.json
+/config/AdGuardHome.yaml
+/config/ocserv.passwd
+/config/deny
+/config/sslocal.json
+/config/ssserver.json
 /todo.todo
 /app/zapretlists/*
 !/app/zapretlists/.gitkeep
@@ -27,6 +41,7 @@ docker-compose.override.yml
 backup.json
 app/webapp/override/
 .rest
+.env
 
 subscription.php
 location.conf
