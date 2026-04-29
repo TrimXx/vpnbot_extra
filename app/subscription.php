@@ -1,0 +1,3157 @@
+<?php
+$metaTitle = 'TrimX Sub';
+$announce = 'welcome to the club';
+$metaDescription = 'Твой маленький секрет';
+$supportUrl = 'https://t.me/Trim_X';
+$brandingTitle = 'FPN Network';
+$brandingLogoUrl = 'https://cdn.jsdelivr.net/gh/arpicme/Proxy-App-Icon-set@refs/heads/main/white_background/Prizrak-box.svg';
+$subscription_url = preg_replace("/<a href='([^']+)'>.*<\/a>/", '$1', $suburl);
+$ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+$username = htmlspecialchars($email ?? '', ENT_QUOTES, 'UTF-8');
+$connectedDevices = method_exists($this, 'getHwidDevicesByUser') ? ($this->getHwidDevicesByUser($uid) ?: []) : [];
+$deviceTrafficMap = $deviceTrafficMap ?? [];
+$pacConfig = method_exists($this, 'getPacConf') ? ($this->getPacConf() ?: []) : [];
+$hwidLimitEnabled = !empty($pacConfig['hwid_limit_enabled']);
+$defaultDeviceLimit = (int)($pacConfig['hwid_device_count'] ?? 0);
+$clientDeviceLimit = (int)($client['hwid_limit'] ?? 0);
+$connectedDevicesMax = $hwidLimitEnabled ? ($clientDeviceLimit > 0 ? $clientDeviceLimit : max(0, $defaultDeviceLimit)) : 0;
+$connectedDevicesList = [];
+foreach ($connectedDevices as $deviceHwid => $deviceInfo) {
+    if (!is_array($deviceInfo)) {
+        continue;
+    }
+    $hwidKey = trim((string) $deviceHwid);
+    if ($hwidKey === '') {
+        continue;
+    }
+
+    $connectedDevicesList[] = [
+        'hwid' => $hwidKey,
+        'user_agent' => (string)($deviceInfo['user_agent'] ?? ''),
+        'device_os' => (string)($deviceInfo['device_os'] ?? ''),
+        'os_version' => (string)($deviceInfo['os_version'] ?? ''),
+        'device_model' => (string)($deviceInfo['device_model'] ?? ''),
+        'time' => (int)($deviceInfo['time'] ?? 0),
+        'traffic_total' => (int)($deviceTrafficMap[$hwidKey]['total'] ?? 0),
+        'traffic_upload' => (int)($deviceTrafficMap[$hwidKey]['upload'] ?? 0),
+        'traffic_download' => (int)($deviceTrafficMap[$hwidKey]['download'] ?? 0),
+    ];
+}
+$appsConfigUrl = 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json';
+// Переменные для страницы подписки vpnbot
+/*
+    $suburl - ссылка на страницу подписки пользователя
+    $vless - шорт ссылка на конфиг
+    $singbox - ссылка на singbox конфиг
+    $clash - ссылка на mihomo конфиг
+    $xray - ссылка на xray конфига
+    $windows - ссылка на архив скриптов сингбокс под винду
+    $download
+    $upload
+    $uid
+    $email
+    $expire - срок действия подписки пользователя
+    $configs['singbox'] - содержимое конфига сингбокс
+    $configs['xray'] - содержимое конфига xray
+    $configs['clash'] - содержимое конфига clash
+
+    sing-box://import-remote-profile/?url=$singbox
+    streisand://import/$vxray
+    v2rayng://install-config?url=$vxray
+    karing://install-config?url=$singbox
+    hiddify://install-config/?url=$singbox
+    clash://install-config/?url=$clash&overwrite=no&name=$email
+*/
+
+// Функция определния браузера по User-Agent для выдачи страницы подписки
+function isBrowser(string $userAgent): bool {
+    $browserKeywords = [
+        'Mozilla', 'Chrome', 'Safari', 'Firefox', 'Opera', 'Edge', 'Brave',
+        'YaBrowser', 'Cromite', 'Vivaldi', 'DuckDuckGo', 'SamsungBrowser',
+        'Puffin', 'Maxthon', 'QQBrowser', 'UCBrowser', 'SogouMobileBrowser',
+        'TelegramBot', 'SeznamBot', 'Coc Coc', 'Naver', 'Baiduspider',
+        'Lynx', 'w3m',
+    ];
+
+    foreach ($browserKeywords as $keyword) {
+        if (stripos($userAgent, $keyword) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Функция формирования panelData для страницы подписки
+function generate_panelData(
+    string $uid,
+    string $download,
+    string $email,
+    string $vless,
+    string $subscription_url,
+    string $clash,
+    string $singbox,
+    string $windows,
+    string $xray,
+    ?int $expire = null, // Может быть null или timestamp
+    array $connectedDevices = [],
+    int $connectedDevicesMax = 0,
+    bool $hasDeviceDeletePassword = false
+): string {
+    $happ_cryptolink = 'happ://add/' . $subscription_url;
+
+    $links = [
+        (string)$vless,
+        $clash   . '#mihomo conf',
+        $singbox . '#sing-box conf',
+        $windows . '#sing-box windows script',
+        $xray    . '#xray conf',
+    ];
+
+    // daysLeft и expiresAt рассчитываются автоматически
+    if ($expire === null) {
+        $daysLeft = 27012;
+        $expiresAt = '2099-08-12T10:46:21.000Z';
+    } else {
+        $now = time();
+        $daysLeft = max(0, (int)ceil(($expire - $now) / 86400));
+        $expiresAt = gmdate('Y-m-d\TH:i:s.000\Z', $expire);
+    }
+
+    $payload = [
+        'response' => [
+            'isFound' => true,
+            'user' => [
+                'shortUuid' => (string)$uid,
+                'daysLeft' => $daysLeft,
+                'trafficUsed' => (string)$download,
+                'trafficLimit' => '0',
+                'username' => (string)$email,
+                'expiresAt' => $expiresAt,
+                'isActive' => true,
+                'userStatus' => 'ACTIVE',
+                'trafficLimitStrategy' => 'NO_RESET',
+                'connectedDevices' => $connectedDevices,
+                'connectedDevicesMax' => $connectedDevicesMax,
+                'hasDeviceDeletePassword' => $hasDeviceDeletePassword,
+            ],
+            'links' => $links,
+            'ssConfLinks' => new stdClass(),
+            'subscriptionUrl' => $subscription_url . '#' . $email,
+            'happ' => [
+                'cryptoLink' => $happ_cryptolink,
+            ],
+        ],
+    ];
+
+    $json = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    return base64_encode($json !== false ? $json : '{}');
+}
+
+// Функция для подсчёта трафика для заголовка subscription-userinfo
+function parse_traffic_to_bytes($traffic_str): int {
+    if (is_numeric($traffic_str)) {
+        return (int)$traffic_str;
+    }
+    $traffic_str = trim(strtoupper($traffic_str));
+    preg_match('/([0-9\.]+)\s*(B|KB|MB|GB|TB|KIB|MIB|GIB|TIB)/', $traffic_str, $matches);
+    if (isset($matches[1]) && isset($matches[2])) {
+        $value = (float)$matches[1];
+        $unit = $matches[2];
+        $powers = ['B' => 0, 'KB' => 1, 'MB' => 2, 'GB' => 3, 'TB' => 4];
+        $bi_powers = ['B' => 0, 'KIB' => 1, 'MIB' => 2, 'GIB' => 3, 'TIB' => 4];
+
+        if (array_key_exists($unit, $powers)) {
+            return (int)($value * pow(1000, $powers[$unit]));
+        } elseif (array_key_exists($unit, $bi_powers)) {
+            return (int)($value * pow(1024, $bi_powers[$unit]));
+        }
+    }
+    return (int)$traffic_str;
+}
+
+// Функция для отправки общих заголовков профиля
+function send_profile_headers(string $email, string $subscription_url, string $supportUrl, $download, $expire, string $announce): void {
+    // Основные заголовки
+    header('x-robots-tag: noindex, nofollow, noarchive, nosnippet, noimageindex');
+    header('profile-title: base64:' . base64_encode(substr($email, 0, 25)));
+    header('support-url: ' . $supportUrl);
+    header('profile-web-page-url: ' . $subscription_url);
+
+    // Заголовок с информацией о пользователе
+    $uploadBytes = 0;
+    $downloadBytes = parse_traffic_to_bytes($download ?? '0');
+    $totalBytes = 0;
+    $expireTimestamp = (!empty($expire) && is_numeric($expire)) ? (int)$expire : 0;
+    $userInfo = "upload={$uploadBytes}; download={$downloadBytes}; total={$totalBytes}; expire={$expireTimestamp}";
+    header('subscription-userinfo: ' . $userInfo);
+
+    // Прочие заголовки
+    header('profile-update-interval: 12');
+    header('content-disposition: attachment; filename=' . $email);
+
+    // Заголовки, перенесенные из send_profile_extra_headers
+    header('update-always: true');
+    header('announce: base64:' . base64_encode($announce));
+    header('flclashx-denywidgets: true');
+    header('flclashx-custom: update');
+    header('flclashx-widgets: announce,metainfo,networkDetection,intranetIp,tunButton,systemProxyButton,networkSpeed');
+    header('flclashx-view: type:list; sort:none; layout:standard; icon:standard; card:min');
+}
+
+$panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword));
+$panelDataB64 = $panelData; // Already base64 encoded
+
+switch (true) {
+    case preg_match('~^(?:[Kk]oala-[Cc]lash|FlClashX|prizrak-box)~iu', $ua):
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        header('Content-type: text/yaml');
+        echo $configs['clash'];
+        break;
+
+    case preg_match('~Happ/~', $ua):
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        header('routing: happ://routing/onadd/eyJOYW1lIjoiU2ltcGxlLVJVLXJvdXRpbmciLCJHbG9iYWxQcm94eSI6InRydWUiLCJSZW1vdGVETlNUeXBlIjoiRG9VIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly9kbnMuYWRndWFyZC1kbnMuY29tL2Rucy1xdWVyeSIsIlJlbW90ZUROU0lQIjoiOTQuMTQwLjE0LjE0IiwiRG9tZXN0aWNETlNUeXBlIjoiRG9VIiwiRG9tZXN0aWNETlNEb21haW4iOiJodHRwczovL2Rucy5hZGd1YXJkLWRucy5jb20vZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJUCI6Ijk0LjE0MC4xNS4xNSIsIkdlb2lwdXJsIjoiaHR0cHM6Ly9naXRodWIuY29tL2ZyYXlaVi9zaW1wbGUtcnUtZ2VvaXAvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb2lwLmRhdCIsIkdlb3NpdGV1cmwiOiJodHRwczovL2dpdGh1Yi5jb20vZnJheVpWL3NpbXBsZS1ydS1nZW9zaXRlL3JlbGVhc2VzL2xhdGVzdC9kb3dubG9hZC9nZW9zaXRlLmRhdCIsIkxhc3RVcGRhdGVkIjoiMTc1MTY4MTM4MiIsIkRuc0hvc3RzIjp7fSwiRGlyZWN0U2l0ZXMiOlsiZ2Vvc2l0ZTpwcml2YXRlIiwiZ2Vvc2l0ZTpjYXRlZ29yeS1ydSIsImdlb3NpdGU6YXBwbGUiLCJnZW9zaXRlOnR3aXRjaCJdLCJEaXJlY3RJcCI6WyJnZW9pcDpydSIsImdlb2lwOnByaXZhdGUiXSwiUHJveHlTaXRlcyI6WyJnZW9zaXRlOnlvdXR1YmUiLCJnZW9zaXRlOmNhdGVnb3J5LWJhbi1ydSJdLCJQcm94eUlwIjpbXSwiQmxvY2tTaXRlcyI6W10sIkJsb2NrSXAiOltdLCJEb21haW5TdHJhdGVneSI6IklQSWZOb25NYXRjaCIsIkZha2VETlMiOiJmYWxzZSIsIlVzZUNodW5rRmlsZXMiOiJ0cnVlIn0=');
+        header('Content-type: text/plain');
+        echo base64_encode($vless);
+        break;
+
+    case preg_match('~^(?:FlClash|[Cc]lash-[Vv]erge|[Cc]lash-?[Mm]eta|[Mm]urge|[Cc]lashX [Mm]eta|[Mm]ihomo|[Cc]lash-nyanpasu|clash\.meta)~iu', $ua):
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        header('Content-type: text/yaml');
+        echo $configs['clash'];
+        break;
+
+    case preg_match('~(?:SFA|SFI|SFM|SFT|[Rr]abbit[Hh]ole)/\d+\.\d+\.\d+(?:-beta\.\d+)?~', $ua):
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        header('Content-type: application/json');
+        echo $configs['singbox'];
+        break;
+
+    case preg_match('~^(?:[Ss]treisand|ktor-client|V2Box|io\.github\.saeeddev94\.xray/)~', $ua):
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        header('Content-type: application/json');
+        echo $configs['xray'];
+        break;
+
+    case isBrowser($ua):
+        header('Content-type: text/html; charset=utf-8');
+        header('x-robots-tag: noindex, nofollow, noarchive, nosnippet, noimageindex');
+        ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script>
+    // Применяем тему ДО рендера страницы для избежания мерцания
+    (function() {
+        var theme = localStorage.getItem('theme') || 'auto';
+        var isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (isDark) document.documentElement.classList.add('dark-theme');
+    })();
+    </script>
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon-180x180.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="https://cdn.jsdelivr.net/gh/arpicme/Proxy-App-Icon-set@refs/heads/main/white_background/Prizrak-box.svg" />
+    <link rel="icon" type="image/png" sizes="16x16" href="https://cdn.jsdelivr.net/gh/arpicme/Proxy-App-Icon-set@refs/heads/main/white_background/Prizrak-box.svg" />
+    <link rel="icon" type="image/x-icon" href="https://cdn.jsdelivr.net/gh/arpicme/Proxy-App-Icon-set@refs/heads/main/white_background/Prizrak-box.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#3b82f6" id="themeColor">
+    <meta name="description" content="<?= $metaDescription ?>" id="metaDesc">
+    <title id="pageTitle"><?= $metaTitle ?></title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsencrypt@3.3.2/bin/jsencrypt.min.js"></script>
+    <style>
+:root {
+    --primary-color: #3b82f6;
+    --primary-hover: #2563eb;
+    --background: #ffffff;
+    --surface: #f8fafc;
+    --border: #e2e8f0;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --info: #3b82f6;
+    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --radius: 0.5rem;
+    --color-blue: #3b82f6;
+    --color-cyan: #06b6d4;
+    --color-dark: #1e293b;
+    --color-grape: #8b5cf6;
+    --color-gray: #6b7280;
+    --color-green: #10b981;
+    --color-indigo: #6366f1;
+    --color-lime: #84cc16;
+    --color-orange: #f97316;
+    --color-pink: #ec4899;
+    --color-red: #ef4444;
+    --color-teal: #14b8a6;
+    --color-violet: #8b5cf6;
+    --color-yellow: #eab308;
+}
+
+.dark-theme {
+    --background: #0f172a;
+    --surface: #1e293b;
+    --border: #334155;
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    background-color: var(--background);
+    color: var(--text-primary);
+    line-height: 1.6;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.container {
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 20px;
+    flex: 1;
+    box-sizing: border-box;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.logo {
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--primary-color);
+    display: flex;
+    align-items: center;
+}
+
+.brand-logo {
+    height: 32px;
+    width: auto;
+    margin-right: 12px;
+    border-radius: 4px;
+}
+
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+.btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 14px;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--primary-color); color: white; border-color: var(--primary-color); }
+.btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-icon { padding: 8px; min-width: 40px; justify-content: center; }
+
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    margin-bottom: 20px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.card-header {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    font-size: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.card-header.clickable { cursor: pointer; transition: background 0.2s ease; }
+.card-header.clickable:hover { background: rgba(0,0,0,0.02); }
+.dark-theme .card-header.clickable:hover { background: rgba(255,255,255,0.02); }
+.card-header.clickable .expand-icon { transition: transform 0.2s ease; }
+.card-header.clickable.open .expand-icon { transform: rotate(180deg); }
+
+.card-content { padding: 20px; width: 100%; box-sizing: border-box; min-width: 0; overflow: hidden; }
+
+/* User Info - Original cards style with info-row */
+.user-info .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+.user-info .info-row:last-child { border-bottom: none; }
+.user-info .info-label { color: var(--text-secondary); font-weight: 500; }
+.user-info .info-value { color: var(--text-primary); font-weight: 600; text-align: right; word-break: break-word; }
+
+/* Subscription Info Block - Collapsed */
+.user-info-collapsed {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.user-info-collapsed:hover { background: rgba(0,0,0,0.02); }
+.dark-theme .user-info-collapsed:hover { background: rgba(255,255,255,0.02); }
+.user-info-collapsed .status-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.user-info-collapsed .status-icon.active { background: var(--success); color: white; }
+.user-info-collapsed .status-icon.inactive { background: var(--error); color: white; }
+.user-info-collapsed .user-summary { flex: 1; }
+.user-info-collapsed .user-summary-name { font-weight: 600; font-size: 18px; }
+.user-info-collapsed .user-summary-expire { color: var(--text-secondary); font-size: 14px; }
+.user-info-collapsed .expand-icon { color: var(--text-muted); transition: transform 0.2s ease; }
+.user-info-collapsed.expanded .expand-icon { transform: rotate(180deg); }
+.user-info-collapsed-details { display: none; padding: 0 20px 20px; }
+.user-info-collapsed-details.open { display: block; }
+
+/* Subscription Info Block - Expanded */
+.user-info-expanded .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+.user-info-expanded .info-row:last-child { border-bottom: none; }
+.user-info-expanded .info-label { color: var(--text-secondary); font-weight: 500; }
+.user-info-expanded .info-value { color: var(--text-primary); font-weight: 600; text-align: right; word-break: break-word; }
+
+/* Stats Grid */
+.stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.stat-card {
+    background: linear-gradient(135deg, var(--surface) 0%, rgba(59, 130, 246, 0.05) 100%);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+}
+.stat-card-label { color: var(--text-secondary); font-size: 12px; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+.stat-card-value { font-weight: 600; }
+
+.badge { padding: 4px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; text-transform: uppercase; }
+.badge-active { background: #dcfce7; color: #166534; }
+.badge-disabled, .badge-limited, .badge-expired { background: #fee2e2; color: #991b1b; }
+.dark-theme .badge-active { background: #14532d; color: #bbf7d0; }
+.dark-theme .badge-disabled, .dark-theme .badge-limited, .dark-theme .badge-expired { background: #7f1d1d; color: #fecaca; }
+
+/* Links Section */
+.links-section { margin-bottom: 0; }
+.links-section .card-content { display: none; }
+.links-section.open .card-content { display: block; }
+.links-section .expand-icon { transition: transform 0.2s ease; }
+.links-section.open .expand-icon { transform: rotate(180deg); }
+
+.link-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    background: var(--surface);
+}
+.link-item:last-child { margin-bottom: 0; }
+.link-info { flex: 1; min-width: 0; }
+.link-name {
+    font-weight: 500;
+    word-break: break-word;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: "Twemoji Country Flags", system-ui, -apple-system, Roboto, "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+.link-actions { display: flex; gap: 8px; }
+
+/* Installation Section */
+.apps-section { margin-bottom: 20px; width: 100%; min-width: 0; box-sizing: border-box; }
+#appsContainer { width: 100%; min-width: 0; box-sizing: border-box; }
+.platform-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    background: var(--surface);
+    padding: 4px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+.platform-tab {
+    flex: 1 0 auto;
+    padding: 8px 16px;
+    text-align: center;
+    border-radius: calc(var(--radius) - 2px);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 80px;
+}
+.platform-tab:hover { background: var(--border); }
+.platform-tab.active { background: var(--primary-color); color: white; }
+.platform-tab svg { color: inherit; }
+#platform-selector-btn { display: none; }
+
+/* App Cards Container */
+.apps-container { display: flex; flex-direction: column; gap: 20px; width: 100%; min-width: 0; box-sizing: border-box; }
+.featured-apps-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; width: 100%; min-width: 0; box-sizing: border-box; }
+
+.other-apps-spoiler { width: 100%; }
+.spoiler-header {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    width: 100%;
+}
+.spoiler-header:hover { background: var(--border); }
+.spoiler-content { display: none; margin-top: 8px; }
+.spoiler-content.open { display: block; }
+.spoiler-arrow { transition: transform 0.2s ease; flex-shrink: 0; }
+.spoiler-arrow.open { transform: rotate(180deg); }
+.apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; width: 100%; min-width: 0; box-sizing: border-box; }
+
+.app-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    position: relative;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.app-card:hover { border-color: var(--primary-color); box-shadow: var(--shadow-lg); }
+.app-card.featured {
+    border-color: var(--primary-color);
+    background: linear-gradient(135deg, var(--surface) 0%, rgba(59, 130, 246, 0.05) 100%);
+}
+.app-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.app-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius);
+    background: var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    flex-shrink: 0;
+}
+.app-icon svg { width: 24px; height: 24px; }
+.app-name { font-weight: 600; font-size: 16px; }
+.featured-badge {
+    position: absolute;
+    top: -1px;
+    right: -1px;
+    background: var(--primary-color);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 0 var(--radius) 0 var(--radius);
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+/* App Tabs for non-minimal modes */
+.app-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.app-tab {
+    flex: 1 1 auto;
+    min-width: 140px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    display: flex;
+    align-items: stretch;
+    position: relative;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.app-tab:hover { border-color: var(--primary-color); }
+.app-tab.active {
+    border-color: var(--primary-color);
+    background: var(--primary-color);
+    color: white;
+}
+.app-tab .star-icon {
+    color: var(--primary-color);
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 12px;
+    height: 12px;
+    z-index: 1;
+}
+.app-tab.active .star-icon { color: white; }
+.app-tab .app-tab-icon {
+    width: 48px;
+    background: var(--primary-color);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    order: 2;
+    border-radius: calc(var(--radius) - 1px) 0 0 calc(var(--radius) - 1px);
+}
+.app-tab .app-tab-icon svg { width: 32px; height: 32px; }
+.app-tab .app-tab-name {
+    order: 1;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+    .app-tab {
+        flex: 1 0 calc(50% - 4px);
+        min-width: fit-content;
+    }
+    .app-tab .app-tab-name {
+        overflow: visible;
+        text-overflow: clip;
+    }
+}
+
+/* Installation Guides - Cards */
+.guides-cards { width: 100%; min-width: 0; box-sizing: border-box; }
+.guides-cards .guide-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    word-break: break-word;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.guides-cards .guide-card:last-child { margin-bottom: 0; }
+.guides-cards .guide-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.guides-cards .guide-card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.guides-cards .guide-card-icon svg { width: 20px; height: 20px; }
+.guides-cards .guide-card-title { font-weight: 600; font-size: 16px; }
+.guides-cards .guide-card-description { color: var(--text-secondary); margin-bottom: 16px; word-break: break-word; }
+.guides-cards .guide-card-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Installation Guides - Accordion */
+.guides-accordion { width: 100%; min-width: 0; box-sizing: border-box; }
+.guides-accordion .accordion-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    overflow: hidden;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.guides-accordion .accordion-item:last-child { margin-bottom: 0; }
+.guides-accordion .accordion-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    width: 100%;
+}
+.guides-accordion .accordion-header:hover { background: rgba(0,0,0,0.02); }
+.dark-theme .guides-accordion .accordion-header:hover { background: rgba(255,255,255,0.02); }
+.guides-accordion .accordion-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.guides-accordion .accordion-icon svg { width: 18px; height: 18px; }
+.guides-accordion .accordion-title { flex: 1; font-weight: 500; }
+.guides-accordion .accordion-arrow { color: var(--text-muted); transition: transform 0.2s ease; }
+.guides-accordion .accordion-item.open .accordion-arrow { transform: rotate(180deg); }
+.guides-accordion .accordion-content {
+    display: none;
+    padding: 0 16px 16px;
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+    word-break: break-word;
+}
+.guides-accordion .accordion-item.open .accordion-content { display: block; padding-top: 16px; }
+.guides-accordion .accordion-description { color: var(--text-secondary); margin-bottom: 12px; word-break: break-word; }
+.guides-accordion .accordion-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Installation Guides - Expanded (always open, no toggle) */
+.guides-expanded { width: 100%; min-width: 0; box-sizing: border-box; }
+.guides-expanded .expanded-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    overflow: hidden;
+    word-break: break-word;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.guides-expanded .expanded-item:last-child { margin-bottom: 0; }
+.guides-expanded .expanded-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+}
+.guides-expanded .expanded-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.guides-expanded .expanded-icon svg { width: 18px; height: 18px; }
+.guides-expanded .expanded-title { flex: 1; font-weight: 500; }
+.guides-expanded .expanded-content {
+    padding: 0 16px 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+    overflow: hidden;
+    word-break: break-word;
+}
+.guides-expanded .expanded-description { color: var(--text-secondary); margin-bottom: 12px; word-break: break-word; }
+.guides-expanded .expanded-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Installation Guides - Minimal (steps in modal) */
+.guides-minimal { width: 100%; min-width: 0; box-sizing: border-box; }
+.guides-minimal .step { margin-bottom: 24px; width: 100%; min-width: 0; box-sizing: border-box; }
+.guides-minimal .step:last-child { margin-bottom: 0; }
+.guides-minimal .step-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.guides-minimal .step-number {
+    background: var(--primary-color);
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+.guides-minimal .step-description { color: var(--text-secondary); margin-bottom: 12px; word-break: break-word; }
+.guides-minimal .step-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Installation Guides - Timeline */
+.guides-timeline { position: relative; width: 100%; min-width: 0; box-sizing: border-box; }
+.guides-timeline .timeline-container { position: relative; width: 100%; min-width: 0; box-sizing: border-box; }
+.guides-timeline .timeline-step {
+    position: relative;
+    margin-bottom: 24px;
+    display: none;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.guides-timeline .timeline-step.active { display: block; }
+.guides-timeline .timeline-step-content {
+    overflow: hidden;
+    word-break: break-word;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.guides-timeline .timeline-step-content.guide-card { margin-bottom: 0; }
+.guides-timeline .timeline-step-content .guide-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.guides-timeline .timeline-step-content .app-tabs { margin-bottom: 0; }
+.guides-timeline .timeline-step-content .guide-card-icon { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.guides-timeline .timeline-step-content .guide-card-icon svg { width: 20px; height: 20px; }
+.guides-timeline .timeline-step-content .guide-card-title { font-weight: 600; font-size: 16px; }
+.guides-timeline .timeline-step-content .guide-card-description { color: var(--text-secondary); margin-bottom: 16px; word-break: break-word; }
+.guides-timeline .timeline-step-content .guide-card-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.guides-timeline .timeline-nav {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 0;
+}
+.guides-timeline .timeline-nav .btn { flex: 1; justify-content: center; gap: 8px; }
+.guides-timeline .timeline-nav .nav-step-icon { display: flex; align-items: center; }
+.guides-timeline .timeline-nav .nav-step-icon svg { width: 16px; height: 16px; }
+.guides-timeline .timeline-dots {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding: 8px 0;
+}
+.guides-timeline .timeline-dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    flex-shrink: 0;
+}
+.guides-timeline .timeline-dot svg { width: 16px; height: 16px; }
+.guides-timeline .timeline-dot.active { transform: scale(1.3); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+.guides-timeline .timeline-dot.completed { opacity: 0.6; }
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    padding-top: env(safe-area-inset-top, 20px);
+    padding-bottom: env(safe-area-inset-bottom, 20px);
+}
+.dark-theme .modal {
+    background: rgba(15, 23, 42, 0.9);
+}
+.modal.active { display: flex; }
+.modal-content {
+    background: var(--surface);
+    border-radius: var(--radius);
+    max-width: 600px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+}
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+}
+.modal-title {
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: "Twemoji Country Flags", system-ui, -apple-system, Roboto, "Segoe UI", "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+.modal-close:hover { background: var(--border); }
+.modal-body { padding: 20px; }
+
+/* Step (for modal) */
+.step { margin-bottom: 24px; }
+.step:last-child { margin-bottom: 0; }
+.step-title { font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.step-number {
+    background: var(--primary-color);
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+.step-description { color: var(--text-secondary); margin-bottom: 12px; }
+.step-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Platform Modal */
+.platform-modal-list { display: flex; flex-direction: column; gap: 8px; }
+.platform-modal-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.platform-modal-item:hover { background: var(--border); border-color: var(--primary-color); }
+
+/* Settings Modal */
+.settings-section { margin-bottom: 24px; }
+.settings-section:last-child { margin-bottom: 0; }
+.settings-label { font-weight: 600; margin-bottom: 12px; display: block; }
+.settings-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.settings-buttons .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
+}
+.lang-emoji {
+    font-family: "Twemoji Country Flags", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", sans-serif;
+    font-size: 1.2em;
+}
+
+/* QR Modal */
+.qr-container { display: flex; flex-direction: column; align-items: center; padding: 20px; }
+.qr-container > div { width: 256px; height: 256px; display: flex; align-items: center; justify-content: center; }
+.qr-container img { width: 256px; height: 256px; border-radius: var(--radius); }
+.qr-hint { margin-top: 16px; color: var(--text-secondary); text-align: center; }
+
+/* Footer */
+.footer {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+    font-size: 14px;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+}
+
+/* Toast */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: var(--text-primary);
+    color: var(--background);
+    padding: 12px 24px;
+    border-radius: var(--radius);
+    font-weight: 500;
+    opacity: 0;
+    transition: all 0.3s ease;
+    z-index: 2000;
+}
+.toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+/* SVG Icon sizing */
+.icon-svg { width: 20px; height: 20px; display: inline-block; vertical-align: middle; }
+.icon-svg-sm { width: 16px; height: 16px; }
+.icon-svg-lg { width: 24px; height: 24px; }
+.w-4 { width: 16px; }
+.h-4 { height: 16px; }
+.w-5 { width: 20px; }
+.h-5 { height: 20px; }
+.w-6 { width: 24px; }
+.h-6 { height: 24px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+    .container { padding: 16px; width: 100%; box-sizing: border-box; }
+    .header { gap: 12px; }
+    .logo { font-size: 20px; flex: 1; }
+    .controls { gap: 8px; }
+    .btn-text { display: none; }
+    .btn-icon { padding: 8px; min-width: auto; }
+    .stats-grid { grid-template-columns: 1fr; }
+    .featured-apps-row { grid-template-columns: 1fr; }
+    .apps-grid { grid-template-columns: 1fr; }
+    .app-card { width: 100%; min-width: 0; box-sizing: border-box; }
+    .card { width: 100%; min-width: 0; box-sizing: border-box; }
+    .card-content { width: 100%; min-width: 0; box-sizing: border-box; }
+    .apps-container { width: 100%; min-width: 0; box-sizing: border-box; }
+    .guides-cards, .guides-accordion, .guides-expanded, .guides-minimal, .guides-timeline { width: 100%; min-width: 0; box-sizing: border-box; }
+    .app-tabs { width: 100%; min-width: 0; box-sizing: border-box; }
+}
+
+/* Platform tabs breakpoint - show selector button instead of tabs on screens <= 1024px */
+@media (max-width: 1024px) {
+    .platform-tabs { display: none; }
+    #platform-selector-btn { display: inline-flex !important; }
+}
+
+/* Скрываем элементы до загрузки данных */
+.logo:not(.loaded) { visibility: hidden; }
+.header-controls:not(.loaded) { visibility: hidden; }
+#mainContent { opacity: 0; transition: opacity 0.2s ease; }
+#mainContent.loaded { opacity: 1; }
+
+/* Snowflakes Animation */
+.snowflakes {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    overflow: hidden;
+}
+.snowflake {
+    position: absolute;
+    top: -20px;
+    color: #a0c4e8;
+    font-size: 1em;
+    text-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+    animation: snowfall linear infinite;
+    opacity: 0;
+}
+.dark-theme .snowflake {
+    color: #fff;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+}
+@keyframes snowfall {
+    0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+    3% { opacity: 0.9; }
+    95% { opacity: 0.9; }
+    100% { transform: translateY(100vh) rotate(360deg); opacity: 0; }
+}
+.snowflake:nth-child(1) { left: 5%; animation-duration: 8s; animation-delay: 0s; font-size: 0.8em; }
+.snowflake:nth-child(2) { left: 15%; animation-duration: 12s; animation-delay: 1s; font-size: 1.2em; }
+.snowflake:nth-child(3) { left: 25%; animation-duration: 10s; animation-delay: 2s; font-size: 0.9em; }
+.snowflake:nth-child(4) { left: 35%; animation-duration: 14s; animation-delay: 0.5s; font-size: 1.1em; }
+.snowflake:nth-child(5) { left: 45%; animation-duration: 9s; animation-delay: 3s; font-size: 0.7em; }
+.snowflake:nth-child(6) { left: 55%; animation-duration: 11s; animation-delay: 1.5s; font-size: 1em; }
+.snowflake:nth-child(7) { left: 65%; animation-duration: 13s; animation-delay: 2.5s; font-size: 1.3em; }
+.snowflake:nth-child(8) { left: 75%; animation-duration: 8s; animation-delay: 0.8s; font-size: 0.85em; }
+.snowflake:nth-child(9) { left: 85%; animation-duration: 15s; animation-delay: 3.5s; font-size: 1.15em; }
+.snowflake:nth-child(10) { left: 95%; animation-duration: 10s; animation-delay: 1.2s; font-size: 0.95em; }
+.snowflake:nth-child(11) { left: 10%; animation-duration: 11s; animation-delay: 4s; font-size: 0.75em; }
+.snowflake:nth-child(12) { left: 30%; animation-duration: 9s; animation-delay: 2.8s; font-size: 1.05em; }
+.snowflake:nth-child(13) { left: 50%; animation-duration: 12s; animation-delay: 0.3s; font-size: 0.65em; }
+.snowflake:nth-child(14) { left: 70%; animation-duration: 14s; animation-delay: 1.8s; font-size: 1.25em; }
+.snowflake:nth-child(15) { left: 90%; animation-duration: 10s; animation-delay: 3.2s; font-size: 0.9em; }
+.snowflake:nth-child(16) { left: 8%; animation-duration: 13s; animation-delay: 4.5s; font-size: 0.7em; }
+.snowflake:nth-child(17) { left: 22%; animation-duration: 9s; animation-delay: 0.7s; font-size: 1.1em; }
+.snowflake:nth-child(18) { left: 38%; animation-duration: 11s; animation-delay: 2.2s; font-size: 0.85em; }
+.snowflake:nth-child(19) { left: 48%; animation-duration: 14s; animation-delay: 3.8s; font-size: 1.2em; }
+.snowflake:nth-child(20) { left: 58%; animation-duration: 8s; animation-delay: 1.3s; font-size: 0.75em; }
+.snowflake:nth-child(21) { left: 68%; animation-duration: 12s; animation-delay: 4.2s; font-size: 0.95em; }
+.snowflake:nth-child(22) { left: 78%; animation-duration: 10s; animation-delay: 0.4s; font-size: 1.15em; }
+.snowflake:nth-child(23) { left: 88%; animation-duration: 15s; animation-delay: 2.6s; font-size: 0.65em; }
+.snowflake:nth-child(24) { left: 3%; animation-duration: 11s; animation-delay: 1.9s; font-size: 1.0em; }
+.snowflake:nth-child(25) { left: 97%; animation-duration: 9s; animation-delay: 3.4s; font-size: 0.8em; }
+
+.settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+}
+.settings-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.toggle-switch {
+    position: relative;
+    width: 48px;
+    height: 26px;
+    background: var(--border);
+    border-radius: 13px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+.toggle-switch.active {
+    background: var(--primary-color);
+}
+.toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.3s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch.active::after {
+    transform: translateX(22px);
+}
+    </style>
+</head>
+<body>
+    <!-- Snowflakes container for New Year mode -->
+    <div class="snowflakes" id="snowflakesContainer" style="display: none;">
+        <div class="snowflake">❄</div>
+        <div class="snowflake">✦</div>
+        <div class="snowflake">*</div>
+        <div class="snowflake">❅</div>
+        <div class="snowflake">✧</div>
+        <div class="snowflake">∗</div>
+        <div class="snowflake">❆</div>
+        <div class="snowflake">⋆</div>
+        <div class="snowflake">⁕</div>
+        <div class="snowflake">❄</div>
+        <div class="snowflake">✦</div>
+        <div class="snowflake">*</div>
+        <div class="snowflake">❅</div>
+        <div class="snowflake">✧</div>
+        <div class="snowflake">∗</div>
+        <div class="snowflake">❆</div>
+        <div class="snowflake">⋆</div>
+        <div class="snowflake">⁕</div>
+        <div class="snowflake">❄</div>
+        <div class="snowflake">✦</div>
+        <div class="snowflake">*</div>
+        <div class="snowflake">❅</div>
+        <div class="snowflake">✧</div>
+        <div class="snowflake">∗</div>
+        <div class="snowflake">❆</div>
+    </div>
+
+    <div class="container">
+        <header class="header">
+            <div class="logo" id="brandLogo"></div>
+            <div class="controls header-controls" id="headerControls">
+                <!-- Controls will be rendered by JS -->
+            </div>
+        </header>
+        <main id="mainContent">
+            <!-- Контент будет загружен JS -->
+        </main>
+    </div>
+
+    <footer class="footer" id="pageFooter"></footer>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="settingsTitle">Settings</div>
+                <button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <label class="settings-label" id="themeLabel">Theme</label>
+                    <div class="settings-buttons" id="themeButtons">
+                        <button class="btn" id="themeLightBtn" onclick="setTheme('light')">☀️ <span class="theme-text">Light</span></button>
+                        <button class="btn" id="themeDarkBtn" onclick="setTheme('dark')">🌙 <span class="theme-text">Dark</span></button>
+                        <button class="btn" id="themeAutoBtn" onclick="setTheme('auto')">⚙️ <span class="theme-text">Auto</span></button>
+                    </div>
+                    <div class="settings-toggle" id="snowToggleContainer" style="margin-top: 12px;">
+                        <div class="settings-toggle-label">
+                            <span>❄️</span>
+                            <span id="snowToggleLabel">New Year Mode</span>
+                        </div>
+                        <div class="toggle-switch" id="snowToggle" onclick="toggleSnowMode()"></div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <label class="settings-label" id="languageLabel">Language</label>
+                    <div class="settings-buttons" id="languageButtons"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- App Setup Modal -->
+    <div class="modal" id="appModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="appModalTitle"></div>
+                <button class="modal-close" onclick="closeModal('appModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="appModalBody"></div>
+        </div>
+    </div>
+
+    <!-- QR Modal -->
+    <div class="modal" id="qrModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="qrModalTitle">QR Code</div>
+                <button class="modal-close" onclick="closeModal('qrModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="qr-container">
+                    <div id="qrCode"></div>
+                    <p class="qr-hint" id="qrHint">Scan with your phone</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Subscription QR Modal -->
+    <div class="modal" id="subscriptionModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="subscriptionModalTitle">Subscription</div>
+                <button class="modal-close" onclick="closeModal('subscriptionModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="qr-container">
+                    <div id="subscriptionQrCode"></div>
+                    <p class="qr-hint" id="subscriptionQrHint">Scan with your phone</p>
+                </div>
+                <div style="text-align: center; margin-top: 16px;">
+                    <button class="btn btn-primary" onclick="copySubscriptionUrl()" id="copySubBtn">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                        </svg>
+                        <span id="copySubBtnText">Copy</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Platform Modal -->
+    <div class="modal" id="platformModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="platformModalTitle">Select Platform</div>
+                <button class="modal-close" onclick="closeModal('platformModal')">&times;</button>
+            </div>
+            <div class="modal-body" id="platformModalBody"></div>
+        </div>
+    </div>
+
+    <!-- Device Password Modal -->
+    <div class="modal" id="devicePasswordModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="devicePasswordModalTitle">Set Device Password</div>
+                <button class="modal-close" onclick="closeModal('devicePasswordModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display: grid; gap: 12px;">
+                    <label id="devicePasswordCurrentRow" style="display: none;">
+                        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;" id="devicePasswordCurrentLabel">Current password</div>
+                        <input id="devicePasswordCurrentInput" type="password" class="input" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);" autocomplete="current-password">
+                    </label>
+                    <label>
+                        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;" id="devicePasswordNewLabel">New password</div>
+                        <input id="devicePasswordNewInput" type="password" class="input" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);" autocomplete="new-password">
+                    </label>
+                    <div id="devicePasswordSupportHint" style="font-size: 12px; color: var(--text-secondary);">
+                        If you forgot the password, contact support.
+                    </div>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top: 4px;">
+                        <button class="btn" onclick="closeModal('devicePasswordModal')">Cancel</button>
+                        <button class="btn btn-primary" onclick="submitDevicePasswordModal()">Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Device Modal -->
+    <div class="modal" id="deleteDeviceModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="deleteDeviceModalTitle">Delete device</div>
+                <button class="modal-close" onclick="closeModal('deleteDeviceModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:grid; gap: 12px;">
+                    <div id="deleteDeviceModalInfo" style="font-size: 13px; color: var(--text-secondary);"></div>
+                    <label>
+                        <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;" id="deleteDevicePasswordLabel">Password</div>
+                        <input id="deleteDevicePasswordInput" type="password" class="input" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);" autocomplete="current-password">
+                    </label>
+                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top: 4px;">
+                        <button class="btn" onclick="closeModal('deleteDeviceModal')">Cancel</button>
+                        <button class="btn btn-primary" style="background: var(--error); border-color: var(--error);" onclick="submitDeleteDeviceModal()">Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // Global state
+        let panelData = null;
+        let appConfig = null;
+        let currentLanguage = 'en';
+        let currentPlatform = 'ios';
+        let currentApp = null;
+        let toastTimeout = null;
+        let validPlatforms = [];
+        let pendingDeleteHwid = '';
+
+        // Hardcoded translations for "Days left"
+        const daysLeftTranslations = {
+            en: 'Days left',
+            ru: 'Осталось дней',
+            zh: '剩余天数',
+            es: 'Días restantes',
+            pt: 'Dias restantes',
+            fr: 'Jours restants',
+            de: 'Verbleibende Tage',
+            it: 'Giorni rimanenti',
+            ja: '残り日数',
+            ko: '남은 일수',
+            ar: 'الأيام المتبقية',
+            tr: 'Kalan günler',
+            fa: 'روزهای باقی‌مانده',
+            uk: 'Залишилось днів',
+            hi: 'शेष दिन',
+            id: 'Hari tersisa',
+            vi: 'Số ngày còn lại',
+            th: 'จำนวนวันคงเหลือ',
+            pl: 'Pozostało dni',
+            nl: 'Dagen resterend'
+        };
+        let timelineCurrentStep = 0;
+
+        // Language full names for display
+        const langFullNames = {
+            en: 'English', ru: 'Русский', zh: '中文', fa: 'فارسی', fr: 'Français',
+            de: 'Deutsch', es: 'Español', it: 'Italiano', pt: 'Português', ja: '日本語',
+            ko: '한국어', ar: 'العربية', tr: 'Türkçe', pl: 'Polski', uk: 'Українська',
+            nl: 'Nederlands', vi: 'Tiếng Việt', th: 'ไทย', id: 'Indonesia', ms: 'Melayu',
+            az: 'Azərbaycan', uz: 'Oʻzbek', hi: 'हिन्दी', be: 'Беларуская',
+            tk: 'Türkmen'
+        };
+
+        // HAPP Encrypted Link Support - RSA Public Keys
+        const HAPP_PUBLIC_KEY_V3 = `-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAlBetA0wjbaj+h7oJ/d/h
+pNrXvAcuhOdFGEFcfCxSWyLzWk4SAQ05gtaEGZyetTax2uqagi9HT6lapUSUe2S8
+nMLJf5K+LEs9TYrhhBdx/B0BGahA+lPJa7nUwp7WfUmSF4hir+xka5ApHjzkAQn6
+cdG6FKtSPgq1rYRPd1jRf2maEHwiP/e/jqdXLPP0SFBjWTMt/joUDgE7v/IGGB0L
+Q7mGPAlgmxwUHVqP4bJnZ//5sNLxWMjtYHOYjaV+lixNSfhFM3MdBndjpkmgSfmg
+D5uYQYDL29TDk6Eu+xetUEqry8ySPjUbNWdDXCglQWMxDGjaqYXMWgxBA1UKjUBW
+wbgr5yKTJ7mTqhlYEC9D5V/LOnKd6pTSvaMxkHXwk8hBWvUNWAxzAf5JZ7EVE3jt
+0j682+/hnmL/hymUE44yMG1gCcWvSpB3BTlKoMnl4yrTakmdkbASeFRkN3iMRewa
+IenvMhzJh1fq7xwX94otdd5eLB2vRFavrnhOcN2JJAkKTnx9dwQwFpGEkg+8U613
++Tfm/f82l56fFeoFN98dD2mUFLFZoeJ5CG81ZeXrH83niI0joX7rtoAZIPWzq3Y1
+Zb/Zq+kK2hSIhphY172Uvs8X2Qp2ac9UoTPM71tURsA9IvPNvUwSIo/aKlX5KE3I
+VE0tje7twWXL5Gb1sfcXRzsCAwEAAQ==
+-----END PUBLIC KEY-----`;
+
+        const HAPP_PUBLIC_KEY_V4 = `-----BEGIN PUBLIC KEY-----
+MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA3UZ0M3L4K+WjM3vkbQnz
+ozHg/cRbEXvQ6i4A8RVN4OM3rK9kU01FdjyoIgywve8OEKsFnVwERZAQZ1Trv60B
+hmaM76QQEE+EUlIOL9EpwKWGtTL5lYC1sT9XJMNP3/CI0gP5wwQI88cY/xedpOEB
+W72EmOOShHUm/b/3m+HPmqwc4ugKj5zWV5SyiT829aFA5DxSjmIIFBAms7DafmSq
+LFTYIQL5cShDY2u+/sqyAw9yZIOoqW2TFIgIHhLPWek/ocDU7zyOrlu1E0SmcQQb
+LFqHq02fsnH6IcqTv3N5Adb/CkZDDQ6HvQVBmqbKZKf7ZdXkqsc/Zw27xhG7OfXC
+tUmWsiL7zA+KoTd3avyOh93Q9ju4UQsHthL3Gs4vECYOCS9dsXXSHEY/1ngU/hjO
+WFF8QEE/rYV6nA4PTyUvo5RsctSQL/9DJX7XNh3zngvif8LsCN2MPvx6X+zLouBX
+zgBkQ9DFfZAGLWf9TR7KVjZC/3NsuUCDoAOcpmN8pENBbeB0puiKMMWSvll36+2M
+YR1Xs0MgT8Y9TwhE2+TnnTJOhzmHi/BxiUlY/w2E0s4ax9GHAmX0wyF4zeV7kDkc
+vHuEdc0d7vDmdw0oqCqWj0Xwq86HfORu6tm1A8uRATjb4SzjTKclKuoElVAVa5Jo
+oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
+-----END PUBLIC KEY-----`;
+
+        const HAPP_CRYPTO_V3 = {
+            publicKey: HAPP_PUBLIC_KEY_V3,
+            deepLink: 'happ://crypt3/'
+        };
+
+        const HAPP_CRYPTO_V4 = {
+            publicKey: HAPP_PUBLIC_KEY_V4,
+            deepLink: 'happ://crypt4/'
+        };
+
+        // Function to encrypt link using RSA public key
+        function encryptLink(link, publicKey) {
+            try {
+                const encrypt = new JSEncrypt();
+                encrypt.setPublicKey(publicKey);
+                const encrypted = encrypt.encrypt(link);
+                return encrypted || null;
+            } catch (error) {
+                console.error('Encryption error:', error);
+                return null;
+            }
+        }
+
+        // Function to generate HAPP encrypted links
+        function generateHappCryptLink(subscriptionUrl, version) {
+            if (!subscriptionUrl) {
+                console.warn('generateHappCryptLink: No subscriptionUrl provided');
+                return '';
+            }
+
+            const cryptoConfig = version === 3 ? HAPP_CRYPTO_V3 : HAPP_CRYPTO_V4;
+            console.log('Encrypting link for HAPP_CRYPT' + version + ':', subscriptionUrl);
+
+            const encrypted = encryptLink(subscriptionUrl, cryptoConfig.publicKey);
+
+            if (!encrypted) {
+                console.error('Failed to encrypt subscription link for HAPP_CRYPT' + version);
+                return '';
+            }
+
+            const result = cryptoConfig.deepLink + encodeURIComponent(encrypted);
+            console.log('Generated HAPP_CRYPT' + version + '_LINK:', result);
+            return result;
+        }
+
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', initializeApp);
+
+        function initializeApp() {
+            loadSettings();
+            loadAppConfig();
+            loadPanelData();
+        }
+
+        function loadSettings() {
+            const savedTheme = localStorage.getItem('theme') || 'auto';
+            applyTheme(savedTheme);
+            const savedLang = localStorage.getItem('lang') || getBrowserLanguage();
+            currentLanguage = savedLang;
+            // Initialize snow mode
+            initSnowMode();
+        }
+
+        function getBrowserLanguage() {
+            const lang = (navigator.language || navigator.userLanguage).slice(0, 2);
+            return appConfig?.locales?.includes(lang) ? lang : (appConfig?.locales?.[0] || 'en');
+        }
+
+        function loadAppConfig() {
+            const configUrl = '<?= $appsConfigUrl ?>';
+            console.log('Loading app config from:', configUrl);
+
+            fetch(configUrl)
+                .then(response => {
+                    console.log('App config response status:', response.status);
+                    if (!response.ok) throw new Error(`Failed to load config: ${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('App config loaded successfully:', data);
+                    appConfig = data;
+
+                    // Set meta tags from baseSettings
+                    if (appConfig.baseSettings) {
+                        if (appConfig.baseSettings.metaTitle) {
+                            document.getElementById('pageTitle').textContent = appConfig.baseSettings.metaTitle;
+                        }
+                        if (appConfig.baseSettings.metaDescription) {
+                            document.getElementById('metaDesc').setAttribute('content', appConfig.baseSettings.metaDescription);
+                            document.getElementById('pageFooter').textContent = appConfig.baseSettings.metaDescription;
+                        }
+                    }
+
+                    // Override branding settings with template variables (for vpnbot)
+                    if (!appConfig.brandingSettings) {
+                        appConfig.brandingSettings = {};
+                    }
+                    // Use template variables if they are defined, otherwise keep appConfig values
+                    const templateBrandingTitle = '<?= $brandingTitle ?>';
+                    const templateBrandingLogoUrl = '<?= $brandingLogoUrl ?>';
+                    const templateBrandingSupportUrl = '<?= $supportUrl ?>';
+
+                    if (templateBrandingTitle && templateBrandingTitle !== '') {
+                        appConfig.brandingSettings.title = templateBrandingTitle;
+                    }
+                    if (templateBrandingLogoUrl && templateBrandingLogoUrl !== '') {
+                        appConfig.brandingSettings.logoUrl = templateBrandingLogoUrl;
+                    }
+                    if (templateBrandingSupportUrl && templateBrandingSupportUrl !== '') {
+                        appConfig.brandingSettings.supportUrl = templateBrandingSupportUrl;
+                    }
+
+                    // Set valid platforms
+                    validPlatforms = Object.keys(appConfig.platforms || {}).filter(p => {
+                        const platform = appConfig.platforms[p];
+                        return platform && platform.apps && platform.apps.length > 0;
+                    });
+                    console.log('Valid platforms found:', validPlatforms);
+                    console.log('All platforms in config:', Object.keys(appConfig.platforms || {}));
+
+                    // Set language if not already set (now that appConfig is loaded)
+                    if (!localStorage.getItem('lang')) {
+                        currentLanguage = getBrowserLanguage();
+                    }
+
+                    // Setup language buttons
+                    setupLanguageButtons();
+
+                    // Update branding
+                    updateBranding();
+
+                    // Render header controls
+                    renderHeaderControls();
+
+                    // Update all texts
+                    updateTexts();
+                })
+                .catch(error => {
+                    console.error('Error loading app config:', error);
+                    console.error('Config URL was:', '<?= $appsConfigUrl ?>');
+                    // Set minimal config to avoid errors
+                    appConfig = {
+                        locales: ['en'],
+                        platforms: {},
+                        baseSettings: {},
+                        baseTranslations: {}
+                    };
+                    alert('Failed to load app configuration. Please check your internet connection and try again.');
+                })
+                .finally(() => {
+                    if (panelData) renderContent();
+                });
+        }
+
+        function loadPanelData() {
+            const panelDataB64 = '<?= $panelDataB64 ?>';
+            console.log('Loading panel data, base64 length:', panelDataB64.length);
+            try {
+                panelData = JSON.parse(atob(panelDataB64));
+                console.log('Panel data loaded successfully:', panelData);
+            } catch (error) {
+                console.error('Error loading panel data:', error);
+                panelData = { response: { isFound: false } };
+            }
+            if (appConfig !== null) renderContent();
+        }
+
+        // Translation function
+        function t(key) {
+            const translation = appConfig?.baseTranslations?.[key];
+            if (translation) {
+                return translation[currentLanguage] || translation['en'] || key;
+            }
+            return key;
+        }
+
+        // Get localized text from object
+        function getLocalizedText(textObj) {
+            if (!textObj) return '';
+            if (typeof textObj === 'string') return textObj;
+            return textObj[currentLanguage] || textObj['en'] || Object.values(textObj)[0] || '';
+        }
+
+        // Get SVG icon from library
+        function getSvgIcon(iconKey, className = 'icon-svg') {
+            if (!iconKey || !appConfig?.svgLibrary) return '';
+            const svg = appConfig.svgLibrary[iconKey];
+            if (!svg) return '';
+            return svg.replace('<svg', `<svg class="${className}"`);
+        }
+
+        // Get icon color CSS
+        function getIconColor(colorValue) {
+            if (!colorValue) return 'var(--primary-color)';
+            if (colorValue.startsWith('#')) return colorValue;
+            return `var(--color-${colorValue}, var(--primary-color))`;
+        }
+
+        // Hardcoded translations for common UI texts
+        const hardcodedTranslations = {
+            recommended: {
+                en: 'Recommended', ru: 'Рекомендуется', zh: '推荐', fa: 'پیشنهادی', fr: 'Recommandé',
+                uz: 'Tavsiya etiladi', hi: 'अनुशंसित', de: 'Empfohlen', tr: 'Önerilen', az: 'Tövsiyə olunur',
+                vi: 'Được đề xuất', es: 'Recomendado', ja: '推奨', be: 'Рэкамендуецца', pt: 'Recomendado',
+                uk: 'Рекомендовано', pl: 'Zalecane', id: 'Direkomendasikan', tk: 'Maslahat berilýär', th: 'แนะนำ'
+            },
+            install: {
+                en: 'Install and Launch', ru: 'Установить и Запустить', zh: '安装并启动', fa: 'نصب و اجرا', fr: 'Installer et Lancer',
+                uz: "O'rnatish va Ishga tushirish", hi: 'इंस्टॉल करें और लॉन्च करें', de: 'Installieren und Starten', tr: 'Yükle ve Başlat', az: 'Quraşdır və İşə sal',
+                vi: 'Cài đặt và Khởi chạy', es: 'Instalar e Iniciar', ja: 'インストールして起動', be: 'Усталяваць і Запусціць', pt: 'Instalar e Iniciar',
+                uk: 'Встановити та Запустити', pl: 'Zainstaluj i Uruchom', id: 'Instal dan Luncurkan', tk: 'Gurnamak we Başla', th: 'ติดตั้งและเปิด'
+            },
+            support: {
+                en: 'Support', ru: 'Поддержка', zh: '支持', fa: 'پشتیبانی', fr: 'Support',
+                uz: 'Yordam', hi: 'सहायता', de: 'Support', tr: 'Destek', az: 'Dəstək',
+                vi: 'Hỗ trợ', es: 'Soporte', ja: 'サポート', be: 'Падтрымка', pt: 'Suporte',
+                uk: 'Підтримка', pl: 'Wsparcie', id: 'Dukungan', tk: 'Goldaw', th: 'สนับสนุน'
+            },
+            settings: {
+                en: 'Settings', ru: 'Настройки', zh: '设置', fa: 'تنظیمات', fr: 'Paramètres',
+                uz: 'Sozlamalar', hi: 'सेटिंग्स', de: 'Einstellungen', tr: 'Ayarlar', az: 'Parametrlər',
+                vi: 'Cài đặt', es: 'Ajustes', ja: '設定', be: 'Налады', pt: 'Configurações',
+                uk: 'Налаштування', pl: 'Ustawienia', id: 'Pengaturan', tk: 'Sazlamalar', th: 'การตั้งค่า'
+            },
+            getLink: {
+                en: 'Get Link', ru: 'Получить ссылку', zh: '获取链接', fa: 'دریافت لینک', fr: 'Obtenir le lien',
+                uz: 'Havolani olish', hi: 'लिंक प्राप्त करें', de: 'Link erhalten', tr: 'Bağlantı Al', az: 'Link əldə et',
+                vi: 'Lấy liên kết', es: 'Obtener enlace', ja: 'リンクを取得', be: 'Атрымаць спасылку', pt: 'Obter link',
+                uk: 'Отримати посилання', pl: 'Pobierz link', id: 'Dapatkan Tautan', tk: 'Baglanyşyk al', th: 'รับลิงก์'
+            },
+            selectPlatform: {
+                en: 'Select platform', ru: 'Выбрать платформу', zh: '选择平台', fa: 'انتخاب پلتفرم', fr: 'Sélectionner la plateforme',
+                uz: 'Platformani tanlang', hi: 'प्लेटफॉर्म चुनें', de: 'Plattform auswählen', tr: 'Platform seçin', az: 'Platformanı seçin',
+                vi: 'Chọn nền tảng', es: 'Seleccionar plataforma', ja: 'プラットフォームを選択', be: 'Выберыце платформу', pt: 'Selecionar plataforma',
+                uk: 'Вибрати платформу', pl: 'Wybierz platformę', id: 'Pilih platform', tk: 'Platformany saýlaň', th: 'เลือกแพลตฟอร์ม'
+            },
+            selectApp: {
+                en: 'Select application', ru: 'Выбрать приложение', zh: '选择应用', fa: 'انتخاب برنامه', fr: 'Sélectionner l\'application',
+                uz: 'Ilovani tanlang', hi: 'एप्लिकेशन चुनें', de: 'Anwendung auswählen', tr: 'Uygulama seçin', az: 'Tətbiqi seçin',
+                vi: 'Chọn ứng dụng', es: 'Seleccionar aplicación', ja: 'アプリを選択', be: 'Выберыце праграму', pt: 'Selecionar aplicativo',
+                uk: 'Вибрати додаток', pl: 'Wybierz aplikację', id: 'Pilih aplikasi', tk: 'Programmany saýlaň', th: 'เลือกแอปพลิเคชัน'
+            },
+            theme: {
+                en: 'Theme', ru: 'Тема', zh: '主题', fa: 'تم', fr: 'Thème',
+                uz: 'Mavzu', hi: 'थीम', de: 'Design', tr: 'Tema', az: 'Mövzu',
+                vi: 'Giao diện', es: 'Tema', ja: 'テーマ', be: 'Тэма', pt: 'Tema',
+                uk: 'Тема', pl: 'Motyw', id: 'Tema', tk: 'Tema', th: 'ธีม'
+            },
+            language: {
+                en: 'Language', ru: 'Язык', zh: '语言', fa: 'زبان', fr: 'Langue',
+                uz: 'Til', hi: 'भाषा', de: 'Sprache', tr: 'Dil', az: 'Dil',
+                vi: 'Ngôn ngữ', es: 'Idioma', ja: '言語', be: 'Мова', pt: 'Idioma',
+                uk: 'Мова', pl: 'Język', id: 'Bahasa', tk: 'Dil', th: 'ภาษา'
+            },
+            newYearMode: {
+                en: 'New Year Mode', ru: 'Новогодний режим', zh: '新年模式', fa: 'حالت سال نو', fr: 'Mode Nouvel An',
+                uz: 'Yangi yil rejimi', hi: 'नए साल का मोड', de: 'Neujahrsmodus', tr: 'Yeni Yıl Modu', az: 'Yeni İl rejimi',
+                vi: 'Chế độ Năm mới', es: 'Modo Año Nuevo', ja: '新年モード', be: 'Навагодні рэжым', pt: 'Modo Ano Novo',
+                uk: 'Новорічний режим', pl: 'Tryb Noworoczny', id: 'Mode Tahun Baru', tk: 'Täze ýyl rejimi', th: 'โหมดปีใหม่'
+            },
+            themeLight: {
+                en: 'Light', ru: 'Светлая', zh: '明亮', fa: 'روشن', fr: 'Claire',
+                uz: 'Yorug\'', hi: 'लाइट', de: 'Hell', tr: 'Açık', az: 'İşıqlı',
+                vi: 'Sáng', es: 'Clara', ja: 'ライト', be: 'Светлая', pt: 'Clara',
+                uk: 'Світла', pl: 'Jasny', id: 'Terang', tk: 'Ýagty', th: 'สว่าง'
+            },
+            themeDark: {
+                en: 'Dark', ru: 'Тёмная', zh: '深色', fa: 'تیره', fr: 'Sombre',
+                uz: 'Qorong\'i', hi: 'डार्क', de: 'Dunkel', tr: 'Koyu', az: 'Qaranlıq',
+                vi: 'Tối', es: 'Oscura', ja: 'ダーク', be: 'Цёмная', pt: 'Escura',
+                uk: 'Темна', pl: 'Ciemny', id: 'Gelap', tk: 'Garaňky', th: 'มืด'
+            },
+            themeAuto: {
+                en: 'Auto', ru: 'Авто', zh: '自动', fa: 'خودکار', fr: 'Auto',
+                uz: 'Avto', hi: 'ऑटो', de: 'Auto', tr: 'Otomatik', az: 'Avto',
+                vi: 'Tự động', es: 'Auto', ja: '自動', be: 'Аўта', pt: 'Auto',
+                uk: 'Авто', pl: 'Auto', id: 'Otomatis', tk: 'Awto', th: 'อัตโนมัติ'
+            }
+        };
+
+        // Language emojis for selector
+        const langEmojis = {
+            en: '🇬🇧', ru: '🇷🇺', zh: '🇨🇳', fa: '🇮🇷', fr: '🇫🇷', uz: '🇺🇿', hi: '🇮🇳', de: '🇩🇪', tr: '🇹🇷', az: '🇦🇿',
+            vi: '🇻🇳', es: '🇪🇸', ja: '🇯🇵', be: '🇧🇾', pt: '🇵🇹', uk: '🇺🇦', pl: '🇵🇱', id: '🇮🇩', tk: '🇹🇲', th: '🇹🇭'
+        };
+
+        function getHardcodedText(key) {
+            const texts = hardcodedTranslations[key];
+            if (!texts) return key;
+            return texts[currentLanguage] || texts['en'] || key;
+        }
+
+        function updateBranding() {
+            if (!appConfig?.brandingSettings) return;
+            const branding = appConfig.brandingSettings;
+
+            const logo = document.getElementById('brandLogo');
+            if (logo) {
+                logo.innerHTML = '';
+                if (branding.logoUrl) {
+                    const logoImg = document.createElement('img');
+                    logoImg.src = branding.logoUrl;
+                    logoImg.alt = branding.title || 'Logo';
+                    logoImg.className = 'brand-logo';
+                    logo.appendChild(logoImg);
+                }
+                const titleSpan = document.createElement('span');
+                titleSpan.textContent = branding.title || 'Subscription';
+                logo.appendChild(titleSpan);
+                logo.classList.add('loaded');
+            }
+        }
+
+        function renderHeaderControls() {
+            const controls = document.getElementById('headerControls');
+            if (!controls) return;
+
+            const branding = appConfig?.brandingSettings;
+            let html = '';
+
+            // Support button (if supportUrl exists)
+            if (branding?.supportUrl) {
+                const isTelegramUrl = branding.supportUrl.startsWith('https://t.me');
+                const supportIcon = isTelegramUrl
+                    ? `<svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>`
+                    : `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+                html += `<button class="btn btn-icon" onclick="openLink('${escapeForAttribute(branding.supportUrl)}')">${supportIcon}<span class="btn-text">${getHardcodedText('support')}</span></button>`;
+            }
+
+            // Settings button
+            html += `<button class="btn btn-icon" onclick="openModal('settingsModal')">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                <span class="btn-text">${getHardcodedText('settings')}</span>
+            </button>`;
+
+            // Get Link / QR button (hide if baseSettings.hideGetLinkButton is true)
+            if (appConfig?.baseSettings?.hideGetLinkButton !== true) {
+                html += `<button class="btn btn-primary btn-icon" onclick="showSubscriptionModal()">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                    </svg>
+                    <span class="btn-text">${getHardcodedText('getLink')}</span>
+                </button>`;
+            }
+
+            const hasDevicePassword = !!panelData?.response?.user?.hasDeviceDeletePassword;
+            html += `<button class="btn ${hasDevicePassword ? '' : 'btn-primary'} btn-icon" onclick="configureDeviceDeletePassword()" title="${hasDevicePassword ? (currentLanguage === 'ru' ? 'Сменить пароль удаления устройств' : 'Change device deletion password') : (currentLanguage === 'ru' ? 'Задать пароль удаления устройств' : 'Set device deletion password')}">
+                <span>🔐</span>
+                <span class="btn-text">${currentLanguage === 'ru' ? (hasDevicePassword ? 'Сменить пароль' : 'Задать пароль') : (hasDevicePassword ? 'Change password' : 'Set password')}</span>
+            </button>`;
+
+            controls.innerHTML = html;
+            controls.classList.add('loaded');
+        }
+
+        function setupLanguageButtons() {
+            const container = document.getElementById('languageButtons');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const locales = appConfig?.locales || ['en'];
+            locales.forEach(langCode => {
+                const button = document.createElement('button');
+                button.className = 'btn' + (langCode === currentLanguage ? ' btn-primary' : '');
+                const emoji = langEmojis[langCode] || '';
+                button.innerHTML = `<span class="lang-emoji">${emoji}</span> ${langFullNames[langCode] || langCode.toUpperCase()}`;
+                button.onclick = () => setLanguage(langCode);
+                container.appendChild(button);
+            });
+        }
+
+        function setLanguage(lang) {
+            currentLanguage = lang;
+            localStorage.setItem('lang', lang);
+            updateTexts();
+            setupLanguageButtons();
+            renderHeaderControls();
+            if (panelData?.response?.isFound) renderContent();
+        }
+
+        function updateTexts() {
+            // Update modal titles and hints
+            document.getElementById('qrHint').textContent = t('scanQrCodeDescription') || 'Scan with your phone';
+            document.getElementById('subscriptionQrHint').textContent = t('scanQrCodeDescription') || 'Scan with your phone';
+            document.getElementById('copySubBtnText').textContent = t('copyLink') || 'Copy';
+            document.getElementById('platformModalTitle').textContent = getHardcodedText('selectPlatform');
+            // Update settings modal labels
+            document.getElementById('settingsTitle').textContent = getHardcodedText('settings');
+            document.getElementById('themeLabel').textContent = getHardcodedText('theme');
+            document.getElementById('languageLabel').textContent = getHardcodedText('language');
+            document.getElementById('snowToggleLabel').textContent = getHardcodedText('newYearMode');
+            // Update theme button texts
+            const lightBtn = document.getElementById('themeLightBtn');
+            const darkBtn = document.getElementById('themeDarkBtn');
+            const autoBtn = document.getElementById('themeAutoBtn');
+            if (lightBtn) lightBtn.querySelector('.theme-text').textContent = getHardcodedText('themeLight');
+            if (darkBtn) darkBtn.querySelector('.theme-text').textContent = getHardcodedText('themeDark');
+            if (autoBtn) autoBtn.querySelector('.theme-text').textContent = getHardcodedText('themeAuto');
+        }
+
+        function setTheme(theme) {
+            localStorage.setItem('theme', theme);
+            applyTheme(theme);
+        }
+
+        function applyTheme(theme) {
+            const html = document.documentElement;
+            const themeColorMeta = document.getElementById('themeColor');
+            let isDark;
+            if (theme === 'auto') {
+                isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            } else {
+                isDark = theme === 'dark';
+            }
+            html.classList.toggle('dark-theme', isDark);
+            themeColorMeta.setAttribute('content', isDark ? '#0f172a' : '#3b82f6');
+        }
+
+        function isNewYearSeason() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = now.getMonth(); // 0-indexed
+            const day = now.getDate();
+            // Enable by default from Dec 1 to Jan 31
+            if (month === 11) return true; // December
+            if (month === 0 && day <= 31) return true; // Jan 1-31
+            return false;
+        }
+
+        function initSnowMode() {
+            const savedSnowMode = localStorage.getItem('snowMode');
+            let snowEnabled;
+            if (savedSnowMode !== null) {
+                snowEnabled = savedSnowMode === 'true';
+            } else {
+                snowEnabled = isNewYearSeason();
+            }
+            applySnowMode(snowEnabled);
+        }
+
+        function applySnowMode(enabled) {
+            const container = document.getElementById('snowflakesContainer');
+            const toggle = document.getElementById('snowToggle');
+            if (container) {
+                container.style.display = enabled ? 'block' : 'none';
+            }
+            if (toggle) {
+                toggle.classList.toggle('active', enabled);
+            }
+        }
+
+        function toggleSnowMode() {
+            const toggle = document.getElementById('snowToggle');
+            const isActive = toggle.classList.contains('active');
+            const newState = !isActive;
+            localStorage.setItem('snowMode', newState.toString());
+            applySnowMode(newState);
+        }
+
+        function detectOS() {
+            const ua = navigator.userAgent;
+            const platform = navigator.platform;
+            if (/iPad|iPhone|iPod/.test(ua) && !window.MSStream) return 'ios';
+            if (/Android/.test(ua)) return 'android';
+            if (/Mac/.test(platform)) return 'macos';
+            if (/Win/.test(platform)) return 'windows';
+            if (/Linux/.test(platform)) return 'linux';
+            return 'ios';
+        }
+
+        function renderContent() {
+            const mainContent = document.getElementById('mainContent');
+            if (!panelData?.response?.isFound) {
+                mainContent.innerHTML = `<div class="card"><div class="card-content" style="text-align: center; padding: 40px;">${t('unknown') || 'No data found'}</div></div>`;
+                return;
+            }
+
+            let html = '';
+
+            // Render subscription info block based on uiConfig
+            const infoBlockType = appConfig?.uiConfig?.subscriptionInfoBlockType || 'cards';
+            if (infoBlockType !== 'hidden') {
+                html += renderSubscriptionInfo(infoBlockType);
+            }
+            html += renderConnectedDevicesSection();
+
+            // Render installation section
+            html += renderInstallationSection();
+
+            // Render connection keys section if enabled
+            if (appConfig?.baseSettings?.showConnectionKeys !== false) {
+                html += renderLinksSection();
+            }
+
+            mainContent.innerHTML = html;
+            mainContent.classList.add('loaded');
+            attachEventListeners();
+        }
+
+        function renderSubscriptionInfo(blockType) {
+            const { user } = panelData.response;
+            const expiresDate = new Date(user.expiresAt);
+            const isNeverExpires = expiresDate.getFullYear() >= 2099;
+            const isActive = user.userStatus.toLowerCase() === 'active';
+
+            // Format traffic
+            const trafficUsed = user.trafficUsed || '0 B';
+            const trafficLimit = user.trafficLimit === "0" ? '∞' : user.trafficLimit;
+            const bandwidth = `${trafficUsed} / ${trafficLimit}`;
+
+            // Get expiry text
+            let expiryText = t('indefinitely') || 'Indefinitely';
+            if (!isNeverExpires) {
+                expiryText = formatDate(expiresDate);
+            }
+
+            switch (blockType) {
+                case 'collapsed':
+                    return renderCollapsedInfo(user, isActive, expiryText, bandwidth, isNeverExpires);
+                case 'expanded':
+                    return renderExpandedInfo(user, isActive, expiryText, bandwidth, isNeverExpires);
+                case 'cards':
+                default:
+                    return renderCardsInfo(user, isActive, expiryText, bandwidth, isNeverExpires);
+            }
+        }
+
+        function renderConnectedDevicesSection() {
+            const devices = panelData?.response?.user?.connectedDevices;
+            if (!Array.isArray(devices) || devices.length === 0) {
+                return '';
+            }
+            const maxDevices = Number(panelData?.response?.user?.connectedDevicesMax || 0);
+            const titleText = currentLanguage === 'ru' ? 'Подключенные устройства' : 'Connected devices';
+            const badgeText = maxDevices > 0 ? `${devices.length} / ${maxDevices}` : `${devices.length}`;
+
+            const rows = devices.map(device => {
+                const model = escapeHtml(device.device_model || '-');
+                const os = escapeHtml(device.device_os || '-');
+                const osVersion = escapeHtml(device.os_version || '');
+                const hwid = escapeHtml(device.hwid || '-');
+                const userAgent = escapeHtml(device.user_agent || '-');
+                const lastSeen = Number(device.time) > 0
+                    ? new Date(Number(device.time) * 1000).toLocaleString(currentLanguage === 'ru' ? 'ru-RU' : 'en-GB')
+                    : '-';
+                const trafficDownload = formatBytes(device.traffic_download || 0);
+                const trafficUpload = formatBytes(device.traffic_upload || 0);
+
+                return `
+                    <div class="link-item" style="align-items: stretch; gap: 8px; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;">
+                        <div style="display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) minmax(150px, 1fr); gap: 10px; align-items: center;">
+                            <div style="font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${model}">
+                                📱 ${model}
+                            </div>
+                            <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary);" title="${hwid}">
+                                🔑 ${hwid}
+                            </div>
+                            <div style="text-align: right; white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
+                                <span>⬇ ${trafficDownload} · ⬆ ${trafficUpload}</span>
+                                <button class="btn btn-sm" style="padding: 4px 8px; border-color: var(--error); color: var(--error);" onclick="deleteDeviceByHwid('${escapeForAttribute(device.hwid || '')}')">🗑️</button>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1.4fr) minmax(180px, 1fr); gap: 10px; align-items: center; color: var(--text-secondary);">
+                            <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                💻 ${os}${osVersion ? ' ' + osVersion : ''}
+                            </div>
+                            <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${userAgent}">
+                                🌐 ${userAgent}
+                            </div>
+                            <div style="text-align: right; white-space: nowrap;">
+                                🕒 ${lastSeen}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="card user-info" id="connectedDevicesCard" style="margin-bottom: 20px;">
+                    <div class="card-header clickable" onclick="toggleConnectedDevicesSection()">
+                        <span>${titleText}</span>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span class="badge" style="background: var(--primary-color); color: white;">${badgeText}</span>
+                            <svg class="w-5 h-5 expand-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="card-content" style="display: none;">
+                        ${rows}
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleConnectedDevicesSection() {
+            const card = document.getElementById('connectedDevicesCard');
+            if (!card) return;
+            const header = card.querySelector('.card-header.clickable');
+            if (!header) return;
+            const content = header.nextElementSibling;
+            if (!content) return;
+            const isOpen = content.style.display === 'block';
+            content.style.display = isOpen ? 'none' : 'block';
+            header.classList.toggle('open', !isOpen);
+        }
+
+        function getSubscriptionApiUrl() {
+            const raw = panelData?.response?.subscriptionUrl || '';
+            return raw.split('#')[0];
+        }
+
+        async function postSubscriptionAction(action, payload = {}) {
+            const baseUrl = getSubscriptionApiUrl();
+            if (!baseUrl) throw new Error('No subscription URL');
+            const url = baseUrl + (baseUrl.includes('?') ? '&' : '?') + `action=${encodeURIComponent(action)}`;
+            const body = new URLSearchParams();
+            Object.entries(payload).forEach(([k, v]) => body.append(k, String(v ?? '')));
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                body: body.toString(),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.ok) {
+                throw new Error(data?.message || `HTTP ${res.status}`);
+            }
+            return data;
+        }
+
+        async function configureDeviceDeletePassword() {
+            const hasPassword = !!panelData?.response?.user?.hasDeviceDeletePassword;
+            const title = document.getElementById('devicePasswordModalTitle');
+            const currentRow = document.getElementById('devicePasswordCurrentRow');
+            const currentLabel = document.getElementById('devicePasswordCurrentLabel');
+            const newLabel = document.getElementById('devicePasswordNewLabel');
+            const currentInput = document.getElementById('devicePasswordCurrentInput');
+            const newInput = document.getElementById('devicePasswordNewInput');
+            if (!title || !currentRow || !currentInput || !newInput || !currentLabel || !newLabel) return;
+
+            title.textContent = hasPassword
+                ? (currentLanguage === 'ru' ? 'Смена пароля удаления устройств' : 'Change device deletion password')
+                : (currentLanguage === 'ru' ? 'Задать пароль удаления устройств' : 'Set device deletion password');
+            currentLabel.textContent = currentLanguage === 'ru' ? 'Текущий пароль' : 'Current password';
+            newLabel.textContent = hasPassword
+                ? (currentLanguage === 'ru' ? 'Новый пароль' : 'New password')
+                : (currentLanguage === 'ru' ? 'Пароль' : 'Password');
+            const hint = document.getElementById('devicePasswordSupportHint');
+            if (hint) {
+                hint.textContent = currentLanguage === 'ru'
+                    ? 'Если забыли пароль — напишите в поддержку.'
+                    : 'If you forgot the password, contact support.';
+            }
+            currentRow.style.display = hasPassword ? 'block' : 'none';
+            currentInput.value = '';
+            newInput.value = '';
+            openModal('devicePasswordModal');
+            setTimeout(() => (hasPassword ? currentInput : newInput).focus(), 50);
+        }
+
+        async function submitDevicePasswordModal() {
+            const hasPassword = !!panelData?.response?.user?.hasDeviceDeletePassword;
+            const currentInput = document.getElementById('devicePasswordCurrentInput');
+            const newInput = document.getElementById('devicePasswordNewInput');
+            if (!newInput || !currentInput) return;
+            const currentPassword = currentInput.value.trim();
+            const password = newInput.value.trim();
+            if (!password) {
+                showToast(currentLanguage === 'ru' ? 'Введите пароль' : 'Enter password');
+                return;
+            }
+            if (hasPassword && !currentPassword) {
+                showToast(currentLanguage === 'ru' ? 'Введите текущий пароль' : 'Enter current password');
+                return;
+            }
+            try {
+                await postSubscriptionAction('device_password_set', {
+                    password,
+                    current_password: currentPassword,
+                });
+                panelData.response.user.hasDeviceDeletePassword = true;
+                renderHeaderControls();
+                closeModal('devicePasswordModal');
+                showToast(currentLanguage === 'ru' ? 'Пароль сохранён' : 'Password saved');
+            } catch (e) {
+                showToast((currentLanguage === 'ru' ? 'Ошибка: ' : 'Error: ') + (e?.message || 'unknown'));
+            }
+        }
+
+        async function deleteDeviceByHwid(hwid) {
+            const safeHwid = String(hwid || '').trim();
+            if (!safeHwid) return;
+            if (!panelData?.response?.user?.hasDeviceDeletePassword) {
+                showToast(currentLanguage === 'ru' ? 'Сначала задайте пароль удаления устройств (кнопка 🔐 сверху).' : 'Set deletion password first (🔐 button above).');
+                return;
+            }
+            pendingDeleteHwid = safeHwid;
+            const info = document.getElementById('deleteDeviceModalInfo');
+            const title = document.getElementById('deleteDeviceModalTitle');
+            const label = document.getElementById('deleteDevicePasswordLabel');
+            const input = document.getElementById('deleteDevicePasswordInput');
+            if (!info || !title || !label || !input) return;
+            title.textContent = currentLanguage === 'ru' ? 'Удаление устройства' : 'Delete device';
+            label.textContent = currentLanguage === 'ru' ? 'Пароль' : 'Password';
+            info.textContent = (currentLanguage === 'ru' ? 'Будет удалено устройство с HWID: ' : 'Device to delete (HWID): ') + safeHwid;
+            input.value = '';
+            openModal('deleteDeviceModal');
+            setTimeout(() => input.focus(), 50);
+        }
+
+        async function submitDeleteDeviceModal() {
+            const passwordInput = document.getElementById('deleteDevicePasswordInput');
+            const password = passwordInput?.value?.trim() || '';
+            if (!pendingDeleteHwid) return;
+            if (!password) {
+                showToast(currentLanguage === 'ru' ? 'Введите пароль' : 'Enter password');
+                return;
+            }
+            try {
+                await postSubscriptionAction('device_delete', { hwid: pendingDeleteHwid, password });
+                panelData.response.user.connectedDevices = (panelData.response.user.connectedDevices || []).filter(d => (d?.hwid || '') !== pendingDeleteHwid);
+                pendingDeleteHwid = '';
+                closeModal('deleteDeviceModal');
+                renderContent();
+                showToast(currentLanguage === 'ru' ? 'Устройство удалено' : 'Device deleted');
+            } catch (e) {
+                showToast((currentLanguage === 'ru' ? 'Удаление не удалось: ' : 'Delete failed: ') + (e?.message || 'unknown'));
+            }
+        }
+
+        function renderCardsInfo(user, isActive, expiryText, bandwidth, isNeverExpires) {
+            const expiresDate = new Date(user.expiresAt);
+            const trafficLimit = user.trafficLimit === "0" ? (t('indefinitely') || '∞') : user.trafficLimit;
+
+            let infoRows = `
+                <div class="info-row"><span class="info-label">${t('name') || 'Username'}</span><span class="info-value">${escapeHtml(user.username)}</span></div>
+                <div class="info-row"><span class="info-label">${t('status') || 'Status'}</span><span class="info-value"><span class="badge badge-${user.userStatus.toLowerCase()}">${isActive ? (t('active') || 'ACTIVE') : (t('inactive') || 'INACTIVE')}</span></span></div>
+            `;
+
+            if (isActive) {
+                infoRows += `
+                    <div class="info-row"><span class="info-label">${t('expires') || 'Expires'}</span><span class="info-value">${expiryText}</span></div>
+                    ${!isNeverExpires ? `<div class="info-row"><span class="info-label">${daysLeftTranslations[currentLanguage] || daysLeftTranslations.en}</span><span class="info-value">${user.daysLeft || 0}</span></div>` : ''}
+                    <div class="info-row"><span class="info-label">${t('bandwidth') || 'Traffic used'}</span><span class="info-value">${user.trafficUsed || '0 B'} / ${trafficLimit}</span></div>
+                `;
+            }
+
+            return `
+                <div class="card user-info" style="margin-bottom: 20px;">
+                    <div class="card-content">
+                        ${infoRows}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCollapsedInfo(user, isActive, expiryText, bandwidth, isNeverExpires) {
+            const trafficLimit = user.trafficLimit === "0" ? (t('indefinitely') || '∞') : user.trafficLimit;
+
+            return `
+                <div class="card" style="margin-bottom: 20px;">
+                    <div class="user-info-collapsed" onclick="toggleCollapsedInfo(this)">
+                        <div class="status-icon ${isActive ? 'active' : 'inactive'}">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+                        <div class="user-summary">
+                            <div class="user-summary-name">${escapeHtml(user.username)}</div>
+                            <div class="user-summary-expire">${expiryText}</div>
+                        </div>
+                        <div class="expand-icon">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="user-info-collapsed-details">
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('name') || 'Username'}</div>
+                                <div class="stat-card-value">${escapeHtml(user.username)}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('status') || 'Status'}</div>
+                                <div class="stat-card-value"><span class="badge badge-${user.userStatus.toLowerCase()}">${isActive ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}</span></div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('expires') || 'Expires'}</div>
+                                <div class="stat-card-value">${expiryText}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('bandwidth') || 'Bandwidth'}</div>
+                                <div class="stat-card-value">${bandwidth}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderExpandedInfo(user, isActive, expiryText, bandwidth, isNeverExpires) {
+            const trafficLimit = user.trafficLimit === "0" ? (t('indefinitely') || '∞') : user.trafficLimit;
+
+            return `
+                <div class="card" style="margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border);">
+                        <div class="status-icon ${isActive ? 'active' : 'inactive'}" style="width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: ${isActive ? 'var(--success)' : 'var(--error)'}; color: white; flex-shrink: 0;">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; font-size: 18px;">${escapeHtml(user.username)}</div>
+                            <div style="color: var(--text-secondary); font-size: 14px;">${expiryText}</div>
+                        </div>
+                    </div>
+                    <div style="padding: 20px;">
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('name') || 'Username'}</div>
+                                <div class="stat-card-value">${escapeHtml(user.username)}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('status') || 'Status'}</div>
+                                <div class="stat-card-value"><span class="badge badge-${user.userStatus.toLowerCase()}">${isActive ? (t('active') || 'Active') : (t('inactive') || 'Inactive')}</span></div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('expires') || 'Expires'}</div>
+                                <div class="stat-card-value">${expiryText}</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-card-label">${t('bandwidth') || 'Bandwidth'}</div>
+                                <div class="stat-card-value">${bandwidth}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function toggleCollapsedInfo(element) {
+            element.classList.toggle('expanded');
+            const details = element.nextElementSibling;
+            details.classList.toggle('open');
+        }
+
+        function renderInstallationSection() {
+            console.log('renderInstallationSection called');
+            console.log('appConfig?.platforms:', appConfig?.platforms);
+            console.log('validPlatforms:', validPlatforms);
+            console.log('validPlatforms.length:', validPlatforms.length);
+
+            if (!appConfig?.platforms || validPlatforms.length === 0) {
+                console.warn('No platforms available, skipping installation section');
+                return '';
+            }
+
+            const storedPlatform = localStorage.getItem('platform');
+            currentPlatform = validPlatforms.includes(storedPlatform) ? storedPlatform : detectOS();
+            if (!validPlatforms.includes(currentPlatform)) {
+                currentPlatform = validPlatforms[0];
+            }
+
+            const platformData = appConfig.platforms[currentPlatform];
+            const platformDisplayName = getLocalizedText(platformData?.displayName) || currentPlatform;
+            const platformIcon = getSvgIcon(platformData?.svgIconKey) || '';
+
+            return `
+                <div class="card apps-section">
+                    <div class="card-header">
+                        <span>${t('installationGuideHeader') || 'Installation'}</span>
+                        <button class="btn" id="platform-selector-btn" onclick="openPlatformModal()">
+                            ${platformIcon} <span>${platformDisplayName}</span>
+                        </button>
+                    </div>
+                    <div class="card-content">
+                        <div class="platform-tabs">
+                            ${validPlatforms.map(p => {
+                                const pData = appConfig.platforms[p];
+                                const pName = getLocalizedText(pData?.displayName) || p;
+                                const pIcon = getSvgIcon(pData?.svgIconKey) || '';
+                                return `<div class="platform-tab ${p === currentPlatform ? 'active' : ''}" data-platform="${p}">${pIcon} ${pName}</div>`;
+                            }).join('')}
+                        </div>
+                        <div id="appsContainer">${renderAppsForPlatform()}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAppsForPlatform() {
+            const platformData = appConfig.platforms[currentPlatform];
+            if (!platformData?.apps?.length) return '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">No apps available</div>';
+
+            const apps = platformData.apps;
+            const guidesType = appConfig?.uiConfig?.installationGuidesBlockType || 'minimal';
+
+            // For minimal mode, use app cards like original
+            if (guidesType === 'minimal') {
+                return renderAppsCardsView(apps);
+            }
+
+            // For timeline mode with multiple apps, use timeline with app selection as first step
+            if (guidesType === 'timeline' && apps.length > 1) {
+                return renderTimelineWithAppSelection(apps);
+            }
+
+            // For other modes (cards, accordion, timeline with single app), use app tabs
+            return renderAppsTabsView(apps, guidesType);
+        }
+
+        function renderAppsCardsView(apps) {
+            // Show all apps in a simple grid with featured badge
+            let html = '<div class="apps-container">';
+            html += `<div class="apps-grid">${apps.map(app => renderAppCard(app, true)).join('')}</div>`;
+            html += '</div>';
+            return html;
+        }
+
+        // Timeline with app selection as first step
+        let timelineApps = [];
+        let timelineSelectedAppIndex = 0;
+        let timelineHasAppSelection = false;
+
+        function renderTimelineWithAppSelection(apps) {
+            timelineApps = apps;
+            timelineSelectedAppIndex = 0;
+            timelineCurrentStep = 0;
+            timelineHasAppSelection = true;
+
+            const selectedApp = apps[0];
+            currentApp = selectedApp;
+
+            return renderTimelineWithApps(apps, selectedApp);
+        }
+
+        function renderTimelineWithApps(apps, selectedApp) {
+            const blocks = selectedApp.blocks || [];
+            const totalSteps = 1 + blocks.length; // 1 for app selection + blocks
+            const platformIcon = getSvgIcon(appConfig.platforms[currentPlatform]?.svgIconKey);
+
+            let html = '<div class="guides-timeline" data-has-app-selection="true">';
+
+            // Timeline dots
+            html += '<div class="timeline-dots">';
+            // First dot for app selection
+            html += `<div class="timeline-dot ${timelineCurrentStep === 0 ? 'active' : ''}" data-step="0" style="background: var(--primary-color);" onclick="goToTimelineStep(0)">${platformIcon}</div>`;
+            // Dots for each block
+            blocks.forEach((block, index) => {
+                const stepIndex = index + 1;
+                const iconColor = getIconColor(block.svgIconColor);
+                const icon = getSvgIcon(block.svgIconKey) || platformIcon;
+                html += `<div class="timeline-dot ${timelineCurrentStep === stepIndex ? 'active' : ''}" data-step="${stepIndex}" style="background: ${iconColor};" onclick="goToTimelineStep(${stepIndex})">${icon}</div>`;
+            });
+            html += '</div>';
+
+            // Content container
+            html += '<div class="timeline-container">';
+
+            // Step 0: App selection
+            html += `<div class="timeline-step ${timelineCurrentStep === 0 ? 'active' : ''}" data-step="0">`;
+            html += '<div class="timeline-step-content guide-card">';
+            html += `<div class="guide-card-header">
+                <div class="guide-card-icon" style="background: var(--primary-color); color: white;">${platformIcon}</div>
+                <div class="guide-card-title">${getHardcodedText('selectApp')}</div>
+            </div>`;
+            html += '<div class="app-tabs">';
+            apps.forEach((app, index) => {
+                const appIcon = getSvgIcon(app.svgIconKey) || platformIcon;
+                const starIcon = app.featured ? '<svg class="star-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' : '';
+                const iconHtml = appIcon ? `<span class="app-tab-icon">${appIcon}</span>` : '';
+                html += `<div class="app-tab ${index === timelineSelectedAppIndex ? 'active' : ''}" data-timeline-app-index="${index}" onclick="selectTimelineApp(${index})">
+                    ${starIcon}<span class="app-tab-name">${escapeHtml(app.name)}</span>${iconHtml}
+                </div>`;
+            });
+            html += '</div></div></div>';
+
+            // Steps for blocks
+            blocks.forEach((block, index) => {
+                const stepIndex = index + 1;
+                const iconColor = getIconColor(block.svgIconColor);
+                const icon = getSvgIcon(block.svgIconKey) || platformIcon;
+                html += `<div class="timeline-step ${timelineCurrentStep === stepIndex ? 'active' : ''}" data-step="${stepIndex}">
+                    <div class="timeline-step-content guide-card">
+                        <div class="guide-card-header">
+                            <div class="guide-card-icon" style="background: ${iconColor}; color: white;">${icon}</div>
+                            <div class="guide-card-title">${getLocalizedText(block.title)}</div>
+                        </div>
+                        <div class="guide-card-description">${getLocalizedText(block.description)}</div>
+                        <div class="guide-card-buttons">${renderBlockButtons(block, selectedApp, iconColor)}</div>
+                    </div>
+                </div>`;
+            });
+
+            html += '</div>';
+
+            // Navigation buttons
+            const nextColor = timelineCurrentStep < totalSteps - 1 ? (timelineCurrentStep === 0 ? getIconColor(blocks[0]?.svgIconColor) : getIconColor(blocks[timelineCurrentStep]?.svgIconColor)) : 'var(--primary-color)';
+
+            html += `<div class="timeline-nav">
+                <button class="btn" onclick="prevTimelineStep()" id="timelinePrevBtn" ${timelineCurrentStep === 0 ? 'disabled' : ''}>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </button>
+                <button class="btn btn-primary" onclick="nextTimelineStep()" id="timelineNextBtn" style="background: ${nextColor}; border-color: ${nextColor};" ${timelineCurrentStep === totalSteps - 1 ? 'disabled' : ''}>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                </button>
+            </div>`;
+
+            html += '</div>';
+            return html;
+        }
+
+        function selectTimelineApp(appIndex) {
+            if (appIndex === timelineSelectedAppIndex) return;
+            timelineSelectedAppIndex = appIndex;
+            currentApp = timelineApps[appIndex];
+
+            // Re-render the timeline with new app's blocks
+            const container = document.querySelector('.guides-timeline[data-has-app-selection="true"]');
+            if (container) {
+                container.outerHTML = renderTimelineWithApps(timelineApps, timelineApps[appIndex]);
+                timelineCurrentStep = 0;
+            }
+        }
+
+        function renderAppCard(app, showFeaturedBadge = true) {
+            const appIcon = getSvgIcon(app.svgIconKey) || getSvgIcon(appConfig.platforms[currentPlatform]?.svgIconKey);
+            const recommendedText = getHardcodedText('recommended');
+
+            return `
+                <div class="app-card ${app.featured ? 'featured' : ''}" data-app-name="${escapeHtml(app.name)}">
+                    ${(app.featured && showFeaturedBadge) ? `<div class="featured-badge">${recommendedText}</div>` : ''}
+                    <div class="app-header">
+                        <div class="app-icon">${appIcon}</div>
+                        <div class="app-name">${escapeHtml(app.name)}</div>
+                    </div>
+                    <div class="btn btn-primary" style="width: 100%; justify-content: center;">${getHardcodedText('install')}</div>
+                </div>
+            `;
+        }
+
+        function renderAppsTabsView(apps, guidesType) {
+            let html = '<div class="app-tabs">';
+            apps.forEach((app, index) => {
+                const appIcon = getSvgIcon(app.svgIconKey) || getSvgIcon(appConfig.platforms[currentPlatform]?.svgIconKey) || '';
+                const starIcon = app.featured ? '<svg class="star-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' : '';
+                const iconHtml = appIcon ? `<span class="app-tab-icon">${appIcon}</span>` : '';
+                html += `<div class="app-tab ${index === 0 ? 'active' : ''}" data-app-index="${index}">
+                    ${starIcon}<span class="app-tab-name">${escapeHtml(app.name)}</span>${iconHtml}
+                </div>`;
+            });
+            html += '</div>';
+
+            currentApp = apps[0];
+            html += `<div id="guidesContainer">${renderGuides(apps[0], guidesType)}</div>`;
+
+            return html;
+        }
+
+        function renderGuides(app, guidesType) {
+            if (!app?.blocks?.length) return '';
+
+            switch (guidesType) {
+                case 'cards':
+                    return renderGuidesCards(app);
+                case 'accordion':
+                    return renderGuidesAccordion(app);
+                case 'expanded':
+                    return renderGuidesExpanded(app);
+                case 'timeline':
+                    return renderGuidesTimeline(app);
+                case 'minimal':
+                default:
+                    return renderGuidesMinimal(app);
+            }
+        }
+
+        function renderGuidesCards(app) {
+            let html = '<div class="guides-cards">';
+            app.blocks.forEach((block) => {
+                const iconColor = getIconColor(block.svgIconColor);
+                const icon = getSvgIcon(block.svgIconKey);
+                html += `
+                    <div class="guide-card">
+                        <div class="guide-card-header">
+                            <div class="guide-card-icon" style="background: ${iconColor}; color: white;">${icon}</div>
+                            <div class="guide-card-title">${getLocalizedText(block.title)}</div>
+                        </div>
+                        <div class="guide-card-description">${getLocalizedText(block.description)}</div>
+                        <div class="guide-card-buttons">${renderBlockButtons(block, app, iconColor)}</div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function renderGuidesAccordion(app) {
+            let html = '<div class="guides-accordion">';
+            app.blocks.forEach((block, index) => {
+                const iconColor = getIconColor(block.svgIconColor);
+                const icon = getSvgIcon(block.svgIconKey);
+                html += `
+                    <div class="accordion-item ${index === 0 ? 'open' : ''}">
+                        <div class="accordion-header" onclick="toggleAccordion(this)">
+                            <div class="accordion-icon" style="background: ${iconColor}; color: white;">${icon}</div>
+                            <div class="accordion-title">${getLocalizedText(block.title)}</div>
+                            <div class="accordion-arrow">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="accordion-content">
+                            <div class="accordion-description">${getLocalizedText(block.description)}</div>
+                            <div class="accordion-buttons">${renderBlockButtons(block, app, iconColor)}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function renderGuidesExpanded(app) {
+            let html = '<div class="guides-expanded">';
+            app.blocks.forEach((block) => {
+                const iconColor = getIconColor(block.svgIconColor);
+                const icon = getSvgIcon(block.svgIconKey);
+                html += `
+                    <div class="expanded-item">
+                        <div class="expanded-header">
+                            <div class="expanded-icon" style="background: ${iconColor}; color: white;">${icon}</div>
+                            <div class="expanded-title">${getLocalizedText(block.title)}</div>
+                        </div>
+                        <div class="expanded-content">
+                            <div class="expanded-description">${getLocalizedText(block.description)}</div>
+                            <div class="expanded-buttons">${renderBlockButtons(block, app, iconColor)}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function renderGuidesMinimal(app) {
+            let html = '<div class="guides-minimal">';
+            app.blocks.forEach((block, index) => {
+                const iconColor = getIconColor(block.svgIconColor);
+                html += `
+                    <div class="step">
+                        <div class="step-title">
+                            <span class="step-number" style="background: ${iconColor};">${index + 1}</span>
+                            ${getLocalizedText(block.title)}
+                        </div>
+                        <div class="step-description">${getLocalizedText(block.description)}</div>
+                        <div class="step-buttons">${renderBlockButtons(block, app, iconColor)}</div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            return html;
+        }
+
+        let timelineBlocks = []; // Store blocks for nav button updates
+
+        function renderGuidesTimeline(app) {
+            timelineCurrentStep = 0;
+            const blocks = app.blocks;
+            timelineBlocks = blocks; // Store for nav updates
+            const platformIcon = getSvgIcon(appConfig.platforms[currentPlatform]?.svgIconKey);
+
+            let html = '<div class="guides-timeline">';
+
+            // Timeline dots with icons and colors
+            html += '<div class="timeline-dots">';
+            blocks.forEach((block, index) => {
+                const iconColor = getIconColor(block.svgIconColor);
+                const icon = getSvgIcon(block.svgIconKey) || platformIcon;
+                html += `<div class="timeline-dot ${index === 0 ? 'active' : ''}" data-step="${index}" style="background: ${iconColor};" onclick="goToTimelineStep(${index})">${icon}</div>`;
+            });
+            html += '</div>';
+
+            html += '<div class="timeline-container">';
+            blocks.forEach((block, index) => {
+                const iconColor = getIconColor(block.svgIconColor);
+                const icon = getSvgIcon(block.svgIconKey) || platformIcon;
+                html += `
+                    <div class="timeline-step ${index === 0 ? 'active' : ''}" data-step="${index}" data-color="${iconColor}">
+                        <div class="timeline-step-content guide-card">
+                            <div class="guide-card-header">
+                                <div class="guide-card-icon" style="background: ${iconColor}; color: white;">${icon}</div>
+                                <div class="guide-card-title">${getLocalizedText(block.title)}</div>
+                            </div>
+                            <div class="guide-card-description">${getLocalizedText(block.description)}</div>
+                            <div class="guide-card-buttons" data-btn-color="${iconColor}">${renderBlockButtons(block, app, iconColor)}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+
+            // Nav buttons with step icons
+            const prevIcon = blocks.length > 1 ? (getSvgIcon(blocks[0].svgIconKey) || platformIcon) : '';
+            const nextIcon = blocks.length > 1 ? (getSvgIcon(blocks[1].svgIconKey) || platformIcon) : '';
+            const prevColor = blocks.length > 0 ? getIconColor(blocks[0].svgIconColor) : 'var(--primary-color)';
+            const nextColor = blocks.length > 1 ? getIconColor(blocks[1].svgIconColor) : 'var(--primary-color)';
+
+            html += `
+                <div class="timeline-nav">
+                    <button class="btn btn-icon" onclick="prevTimelineStep()" id="timelinePrevBtn" disabled style="--btn-color: ${prevColor};">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                        <span class="nav-step-icon">${prevIcon}</span>
+                    </button>
+                    <button class="btn btn-primary btn-icon" onclick="nextTimelineStep()" id="timelineNextBtn" style="background: ${nextColor}; border-color: ${nextColor};">
+                        <span class="nav-step-icon">${nextIcon}</span>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+            `;
+            html += '</div>';
+            return html;
+        }
+
+        function renderBlockButtons(block, app, btnColor = null) {
+            if (!block.buttons?.length) return '';
+            const { response } = panelData || {};
+            let html = '';
+            const colorStyle = btnColor ? `style="background: ${btnColor}; border-color: ${btnColor};"` : '';
+
+            block.buttons.forEach(button => {
+                const buttonText = getLocalizedText(button.text);
+                const buttonIcon = getSvgIcon(button.svgIconKey, 'w-4 h-4');
+                const buttonType = button.type || 'external';
+                let buttonLink = button.link || '';
+
+                // Support for template variables in ALL button types (no encoding)
+                if (buttonLink && response) {
+                    if (response.subscriptionUrl) {
+                        buttonLink = buttonLink.replace(/\{\{SUBSCRIPTION_LINK\}\}/g, response.subscriptionUrl);
+
+                        // Generate encrypted HAPP links
+                        const happCrypt3Link = generateHappCryptLink(response.subscriptionUrl, 3);
+                        const happCrypt4Link = generateHappCryptLink(response.subscriptionUrl, 4);
+
+                        // Always replace variables, even if encryption failed
+                        buttonLink = buttonLink.replace(/\{\{HAPP_CRYPT3_LINK\}\}/g, happCrypt3Link || response.subscriptionUrl);
+                        buttonLink = buttonLink.replace(/\{\{HAPP_CRYPT4_LINK\}\}/g, happCrypt4Link || response.subscriptionUrl);
+                    }
+                    if (response.user?.username) {
+                        buttonLink = buttonLink.replace(/\{\{USERNAME\}\}/g, response.user.username);
+                    }
+                }
+
+                if (buttonType === 'subscriptionLink' || buttonType === 'subscription') {
+                    const subscriptionUrl = generateSubscriptionUrl(app, response?.subscriptionUrl, button.link);
+                    if (subscriptionUrl) {
+                        html += `<button class="btn btn-primary" ${colorStyle} onclick="openSubscriptionUrl('${escapeForAttribute(subscriptionUrl)}')">${buttonIcon} ${buttonText}</button>`;
+                    }
+                } else if (buttonType === 'copyButton' || buttonType === 'copy') {
+                    html += `<button class="btn btn-primary" ${colorStyle} onclick="copyToClipboard('${escapeForAttribute(buttonLink)}')">${buttonIcon} ${buttonText}</button>`;
+                } else {
+                    // external and any other type - open link
+                    html += `<button class="btn btn-primary" ${colorStyle} onclick="openLink('${escapeForAttribute(buttonLink)}')">${buttonIcon} ${buttonText}</button>`;
+                }
+            });
+
+            return html;
+        }
+
+        function generateSubscriptionUrl(app, subscriptionUrl, linkTemplate) {
+            if (!subscriptionUrl) return null;
+            if (linkTemplate) {
+                let result = linkTemplate
+                    .replace(/\{\{SUBSCRIPTION_LINK\}\}/g, subscriptionUrl);
+
+                // Generate encrypted HAPP links
+                const happCrypt3Link = generateHappCryptLink(subscriptionUrl, 3);
+                const happCrypt4Link = generateHappCryptLink(subscriptionUrl, 4);
+
+                // Always replace variables, even if encryption failed
+                result = result.replace(/\{\{HAPP_CRYPT3_LINK\}\}/g, happCrypt3Link || subscriptionUrl);
+                result = result.replace(/\{\{HAPP_CRYPT4_LINK\}\}/g, happCrypt4Link || subscriptionUrl);
+
+                const username = panelData?.response?.user?.username;
+                if (username) {
+                    result = result.replace(/\{\{USERNAME\}\}/g, username);
+                }
+                return result;
+            }
+            return null;
+        }
+
+        function goToTimelineStep(step) {
+            const container = document.querySelector('.guides-timeline');
+            const hasAppSelection = container?.dataset.hasAppSelection === 'true';
+            const steps = document.querySelectorAll('.timeline-step');
+            const dots = document.querySelectorAll('.timeline-dot');
+            const prevBtn = document.getElementById('timelinePrevBtn');
+            const nextBtn = document.getElementById('timelineNextBtn');
+            const platformIcon = getSvgIcon(appConfig?.platforms?.[currentPlatform]?.svgIconKey);
+
+            if (step < 0 || step >= steps.length) return;
+            timelineCurrentStep = step;
+
+            steps.forEach((s, i) => s.classList.toggle('active', i === step));
+            dots.forEach((d, i) => {
+                d.classList.remove('active', 'completed');
+                if (i === step) d.classList.add('active');
+                if (i < step) d.classList.add('completed');
+            });
+
+            // Get blocks based on mode
+            let blocks;
+            if (hasAppSelection) {
+                const selectedApp = timelineApps[timelineSelectedAppIndex];
+                blocks = selectedApp?.blocks || [];
+            } else {
+                blocks = timelineBlocks;
+            }
+
+            // Update prev button
+            if (prevBtn) {
+                prevBtn.disabled = step === 0;
+                const blockIndex = hasAppSelection ? step - 2 : step - 1;
+                if (step > 0 && blockIndex >= 0 && blocks[blockIndex]) {
+                    const prevBlock = blocks[blockIndex];
+                    const prevIcon = getSvgIcon(prevBlock.svgIconKey) || platformIcon;
+                    const prevIconSpan = prevBtn.querySelector('.nav-step-icon');
+                    if (prevIconSpan) prevIconSpan.innerHTML = prevIcon;
+                }
+            }
+
+            // Update next button
+            if (nextBtn) {
+                const isLast = step === steps.length - 1;
+                nextBtn.disabled = isLast;
+                const blockIndex = hasAppSelection ? step : step + 1;
+                if (!isLast && blocks[blockIndex]) {
+                    const nextBlock = blocks[blockIndex];
+                    const nextIcon = getSvgIcon(nextBlock.svgIconKey) || platformIcon;
+                    const nextColor = getIconColor(nextBlock.svgIconColor);
+                    nextBtn.style.background = nextColor;
+                    nextBtn.style.borderColor = nextColor;
+                    const nextIconSpan = nextBtn.querySelector('.nav-step-icon');
+                    if (nextIconSpan) nextIconSpan.innerHTML = nextIcon;
+                } else if (!isLast && hasAppSelection && step === 0) {
+                    // First step to block step
+                    const nextColor = blocks[0] ? getIconColor(blocks[0].svgIconColor) : 'var(--primary-color)';
+                    nextBtn.style.background = nextColor;
+                    nextBtn.style.borderColor = nextColor;
+                }
+            }
+        }
+
+        function prevTimelineStep() { goToTimelineStep(timelineCurrentStep - 1); }
+        function nextTimelineStep() {
+            const steps = document.querySelectorAll('.timeline-step');
+            if (timelineCurrentStep < steps.length - 1) goToTimelineStep(timelineCurrentStep + 1);
+        }
+
+        function toggleAccordion(header) {
+            const item = header.parentElement;
+            const wasOpen = item.classList.contains('open');
+            // Close all accordion items first
+            document.querySelectorAll('.accordion-item.open').forEach(el => el.classList.remove('open'));
+            // Open clicked item if it wasn't open before
+            if (!wasOpen) item.classList.add('open');
+        }
+        function toggleSpoiler(header) {
+            const content = header.nextElementSibling;
+            const arrow = header.querySelector('.spoiler-arrow');
+            content.classList.toggle('open');
+            arrow.classList.toggle('open');
+        }
+
+        function renderLinksSection() {
+            const { links } = panelData.response;
+            if (!links?.length) return '';
+
+            return ''; /*`
+                <div class="card links-section" id="linksSection">
+                    <div class="card-header clickable" onclick="toggleLinksSection()">
+                        <span>${t('connectionKeysHeader') || 'Connection Keys'}</span>
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <span class="badge" style="background: var(--primary-color); color: white;">${links.length}</span>
+                            <svg class="w-5 h-5 expand-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        ${links.map(link => `
+                            <div class="link-item">
+                                <div class="link-info">
+                                    <div class="link-name">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+                                        </svg>
+                                        ${escapeHtml(extractLinkName(link))}
+                                    </div>
+                                </div>
+                                <div class="link-actions">
+                                    <button class="btn btn-sm copy-btn" data-copy-text="${escapeHtml(link)}" title="${t('copyLink') || 'Copy'}">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                                        </svg>
+                                    </button>
+                                    <button class="btn btn-sm qr-btn" data-qr-text="${escapeHtml(link)}" data-qr-title="${escapeHtml(extractLinkName(link))}" title="${t('scanQrCode') || 'QR Code'}">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;*/
+        }
+
+        function toggleLinksSection() {
+            const section = document.getElementById('linksSection');
+            if (section) section.classList.toggle('open');
+        }
+
+        function attachEventListeners() {
+            // Platform tabs
+            document.querySelectorAll('.platform-tab').forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    const platform = e.currentTarget.dataset.platform;
+                    if (platform) switchPlatform(platform);
+                });
+            });
+
+            // App tabs
+            document.querySelectorAll('.app-tab').forEach(tab => {
+                tab.addEventListener('click', (e) => {
+                    const appIndex = parseInt(e.currentTarget.dataset.appIndex);
+                    switchApp(appIndex);
+                });
+            });
+
+            // App cards (for minimal mode)
+            document.querySelectorAll('.app-card').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    const appName = e.currentTarget.dataset.appName;
+                    const platformData = appConfig.platforms[currentPlatform];
+                    const app = platformData?.apps?.find(a => a.name === appName);
+                    if (app) showAppSetupModal(app);
+                });
+            });
+
+            // Copy buttons
+            document.querySelectorAll('.copy-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    copyToClipboard(e.currentTarget.dataset.copyText);
+                });
+            });
+
+            // QR buttons
+            document.querySelectorAll('.qr-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const { qrText, qrTitle } = e.currentTarget.dataset;
+                    showQrModal(qrText, qrTitle);
+                });
+            });
+
+            checkTabsOverflow();
+            window.addEventListener('resize', checkTabsOverflow);
+        }
+
+        function switchPlatform(platform) {
+            if (!platform || platform === currentPlatform) return;
+            currentPlatform = platform;
+            localStorage.setItem('platform', platform);
+
+            document.querySelectorAll('.platform-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.platform === platform);
+            });
+
+            const platformData = appConfig.platforms[platform];
+            const platformDisplayName = getLocalizedText(platformData?.displayName) || platform;
+            const platformIcon = getSvgIcon(platformData?.svgIconKey) || '';
+
+            const button = document.getElementById('platform-selector-btn');
+            if (button) button.innerHTML = `${platformIcon} <span>${platformDisplayName}</span>`;
+
+            const appsContainer = document.getElementById('appsContainer');
+            if (appsContainer) {
+                appsContainer.innerHTML = renderAppsForPlatform();
+                attachEventListeners();
+            }
+        }
+
+        function switchApp(appIndex) {
+            const platformData = appConfig.platforms[currentPlatform];
+            if (!platformData?.apps?.[appIndex]) return;
+
+            currentApp = platformData.apps[appIndex];
+
+            document.querySelectorAll('.app-tab').forEach((tab, i) => {
+                tab.classList.toggle('active', i === appIndex);
+            });
+
+            const guidesType = appConfig?.uiConfig?.installationGuidesBlockType || 'minimal';
+            const guidesContainer = document.getElementById('guidesContainer');
+            if (guidesContainer) guidesContainer.innerHTML = renderGuides(currentApp, guidesType);
+        }
+
+        function showAppSetupModal(app) {
+            if (!app) return;
+            const titleEl = document.getElementById('appModalTitle');
+            const appIcon = getSvgIcon(app.svgIconKey);
+            titleEl.innerHTML = `<div class="app-icon" style="width: 32px; height: 32px;">${appIcon}</div><span>${escapeHtml(app.name)}</span>`;
+
+            const modalBody = document.getElementById('appModalBody');
+            modalBody.innerHTML = renderGuidesMinimal(app);
+            openModal('appModal');
+        }
+
+        function openPlatformModal() {
+            const modalBody = document.getElementById('platformModalBody');
+            modalBody.innerHTML = `
+                <div class="platform-modal-list">
+                    ${validPlatforms.map(p => {
+                        const pData = appConfig.platforms[p];
+                        const pName = getLocalizedText(pData?.displayName) || p;
+                        const pIcon = getSvgIcon(pData?.svgIconKey) || '';
+                        return `<div class="platform-modal-item" data-platform="${p}">${pIcon} <span>${pName}</span></div>`;
+                    }).join('')}
+                </div>
+            `;
+
+            modalBody.querySelectorAll('.platform-modal-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    const platform = e.currentTarget.dataset.platform;
+                    switchPlatform(platform);
+                    closeModal('platformModal');
+                });
+            });
+
+            openModal('platformModal');
+        }
+
+        function checkTabsOverflow() {
+            // CSS media query at 1024px handles visibility
+            // On resize, clear any inline styles to let CSS take control
+            const tabs = document.querySelector('.platform-tabs');
+            const button = document.getElementById('platform-selector-btn');
+            if (tabs) tabs.style.display = '';
+            if (button) button.style.display = '';
+        }
+
+        function showQrModal(data, title) {
+            if (!data) return;
+            document.getElementById('qrModalTitle').textContent = title || t('scanQrCode') || 'QR Code';
+            const qrContainer = document.getElementById('qrCode');
+            qrContainer.innerHTML = '';
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(data);
+                qr.make();
+                qrContainer.innerHTML = qr.createImgTag(5, 10);
+            } catch (e) {
+                console.error('QR generation failed:', e);
+                qrContainer.textContent = 'Error generating QR code.';
+            }
+            openModal('qrModal');
+        }
+
+        function showSubscriptionModal() {
+            const url = panelData?.response?.subscriptionUrl;
+            if (!url) return;
+
+            document.getElementById('subscriptionModalTitle').textContent = t('scanToImport') || 'Subscription Link';
+
+            const qrContainer = document.getElementById('subscriptionQrCode');
+            qrContainer.innerHTML = '';
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(url);
+                qr.make();
+                qrContainer.innerHTML = qr.createImgTag(5, 10);
+            } catch (e) {
+                console.error('QR generation failed:', e);
+                qrContainer.textContent = 'Error generating QR code.';
+            }
+
+            openModal('subscriptionModal');
+        }
+
+        function copySubscriptionUrl() { copyToClipboard(panelData?.response?.subscriptionUrl); }
+
+        function copyToClipboard(text) {
+            if (!text) return;
+            navigator.clipboard.writeText(text)
+                .then(() => showToast(t('linkCopied') || 'Copied!'))
+                .catch(err => console.error('Could not copy text: ', err));
+        }
+
+        function showToast(message) {
+            if (toastTimeout) clearTimeout(toastTimeout);
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            toastTimeout = setTimeout(() => { toast.classList.remove('show'); }, 3000);
+        }
+
+        function openLink(url) {
+            try {
+                if (window.Telegram?.WebApp) {
+                    window.Telegram.WebApp.openLink(url);
+                } else {
+                    window.open(url, '_blank');
+                }
+            } catch (error) {
+                console.error('Failed to open URL:', error);
+                window.open(url, '_blank');
+            }
+        }
+
+        function openSubscriptionUrl(url) {
+            if (!url || url === '#') return;
+
+            const REDIRECT_BASE = 'https://legiz-ru.github.io/Orion/redirect-page/?redirect_to=';
+            const isInTelegram = window.Telegram?.WebApp?.initData;
+
+            let finalUrl = url;
+            if (isInTelegram) finalUrl = REDIRECT_BASE + encodeURIComponent(url);
+
+            try {
+                if (isInTelegram) {
+                    window.Telegram.WebApp.openLink(finalUrl);
+                } else {
+                    window.open(finalUrl, '_blank');
+                }
+            } catch (error) {
+                console.error('Failed to open subscription URL:', error);
+                window.open(finalUrl, '_blank');
+            }
+        }
+
+        function openModal(id) { document.getElementById(id)?.classList.add('active'); }
+        function closeModal(id) { document.getElementById(id)?.classList.remove('active'); }
+
+        function extractLinkName(link) {
+            try { return decodeURIComponent(new URL(link).hash.substring(1)); }
+            catch {
+                const i = link.indexOf('#');
+                if (i !== -1) try { return decodeURIComponent(link.substring(i + 1)); } catch {}
+            }
+            return 'Server Link';
+        }
+
+        function formatDate(d) {
+            return new Date(d).toLocaleDateString(currentLanguage === 'ru' ? 'ru-RU' : currentLanguage === 'fa' ? 'fa-IR' : 'en-GB');
+        }
+
+        function formatBytes(bytes) {
+            const value = Number(bytes || 0);
+            if (!Number.isFinite(value) || value <= 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let size = value;
+            let unitIndex = 0;
+            while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex++;
+            }
+            const digits = size >= 10 || unitIndex === 0 ? 0 : 2;
+            return `${size.toFixed(digits)} ${units[unitIndex]}`;
+        }
+
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function escapeForAttribute(text) {
+            if (typeof text !== 'string') return '';
+            return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // Event listeners
+        document.addEventListener('click', e => { if (e.target.classList.contains('modal')) e.target.classList.remove('active'); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.modal.active').forEach(m => m.classList.remove('active')); });
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (localStorage.getItem('theme') === 'auto') applyTheme('auto'); });
+    </script>
+</body>
+</html>
+<?php
+        break;
+
+    default:
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        header('Content-type: text/plain');
+        echo base64_encode($vless);
+        break;
+}

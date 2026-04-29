@@ -43,7 +43,7 @@ app/webapp/override/
 .rest
 .env
 
-subscription.php
+/subscription.php
 location.conf
 override.conf
 i18n.override.php
