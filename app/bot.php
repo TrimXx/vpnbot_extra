@@ -5585,6 +5585,48 @@ DNS-over-HTTPS with IP:
             $devices = [];
         }
 
+        // Build an index of existing runtime device clients for this subscription.
+        // One (parent_id, hwid) must map to exactly one device UUID.
+        $existingByHwid = [];
+        foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $idx => $client) {
+            if (($client['device_parent_id'] ?? '') !== $ownerSubId) {
+                continue;
+            }
+            $childHwid = (string) ($client['device_hwid'] ?? '');
+            $childId = (string) ($client['id'] ?? '');
+            if ($childHwid === '' || $childId === '') {
+                continue;
+            }
+            if (!isset($existingByHwid[$childHwid])) {
+                $existingByHwid[$childHwid] = [
+                    'id' => $childId,
+                    'idx' => $idx,
+                ];
+                continue;
+            }
+            // Duplicate child for same parent+hwid: keep first, remove the rest.
+            unset($xray['inbounds'][0]['settings']['clients'][$idx]);
+            $changed = true;
+        }
+
+        // Sync storage with already existing runtime children.
+        foreach ($existingByHwid as $existingHwid => $meta) {
+            if (!isset($devices[$existingHwid]) || !is_array($devices[$existingHwid])) {
+                $devices[$existingHwid] = [
+                    'time' => time(),
+                    'user_agent' => '',
+                    'device_os' => '',
+                    'os_version' => '',
+                    'device_model' => '',
+                    'device_uuid' => (string) $meta['id'],
+                ];
+                continue;
+            }
+            if (($devices[$existingHwid]['device_uuid'] ?? '') !== (string) $meta['id']) {
+                $devices[$existingHwid]['device_uuid'] = (string) $meta['id'];
+            }
+        }
+
         foreach ($devices as $storedHwid => $info) {
             if (!is_array($info)) {
                 continue;
@@ -5594,6 +5636,12 @@ DNS-over-HTTPS with IP:
                     $xray['inbounds'][0]['settings']['clients'][] = $this->createRuntimeDeviceClient($owner, $ownerSubId, (string) $info['device_uuid'], (string) $storedHwid);
                     $changed = true;
                 }
+                continue;
+            }
+
+            // If runtime client already exists for this HWID, reuse it.
+            if (!empty($existingByHwid[$storedHwid]['id'])) {
+                $devices[$storedHwid]['device_uuid'] = (string) $existingByHwid[$storedHwid]['id'];
                 continue;
             }
 
@@ -5610,9 +5658,14 @@ DNS-over-HTTPS with IP:
             if ($limit > 0 && count($devices) >= $limit) {
                 return null;
             }
-            $deviceUuid = $this->createXrayUuid();
-            while ($this->findXrayClientIndexById($xray, $deviceUuid) !== null) {
+            $deviceUuid = '';
+            if (!empty($existingByHwid[$hwid]['id'])) {
+                $deviceUuid = (string) $existingByHwid[$hwid]['id'];
+            } else {
                 $deviceUuid = $this->createXrayUuid();
+                while ($this->findXrayClientIndexById($xray, $deviceUuid) !== null) {
+                    $deviceUuid = $this->createXrayUuid();
+                }
             }
             $devices[$hwid] = [
                 'time' => time(),
@@ -5622,17 +5675,23 @@ DNS-over-HTTPS with IP:
                 'device_model' => $_SERVER['HTTP_X_DEVICE_MODEL'] ?? '',
                 'device_uuid' => $deviceUuid,
             ];
-            $xray['inbounds'][0]['settings']['clients'][] = $this->createRuntimeDeviceClient($owner, $ownerSubId, $deviceUuid, $hwid);
-            $changed = true;
-        } else {
-            if (empty($devices[$hwid]['device_uuid'])) {
-                $deviceUuid = $this->createXrayUuid();
-                while ($this->findXrayClientIndexById($xray, $deviceUuid) !== null) {
-                    $deviceUuid = $this->createXrayUuid();
-                }
-                $devices[$hwid]['device_uuid'] = $deviceUuid;
+            if (empty($existingByHwid[$hwid]['id'])) {
                 $xray['inbounds'][0]['settings']['clients'][] = $this->createRuntimeDeviceClient($owner, $ownerSubId, $deviceUuid, $hwid);
                 $changed = true;
+            }
+        } else {
+            if (empty($devices[$hwid]['device_uuid'])) {
+                if (!empty($existingByHwid[$hwid]['id'])) {
+                    $deviceUuid = (string) $existingByHwid[$hwid]['id'];
+                } else {
+                    $deviceUuid = $this->createXrayUuid();
+                    while ($this->findXrayClientIndexById($xray, $deviceUuid) !== null) {
+                        $deviceUuid = $this->createXrayUuid();
+                    }
+                    $xray['inbounds'][0]['settings']['clients'][] = $this->createRuntimeDeviceClient($owner, $ownerSubId, $deviceUuid, $hwid);
+                    $changed = true;
+                }
+                $devices[$hwid]['device_uuid'] = $deviceUuid;
             }
             $devices[$hwid]['time'] = time();
             $devices[$hwid]['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
@@ -8151,7 +8210,7 @@ DNS-over-HTTPS with IP:
         if (!$return && !$this->processHwidRequest($client, $clientIndex)) {
             exit;
         }
-        if (!$return && !empty($_SERVER['VPNBOT_DEVICE_UUID']) && $this->isHwidRuntimeModeEnabled($client)) {
+        if (!empty($_SERVER['VPNBOT_DEVICE_UUID']) && $this->isHwidRuntimeModeEnabled($client)) {
             $uid = (string) $_SERVER['VPNBOT_DEVICE_UUID'];
         }
         $subscriptionId = $subscriptionId ?? $this->getClientSubscriptionId($client);
