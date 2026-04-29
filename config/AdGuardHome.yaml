@@ -1,0 +1,23 @@
+http:
+  address: 0.0.0.0:80
+users:
+  - name: admin
+    password:
+dns:
+  bind_hosts:
+    - 0.0.0.0
+  upstream_dns:
+    - 1.1.1.1
+    - 8.8.8.8
+  trusted_proxies:
+    - 10.10.0.0/24
+    - 127.0.0.0/8
+    - ::1/128
+tls:
+  certificate_path: /certs/cert_public
+  private_key_path: /certs/cert_private
+filtering:
+  safe_search:
+    enabled: false
+log:
+  file: /logs/adguard
