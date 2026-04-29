@@ -146,5 +146,7 @@ switch (true) {
         break;
 
     default:
-        header('500', true, 500);
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Not found.";
 }

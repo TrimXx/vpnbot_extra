@@ -8220,7 +8220,9 @@ DNS-over-HTTPS with IP:
             if (!empty($outbounds)) {
                 $index = 0;
             } else {
-                header('500', true, 500);
+                http_response_code(500);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo "Configuration template is invalid: no outbounds or proxies defined.";
                 exit;
             }
         }
@@ -8228,7 +8230,9 @@ DNS-over-HTTPS with IP:
             if (!empty($outbounds)) {
                 $index = 0;
             } else {
-                header('500', true, 500);
+                http_response_code(500);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo "Configuration template is invalid: outbound index missing.";
                 exit;
             }
         }
