@@ -8021,7 +8021,9 @@ DNS-over-HTTPS with IP:
             }
         }
         if ($flag) {
-            header('500', true, 500);
+            http_response_code(404);
+            header('Content-Type: text/html; charset=utf-8');
+            echo "<html><body><h2>Subscription not found or disabled</h2><p>Please open the bot and request a new subscription link.</p></body></html>";
             exit;
         }
         if (!$flag && !$this->processHwidRequest($client, $clientIndex)) {
@@ -8104,7 +8106,9 @@ DNS-over-HTTPS with IP:
             }
         }
         if ($flag) {
-            header('500', true, 500);
+            http_response_code(404);
+            header('Content-Type: text/html; charset=utf-8');
+            echo "<html><body><h2>Subscription not found or disabled</h2><p>Please open the bot and request a new subscription link.</p></body></html>";
             exit;
         }
 
