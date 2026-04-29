@@ -50,7 +50,8 @@ class Bot
 
     public function input()
     {
-        $this->input_raw = $input = json_decode(file_get_contents('php://input'), true);
+        $raw = file_get_contents('php://input');
+        $this->input_raw = $input = json_decode($raw ?: '[]', true) ?: [];
         $this->input     = [
             'message'           => $input['callback_query']['message']['text'] ?? $input['message']['text'] ?? $input['channel_post']['text'] ?? '',
             'message_id'        => $input['callback_query']['message']['message_id'] ?? $input['message']['message_id'] ?? $input['channel_post']['message_id'],
@@ -59,7 +60,7 @@ class Bot
             'username'          => $input['message']['from']['username'] ?? $input['inline_query']['from']['username'] ?? $input['callback_query']['from']['username'],
             'query'             => $input['inline_query']['query'] ?? '',
             'inlid'             => $input['inline_query']['id'] ?? '',
-            'group'             => 'group' == $input['message']['chat']['type'],
+            'group'             => (isset($input['message']['chat']['type']) && $input['message']['chat']['type'] === 'group'),
             'sticker_id'        => $input['message']['sticker']['file_id'] ?? false,
             'channel'           => !empty($input['channel_post']['message_id']),
             'callback'          => $input['callback_query']['data'] ?? false,
@@ -102,7 +103,8 @@ class Bot
     public function callbackCheck()
     {
         if (empty($this->callback) && !empty($this->input['callback_id'])) {
-            $this->answer($this->input['callback_id'], $GLOBALS['debug'] ? $this->input['callback'] : false);
+            $debug = $GLOBALS['debug'] ?? false;
+            $this->answer($this->input['callback_id'], $debug ? $this->input['callback'] : false);
         }
     }
 
@@ -4894,6 +4896,7 @@ DNS-over-HTTPS with IP:
     public function menu($type = false, $arg = false, $return = false)
     {
         $conf   = $this->getPacConf();
+        $main   = [];
         $domain = $conf['domain'] ?: $this->ip;
         $hash   = $this->getHashBot();
         if ($type == false) {
@@ -4907,7 +4910,7 @@ DNS-over-HTTPS with IP:
                     $backup = "{$conf['backup']} - wrong format";
                 }
             }
-            $cron   = $this->dontshowcron ? '' : $this->i18n($this->ssh('pgrep -f cron.php', 'service') ? 'on' : 'off') . ' cron';
+            $cron   = !empty($this->dontshowcron) ? '' : $this->i18n($this->ssh('pgrep -f cron.php', 'service') ? 'on' : 'off') . ' cron';
             $f      = '/docker/compose';
             $c      = yaml_parse_file($f)['services'];
             $main[] = 'v' . getenv('VER') . " $branch" . ($update ? ' (have updates)' : '');
@@ -6689,6 +6692,7 @@ DNS-over-HTTPS with IP:
         $p     = $this->getPacConf();
         $users = array_map(fn ($e) => trim($e), explode(',', $users));
         $users = array_map(fn ($e) => explode(':', $e), $users);
+        $on = $off = 0;
         foreach ($c['inbounds'][0]['settings']['clients'] as $k => $v) {
             $uuids[]  = $v['id'];
             $emails[] = $v['email'];
@@ -7124,7 +7128,10 @@ DNS-over-HTTPS with IP:
         $c      = $this->getXray();
         $p      = $this->getPacConf();
         $text[] = "Menu -> " . $this->i18n('xray');
-        if (!empty($fake = $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0])) {
+        $fake = $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
+            ?? $c['inbounds'][1]['streamSettings']['realitySettings']['serverNames'][0]
+            ?? null;
+        if (!empty($fake)) {
             $text[] = "fake domain: <code>$fake</code>";
         }
         $text[] = 'transport: ' . ($p['transport'] ?: 'Websocket');
@@ -7173,13 +7180,13 @@ DNS-over-HTTPS with IP:
             ],
         ];
 
-        $ip_count      = $p['ip_count'] ?: 1;
+        $ip_count      = (int) ($p['ip_count'] ?? 1);
         $hwidEnabled   = !empty($p['hwid_limit_enabled']);
         $runtimeGlobal = !empty($p['hwid_runtime_mode_enabled']);
         $defaultHwids  = max(1, (int) ($p['hwid_device_count'] ?: 1));
         $data[] = [
             [
-                'text'          => $this->i18n('ip limit') . ' ' . ($p['ip_limit'] ? ": {$p['ip_limit']} sec & $ip_count" : $this->i18n('off')),
+                'text'          => $this->i18n('ip limit') . ' ' . (!empty($p['ip_limit']) ? ": {$p['ip_limit']} sec & $ip_count" : $this->i18n('off')),
                 'callback_data' => "/setIpLimit",
             ],
         ];
@@ -7977,10 +7984,10 @@ DNS-over-HTTPS with IP:
     public function getDomain($cdn = false)
     {
         $c = $this->getPacConf();
-        if ($cdn && $c['linkdomain']) {
+        if ($cdn && !empty($c['linkdomain'] ?? '')) {
             return $c['linkdomain'];
         }
-        return $c['domain'] ?: $this->ip;
+        return ($c['domain'] ?? '') ?: $this->ip;
     }
 
     public function sub()
@@ -7989,7 +7996,7 @@ DNS-over-HTTPS with IP:
         $pac    = $this->getPacConf();
         $st     = $this->getXrayStats();
         $useCdnDomain = !in_array(($pac['transport'] ?? ''), ['Reality', 'Both'], true);
-        $domain = $_GET['cdn'] ?: ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
+        $domain = !empty($_GET['cdn'] ?? '') ? $_GET['cdn'] : ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
         $flag   = true;
@@ -8555,7 +8562,7 @@ DNS-over-HTTPS with IP:
                             }
                         }
                         if (array_key_exists('ip', $v) && !empty($v['ip'])) {
-                            foreach ($v['domain'] as $j) {
+                            foreach ($v['ip'] as $j) {
                                 if (!preg_match('~^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/\d{1,2})?$~', $j)) {
                                     $domains[$v['outboundTag']][] = $j;
                                 } else {
@@ -8587,17 +8594,20 @@ DNS-over-HTTPS with IP:
                 }
                 break;
             case 'si':
-                $c['route'] = $this->addRuleSet($c['route']);
-                $c['route'] = $this->createRuleSet($c['route'], $uid, $domain);
-                if (!empty($c['route']['rules'])) {
-                    foreach ($c['route']['rules'] as $k => $v) {
+                $route = $c['route'] ?? [];
+                $route = $this->addRuleSet($route);
+                $route = $this->createRuleSet($route, $uid, $domain);
+                if (!empty($route['rules'])) {
+                    foreach ($route['rules'] as $k => $v) {
                         if (count($v) == 1 && array_key_exists('outbound', $v)) {
-                            unset($c['route']['rules'][$k]);
+                            unset($route['rules'][$k]);
                         }
                     }
-                    $c['route']['rules'] = array_values($c['route']['rules']);
+                    $route['rules'] = array_values($route['rules']);
                 }
-                if (empty($c['route'])) {
+                if (!empty($route)) {
+                    $c['route'] = $route;
+                } else {
                     unset($c['route']);
                 }
                 break;
@@ -8732,10 +8742,15 @@ DNS-over-HTTPS with IP:
 
     public function addRuleSet($route)
     {
-        if (!empty($route['rules'])) {
+        if (empty($route) || !is_array($route)) {
+            $route = [];
+        }
+        if (!empty($route['rules']) && is_array($route['rules'])) {
+            $t = [];
             foreach ($route['rules'] as $k => $v) {
                 if (!empty($v['addruleset'])) {
-                    $t[$v['outbound'] ?: 'block'] = $k;
+                    $out = $v['outbound'] ?? 'block';
+                    $t[$out] = $k;
                 }
             }
             $p = $this->getPacConf();
@@ -8743,7 +8758,7 @@ DNS-over-HTTPS with IP:
                 foreach ($p['rulessetlist'] as $k => $v) {
                     if (!empty($v)) {
                         [$type, $time, $url] = explode(':', $k, 3);
-                        if (preg_match('~\.srs$~', $url) && !empty($route['rules'][$t[$type]])) {
+                        if (preg_match('~\.srs$~', $url) && !empty($t[$type]) && !empty($route['rules'][$t[$type]])) {
                             $route['rule_set'][] = [
                                 "tag"             => $k,
                                 "type"            => "remote",
@@ -8849,7 +8864,7 @@ DNS-over-HTTPS with IP:
         if (!empty($route['rules'])) {
             $route['rules']    = array_values($route['rules']);
         }
-        $route['rule_set'] = array_merge($route['rule_set'] ?: [], $ruleset ?: []);
+        $route['rule_set'] = array_merge($route['rule_set'] ?? [], $ruleset ?? []);
         if (empty($route['rule_set'])) {
             unset($route['rule_set']);
         }
