@@ -11,8 +11,19 @@ if [ -z "${APP_DIR:-}" ]; then
         APP_DIR="$DEFAULT_DIR"
     fi
 fi
-BOT_KEY="${1:-}"
-TAG="${2:-master}"
+
+BOT_KEY=""
+TAG="master"
+ARG1="${1:-}"
+ARG2="${2:-}"
+if [[ -n "$ARG1" ]]; then
+    if [[ "$ARG1" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{20,}$ ]]; then
+        BOT_KEY="$ARG1"
+        TAG="${ARG2:-master}"
+    else
+        TAG="$ARG1"
+    fi
+fi
 
 echo "[vpnbot] Installing dependencies..."
 apt update
@@ -50,7 +61,8 @@ else
     echo "[vpnbot] Fresh install to $APP_DIR"
     if [ -z "$BOT_KEY" ]; then
         echo "[vpnbot] ERROR: BOT_KEY is required for fresh install."
-        echo "Usage: wget -O- <init.sh> | sh -s <YOUR_TELEGRAM_BOT_KEY> [branch]"
+        echo "Fresh install: wget -O- <init.sh> | sh -s <YOUR_TELEGRAM_BOT_KEY> [branch]"
+        echo "Upgrade only: wget -O- <init.sh> | sh -s -- [branch]"
         exit 1
     fi
     git clone "$REPO_URL" "$APP_DIR"

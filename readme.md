@@ -19,6 +19,12 @@ environment: ubuntu 22.04/24.04, debian 11/12
 wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s YOUR_TELEGRAM_BOT_KEY master
 ```
 
+## Upgrade (without bot token)
+
+```shell
+wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
+```
+
 ## One-command install/upgrade
 
 Use the same command for both first install and safe in-place upgrade:
