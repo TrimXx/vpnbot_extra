@@ -1,16 +1,16 @@
 <?php
-$metaTitle = 'TrimX Sub';
-$announce = 'welcome to the club';
-$metaDescription = 'Твой маленький секрет';
-$supportUrl = 'https://t.me/Trim_X';
-$brandingTitle = 'FPN Network';
-$brandingLogoUrl = 'https://cdn.jsdelivr.net/gh/arpicme/Proxy-App-Icon-set@refs/heads/main/white_background/Prizrak-box.svg';
+$pacConfig = method_exists($this, 'getPacConf') ? ($this->getPacConf() ?: []) : [];
+$metaTitle = (string) ($pacConfig['subscription_meta_title'] ?? 'VPN Subscription');
+$announce = (string) ($pacConfig['subscription_announce'] ?? 'Welcome');
+$metaDescription = (string) ($pacConfig['subscription_meta_description'] ?? 'Secure and private connection');
+$supportUrl = (string) ($pacConfig['subscription_support_url'] ?? 'https://t.me/example_support');
+$brandingTitle = (string) ($pacConfig['subscription_branding_title'] ?? 'VPN Service');
+$brandingLogoUrl = (string) ($pacConfig['subscription_branding_logo_url'] ?? 'https://example.com/logo.svg');
 $subscription_url = preg_replace("/<a href='([^']+)'>.*<\/a>/", '$1', $suburl);
 $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 $username = htmlspecialchars($email ?? '', ENT_QUOTES, 'UTF-8');
 $connectedDevices = method_exists($this, 'getHwidDevicesByUser') ? ($this->getHwidDevicesByUser($uid) ?: []) : [];
 $deviceTrafficMap = $deviceTrafficMap ?? [];
-$pacConfig = method_exists($this, 'getPacConf') ? ($this->getPacConf() ?: []) : [];
 $hwidLimitEnabled = !empty($pacConfig['hwid_limit_enabled']);
 $defaultDeviceLimit = (int)($pacConfig['hwid_device_count'] ?? 0);
 $clientDeviceLimit = (int)($client['hwid_limit'] ?? 0);

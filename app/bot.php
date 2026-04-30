@@ -661,6 +661,9 @@ class Bot
             case preg_match('~^/changeTargetDestination$~', $this->input['callback'], $m):
                 $this->changeTargetDestination();
                 break;
+            case preg_match('~^/subscriptionBranding$~', $this->input['callback'], $m):
+                $this->subscriptionBranding();
+                break;
             case preg_match('~^/changeTGDomain$~', $this->input['callback'], $m):
                 $this->changeTGDomain();
                 break;
@@ -2612,6 +2615,12 @@ class Bot
             'v2raytemplates' => [],
             'singtemplates' => [],
             'classtemplates' => [],
+            'subscription_meta_title' => 'VPN Subscription',
+            'subscription_announce' => 'Welcome',
+            'subscription_meta_description' => 'Secure and private connection',
+            'subscription_support_url' => 'https://t.me/example_support',
+            'subscription_branding_title' => 'VPN Service',
+            'subscription_branding_logo_url' => 'https://example.com/logo.svg',
             'white' => [],
             'deny' => [],
         ];
@@ -2808,6 +2817,57 @@ class Bot
             $c['linkdomain'] = trim($text);
         }
         $this->setPacConf($c);
+        $this->xray();
+    }
+
+    public function subscriptionBranding()
+    {
+        $c = $this->getPacConf();
+        $hint = [
+            'metaTitle=' . (string) ($c['subscription_meta_title'] ?? ''),
+            'announce=' . (string) ($c['subscription_announce'] ?? ''),
+            'metaDescription=' . (string) ($c['subscription_meta_description'] ?? ''),
+            'supportUrl=' . (string) ($c['subscription_support_url'] ?? ''),
+            'brandingTitle=' . (string) ($c['subscription_branding_title'] ?? ''),
+            'brandingLogoUrl=' . (string) ($c['subscription_branding_logo_url'] ?? ''),
+        ];
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} edit subscription branding as key=value (one per line)\n\n" . implode("\n", $hint),
+            $this->input['message_id'],
+            reply: 'key=value lines',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setSubscriptionBranding',
+            'args'          => [],
+        ];
+    }
+
+    public function setSubscriptionBranding($text)
+    {
+        $pac = $this->getPacConf();
+        $map = [
+            'metaTitle' => 'subscription_meta_title',
+            'announce' => 'subscription_announce',
+            'metaDescription' => 'subscription_meta_description',
+            'supportUrl' => 'subscription_support_url',
+            'brandingTitle' => 'subscription_branding_title',
+            'brandingLogoUrl' => 'subscription_branding_logo_url',
+        ];
+        $lines = preg_split('~\r?\n~', (string) $text);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || strpos($line, '=') === false) {
+                continue;
+            }
+            [$key, $value] = array_map('trim', explode('=', $line, 2));
+            if (!isset($map[$key])) {
+                continue;
+            }
+            $pac[$map[$key]] = $value;
+        }
+        $this->setPacConf($pac);
         $this->xray();
     }
 
@@ -7377,6 +7437,10 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => $p['linkdomain'] ?: $this->i18n('cdn'),
                 'callback_data' => '/addLinkDomain',
+            ],
+            [
+                'text'          => 'subscription branding',
+                'callback_data' => '/subscriptionBranding',
             ],
         ];
         $data[] = [
