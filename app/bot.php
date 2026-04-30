@@ -5240,6 +5240,23 @@ DNS-over-HTTPS with IP:
         $pac = $this->getPacConf();
         $pac['hwid_runtime_mode_enabled'] = !empty($pac['hwid_runtime_mode_enabled']) ? 0 : 1;
         $this->setPacConf($pac);
+        if (empty($pac['hwid_runtime_mode_enabled'])) {
+            $xray = $this->getXray();
+            $changed = false;
+            foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $idx => $client) {
+                if (!empty($client['device_parent_id'])) {
+                    continue;
+                }
+                if (!array_key_exists('hwid_runtime_mode', $client) || empty($client['hwid_runtime_mode'])) {
+                    if ($this->reactivateParentUuidForClient($xray, $idx)) {
+                        $changed = true;
+                    }
+                }
+            }
+            if ($changed) {
+                $this->restartXray($xray);
+            }
+        }
         $this->answer($this->input['callback_id'], 'HWID runtime mode: ' . (!empty($pac['hwid_runtime_mode_enabled']) ? 'on' : 'off'), true);
         if ($context === 'xray') {
             $this->xray();
@@ -5597,6 +5614,36 @@ DNS-over-HTTPS with IP:
         return true;
     }
 
+    protected function reactivateParentUuidForClient(array &$xray, int $ownerIndex): bool
+    {
+        if (!isset($xray['inbounds'][0]['settings']['clients'][$ownerIndex])) {
+            return false;
+        }
+        $owner = &$xray['inbounds'][0]['settings']['clients'][$ownerIndex];
+        if (!empty($owner['device_parent_id'])) {
+            return false;
+        }
+        $subscriptionId = (string) ($owner['subscription_id'] ?? '');
+        if ($subscriptionId === '') {
+            return false;
+        }
+        $currentId = (string) ($owner['id'] ?? '');
+        if ($currentId === $subscriptionId) {
+            if (!empty($owner['runtime_parent_retired'])) {
+                $owner['runtime_parent_retired'] = 0;
+                return true;
+            }
+            return false;
+        }
+        $existing = $this->findXrayClientIndexById($xray, $subscriptionId);
+        if ($existing !== null && $existing !== $ownerIndex) {
+            return false;
+        }
+        $owner['id'] = $subscriptionId;
+        $owner['runtime_parent_retired'] = 0;
+        return true;
+    }
+
     protected function createRuntimeDeviceClient(array $owner, string $ownerSubId, string $deviceUuid, string $hwid): array
     {
         $pac = $this->getPacConf();
@@ -5786,6 +5833,13 @@ DNS-over-HTTPS with IP:
         $pac = $this->getPacConf();
         $runtimeModeEnabled = $this->isHwidRuntimeModeEnabled($client);
         header('X-HWID-Runtime-Mode: ' . ($runtimeModeEnabled ? 'on' : 'off'));
+
+        if (!$runtimeModeEnabled && $clientIndex !== null) {
+            $xray = $this->getXray();
+            if ($this->reactivateParentUuidForClient($xray, $clientIndex)) {
+                $this->restartXray($xray);
+            }
+        }
 
         if (empty($pac['hwid_limit_enabled']) || !empty($client['hwid_disabled'])) {
             return true;
@@ -8108,6 +8162,10 @@ DNS-over-HTTPS with IP:
             $client['hwid_runtime_mode'] = 0;
         } else {
             unset($client['hwid_runtime_mode']);
+        }
+
+        if (empty($client['hwid_runtime_mode'])) {
+            $this->reactivateParentUuidForClient($xray, $i);
         }
 
         file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));

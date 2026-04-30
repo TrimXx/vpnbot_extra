@@ -18,6 +18,18 @@ environment: ubuntu 22.04/24.04, debian 11/12
 ```shell
 wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s YOUR_TELEGRAM_BOT_KEY master
 ```
+
+## One-command install/upgrade
+
+Use the same command for both first install and safe in-place upgrade:
+
+```shell
+wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s YOUR_TELEGRAM_BOT_KEY master
+```
+
+- Fresh server: clones repo, creates `app/config.php`, starts containers.
+- Existing server (`/root/vpnbot_extra` or legacy `/root/vpnbot`): pulls latest code and runs `make u` without wiping runtime data (`config/`, `certs/`, `.env`, stats, HWID storage).
+- If local git changes exist, script auto-saves them to `git stash` before update.
 #### Restart:
 ```shell
 make r
