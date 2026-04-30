@@ -2955,8 +2955,15 @@ class Bot
     public function setSubscriptionAppsConfigCustom($url)
     {
         $url = trim((string) $url);
+        if ($url === '') {
+            $this->send($this->input['chat'], 'empty url', $this->input['message_id']);
+            return;
+        }
         if (!preg_match('~^https?://~i', $url)) {
-            $this->answer($this->input['callback_id'], 'invalid url', true);
+            $url = 'https://' . $url;
+        }
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            $this->send($this->input['chat'], 'invalid url', $this->input['message_id']);
             return;
         }
         $pac = $this->getPacConf();
@@ -9423,6 +9430,18 @@ DNS-over-HTTPS with IP:
         $this->ssh("nginx -s reload 2>&1", 'up');
     }
 
+    public function setUpstreamRealityPort($port)
+    {
+        $port = (int) $port;
+        if ($port <= 0) {
+            $port = 443;
+        }
+        $nginx = file_get_contents('/config/upstream.conf');
+        $t = preg_replace('~(upstream\s+reality\s*\{\s*server\s+xr:)\d+(\s*;)~s', '$1' . $port . '$2', $nginx);
+        file_put_contents('/config/upstream.conf', $t);
+        $this->ssh("nginx -s reload 2>&1", 'up');
+    }
+
     public function setUpstreamDomainOcserv($domain)
     {
         $sub   = $this->getHashSubdomain('oc');
@@ -10413,7 +10432,22 @@ DNS-over-HTTPS with IP:
         $p['reality']['destination'] = $p['reality']['destination'] ?: $p['reality']['domain'] . ':443';
         $p['transport']              = $transport;
 
-        $realityInbound = $x['inbounds'][1] ?? $x['inbounds'][0];
+        $apiInboundIndex = null;
+        $realityInboundIndex = null;
+        foreach (($x['inbounds'] ?? []) as $idx => $inbound) {
+            $tag = (string) ($inbound['tag'] ?? '');
+            $protocol = (string) ($inbound['protocol'] ?? '');
+            if ($tag === 'api' || $protocol === 'dokodemo-door') {
+                $apiInboundIndex = $idx;
+                continue;
+            }
+            if (!empty($inbound['streamSettings']['security']) && $inbound['streamSettings']['security'] === 'reality') {
+                $realityInboundIndex = $idx;
+            }
+        }
+        $realityInbound = ($realityInboundIndex !== null && isset($x['inbounds'][$realityInboundIndex]))
+            ? $x['inbounds'][$realityInboundIndex]
+            : $x['inbounds'][0];
         $p['reality']['domain']      = $realityInbound['streamSettings']['realitySettings']['serverNames'][0] ?: $p['reality']['domain'];
         $p['reality']['destination'] = $realityInbound['streamSettings']['realitySettings']['dest'] ?: $p['reality']['destination'];
         $p['reality']['shortId']     = $realityInbound['streamSettings']['realitySettings']['shortIds'][0] ?: $p['reality']['shortId'];
@@ -10433,6 +10467,10 @@ DNS-over-HTTPS with IP:
 
         switch ($transport) {
             case 'xhttp':
+                if ($realityInboundIndex !== null && $realityInboundIndex !== 0) {
+                    unset($x['inbounds'][$realityInboundIndex]);
+                    $x['inbounds'] = array_values($x['inbounds']);
+                }
                 foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
                     unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
                 }
@@ -10461,8 +10499,18 @@ DNS-over-HTTPS with IP:
                         "path" => "/ws$h"
                     ]
                 ];
-                if (isset($x['inbounds'][1])) {
-                    $x['inbounds'][1]['streamSettings'] = [
+                $realityInbound = [
+                    "port"     => 33443,
+                    "protocol" => "vless",
+                    "settings" => [
+                        "clients"    => $x['inbounds'][0]['settings']['clients'] ?? [],
+                        "decryption" => "none",
+                    ],
+                    "sniffing" => [
+                        "destOverride" => ["http", "tls", "quic"],
+                        "enabled"      => true,
+                    ],
+                    "streamSettings" => [
                         "network"         => "tcp",
                         "realitySettings" => [
                             "dest"         => $p['reality']['destination'],
@@ -10482,7 +10530,13 @@ DNS-over-HTTPS with IP:
                             "acceptProxyProtocol" => true
                         ],
                         "security" => "reality"
-                    ];
+                    ],
+                    "tag" => "vless_reality",
+                ];
+                if ($realityInboundIndex !== null && isset($x['inbounds'][$realityInboundIndex])) {
+                    $x['inbounds'][$realityInboundIndex] = $realityInbound;
+                } else {
+                    $x['inbounds'][] = $realityInbound;
                 }
                 break;
 
@@ -10513,9 +10567,17 @@ DNS-over-HTTPS with IP:
                     ],
                     "security" => "reality"
                 ];
+                if ($realityInboundIndex !== null && $realityInboundIndex !== 0) {
+                    unset($x['inbounds'][$realityInboundIndex]);
+                    $x['inbounds'] = array_values($x['inbounds']);
+                }
                 break;
 
             default:
+                if ($realityInboundIndex !== null && $realityInboundIndex !== 0) {
+                    unset($x['inbounds'][$realityInboundIndex]);
+                    $x['inbounds'] = array_values($x['inbounds']);
+                }
                 $x['inbounds'][0]['streamSettings'] = [
                     "network"    => "ws",
                     "wsSettings" => [
@@ -10528,10 +10590,8 @@ DNS-over-HTTPS with IP:
                 break;
         }
 
-        $this->setUpstreamDomain(in_array($transport, ['Reality', 'Both'], true)
-            ? ($p['reality']['domain'] ?: ($x['inbounds'][1]['streamSettings']['realitySettings']['serverNames'][0] ?? $x['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]))
-            : 't'
-        );
+        $this->setUpstreamDomain(in_array($transport, ['Reality', 'Both'], true) ? ($p['reality']['domain'] ?: 't') : 't');
+        $this->setUpstreamRealityPort($transport === 'Both' ? 33443 : 443);
         $this->setPacConf($p);
         $this->restartXray($x);
         $this->xray();
