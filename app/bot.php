@@ -7554,9 +7554,14 @@ DNS-over-HTTPS with IP:
         $c      = $this->getXray();
         $p      = $this->getPacConf();
         $text[] = "Menu -> " . $this->i18n('xray');
-        $fake = $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
-            ?? $c['inbounds'][1]['streamSettings']['realitySettings']['serverNames'][0]
-            ?? null;
+        $fake = null;
+        foreach (($c['inbounds'] ?? []) as $inbound) {
+            $candidate = $inbound['streamSettings']['realitySettings']['serverNames'][0] ?? '';
+            if ($candidate !== '') {
+                $fake = $candidate;
+                break;
+            }
+        }
         if (!empty($fake) && in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
             $text[] = "fake domain: <code>$fake</code>";
         }
@@ -10450,13 +10455,11 @@ DNS-over-HTTPS with IP:
         $p['reality']['destination'] = $p['reality']['destination'] ?: $p['reality']['domain'] . ':443';
         $p['transport']              = $transport;
 
-        $apiInboundIndex = null;
         $realityInboundIndex = null;
         foreach (($x['inbounds'] ?? []) as $idx => $inbound) {
             $tag = (string) ($inbound['tag'] ?? '');
             $protocol = (string) ($inbound['protocol'] ?? '');
             if ($tag === 'api' || $protocol === 'dokodemo-door') {
-                $apiInboundIndex = $idx;
                 continue;
             }
             if (!empty($inbound['streamSettings']['security']) && $inbound['streamSettings']['security'] === 'reality') {
@@ -10466,9 +10469,9 @@ DNS-over-HTTPS with IP:
         $realityInbound = ($realityInboundIndex !== null && isset($x['inbounds'][$realityInboundIndex]))
             ? $x['inbounds'][$realityInboundIndex]
             : $x['inbounds'][0];
-        $p['reality']['domain']      = $realityInbound['streamSettings']['realitySettings']['serverNames'][0] ?: $p['reality']['domain'];
-        $p['reality']['destination'] = $realityInbound['streamSettings']['realitySettings']['dest'] ?: $p['reality']['destination'];
-        $p['reality']['shortId']     = $realityInbound['streamSettings']['realitySettings']['shortIds'][0] ?: $p['reality']['shortId'];
+        $p['reality']['domain']      = $realityInbound['streamSettings']['realitySettings']['serverNames'][0] ?? $p['reality']['domain'];
+        $p['reality']['destination'] = $realityInbound['streamSettings']['realitySettings']['dest'] ?? $p['reality']['destination'];
+        $p['reality']['shortId']     = $realityInbound['streamSettings']['realitySettings']['shortIds'][0] ?? ($p['reality']['shortId'] ?? '');
 
         if (empty($p['xray'])) {
             $shortId = trim($this->ssh('openssl rand -hex 8', 'xr'));
@@ -10552,7 +10555,7 @@ DNS-over-HTTPS with IP:
                     ],
                     "tag" => "vless_reality",
                 ];
-                if ($realityInboundIndex !== null && isset($x['inbounds'][$realityInboundIndex])) {
+                if ($realityInboundIndex !== null && $realityInboundIndex !== 0 && isset($x['inbounds'][$realityInboundIndex])) {
                     $x['inbounds'][$realityInboundIndex] = $realityInbound;
                 } else {
                     $x['inbounds'][] = $realityInbound;
