@@ -10455,23 +10455,18 @@ DNS-over-HTTPS with IP:
         $p['reality']['destination'] = $p['reality']['destination'] ?: $p['reality']['domain'] . ':443';
         $p['transport']              = $transport;
 
-        $realityInboundIndex = null;
-        foreach (($x['inbounds'] ?? []) as $idx => $inbound) {
-            $tag = (string) ($inbound['tag'] ?? '');
-            $protocol = (string) ($inbound['protocol'] ?? '');
-            if ($tag === 'api' || $protocol === 'dokodemo-door') {
-                continue;
-            }
-            if (!empty($inbound['streamSettings']['security']) && $inbound['streamSettings']['security'] === 'reality') {
-                $realityInboundIndex = $idx;
+        $realityInbound = null;
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (($inbound['streamSettings']['security'] ?? '') === 'reality') {
+                $realityInbound = $inbound;
+                break;
             }
         }
-        $realityInbound = ($realityInboundIndex !== null && isset($x['inbounds'][$realityInboundIndex]))
-            ? $x['inbounds'][$realityInboundIndex]
-            : $x['inbounds'][0];
-        $p['reality']['domain']      = $realityInbound['streamSettings']['realitySettings']['serverNames'][0] ?? $p['reality']['domain'];
-        $p['reality']['destination'] = $realityInbound['streamSettings']['realitySettings']['dest'] ?? $p['reality']['destination'];
-        $p['reality']['shortId']     = $realityInbound['streamSettings']['realitySettings']['shortIds'][0] ?? ($p['reality']['shortId'] ?? '');
+        if (is_array($realityInbound)) {
+            $p['reality']['domain']      = $realityInbound['streamSettings']['realitySettings']['serverNames'][0] ?? $p['reality']['domain'];
+            $p['reality']['destination'] = $realityInbound['streamSettings']['realitySettings']['dest'] ?? $p['reality']['destination'];
+            $p['reality']['shortId']     = $realityInbound['streamSettings']['realitySettings']['shortIds'][0] ?? ($p['reality']['shortId'] ?? '');
+        }
 
         if (empty($p['xray'])) {
             $shortId = trim($this->ssh('openssl rand -hex 8', 'xr'));
@@ -10486,16 +10481,65 @@ DNS-over-HTTPS with IP:
         }
 
 
+        $clients = [];
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (!empty($inbound['settings']['clients']) && is_array($inbound['settings']['clients'])) {
+                $clients = $inbound['settings']['clients'];
+                break;
+            }
+        }
+        $sniffing = [
+            "destOverride" => ["http", "tls", "quic"],
+            "enabled"      => true,
+        ];
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (!empty($inbound['sniffing']) && is_array($inbound['sniffing'])) {
+                $sniffing = $inbound['sniffing'];
+                break;
+            }
+        }
+        $apiInbound = [
+            "listen"   => "127.0.0.1",
+            "port"     => 8080,
+            "protocol" => "dokodemo-door",
+            "settings" => ["address" => "127.0.0.1"],
+            "tag"      => "api",
+        ];
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (($inbound['tag'] ?? '') === 'api' || ($inbound['protocol'] ?? '') === 'dokodemo-door') {
+                $apiInbound = $inbound;
+                break;
+            }
+        }
+        $apiInbound['listen'] = '127.0.0.1';
+        $apiInbound['port'] = 8080;
+        $apiInbound['protocol'] = 'dokodemo-door';
+        $apiInbound['settings'] = ['address' => '127.0.0.1'];
+        $apiInbound['tag'] = 'api';
+
+        $clientsWs = $clients;
+        foreach ($clientsWs as $k => $v) {
+            unset($clientsWs[$k]['flow']);
+        }
+        $clientsReality = $clients;
+        foreach ($clientsReality as $k => $v) {
+            $clientsReality[$k]['flow'] = 'xtls-rprx-vision';
+        }
+
+        $baseInbound = [
+            "port"     => 443,
+            "protocol" => "vless",
+            "settings" => [
+                "clients"    => $clientsWs,
+                "decryption" => "none",
+            ],
+            "sniffing" => $sniffing,
+            "tag"      => "vless_tls",
+        ];
+
         switch ($transport) {
             case 'xhttp':
-                if ($realityInboundIndex !== null && $realityInboundIndex !== 0) {
-                    unset($x['inbounds'][$realityInboundIndex]);
-                    $x['inbounds'] = array_values($x['inbounds']);
-                }
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
-                }
-                $x['inbounds'][0]['streamSettings'] = [
+                $baseInbound['streamSettings'] = [
                     "network"       => "xhttp",
                     "xhttpSettings" => [
                         "mode"  => "auto",
@@ -10509,29 +10553,23 @@ DNS-over-HTTPS with IP:
                         ]
                     ]
                 ];
+                $x['inbounds'] = [$baseInbound, $apiInbound];
                 break;
+
             case 'Both':
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
-                }
                 $p['reality']['destination'] = ($p['reality']['domain'] ?: 'yandex.ru') . ':443';
-                $x['inbounds'][0]['streamSettings'] = [
+                $baseInbound['streamSettings'] = [
                     "network"    => "ws",
-                    "wsSettings" => [
-                        "path" => "/ws$h"
-                    ]
+                    "wsSettings" => ["path" => "/ws$h"]
                 ];
                 $realityInbound = [
                     "port"     => 33443,
                     "protocol" => "vless",
                     "settings" => [
-                        "clients"    => $x['inbounds'][0]['settings']['clients'] ?? [],
+                        "clients"    => $clientsWs,
                         "decryption" => "none",
                     ],
-                    "sniffing" => [
-                        "destOverride" => ["http", "tls", "quic"],
-                        "enabled"      => true,
-                    ],
+                    "sniffing" => $sniffing,
                     "streamSettings" => [
                         "network"         => "tcp",
                         "realitySettings" => [
@@ -10545,70 +10583,43 @@ DNS-over-HTTPS with IP:
                             "show"         => false,
                             "xver"         => 0
                         ],
-                        "tcpSettings" => [
-                            "acceptProxyProtocol" => true
-                        ],
-                        "sockopt" => [
-                            "acceptProxyProtocol" => true
-                        ],
+                        "tcpSettings" => ["acceptProxyProtocol" => true],
+                        "sockopt" => ["acceptProxyProtocol" => true],
                         "security" => "reality"
                     ],
                     "tag" => "vless_reality",
                 ];
-                if ($realityInboundIndex !== null && $realityInboundIndex !== 0 && isset($x['inbounds'][$realityInboundIndex])) {
-                    $x['inbounds'][$realityInboundIndex] = $realityInbound;
-                } else {
-                    $x['inbounds'][] = $realityInbound;
-                }
+                $x['inbounds'] = [$baseInbound, $apiInbound, $realityInbound];
                 break;
 
             case 'Reality':
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    $x['inbounds'][0]['settings']['clients'][$k]['flow'] = 'xtls-rprx-vision';
-                }
-                $x['inbounds'][0]['streamSettings'] = [
+                $baseInbound['settings']['clients'] = $clientsReality;
+                $baseInbound['streamSettings'] = [
                     "network"         => "tcp",
                     "realitySettings" => [
-                        "dest"         => $p['reality']['destination'] ?: $x['inbounds'][0]['streamSettings']['realitySettings']['dest'],
+                        "dest"         => $p['reality']['destination'],
                         "maxClientVer" => "",
                         "maxTimeDiff"  => 0,
                         "minClientVer" => "",
                         "privateKey"   => $p['reality']['privateKey'],
-                        "serverNames"  => [
-                            $p['reality']['domain'] ?: $x['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
-                        ],
-                        "shortIds" => [$p['reality']['shortId']] ?: $x['inbounds'][0]['streamSettings']['realitySettings']['shortIds'][0],
-                        "show"     => false,
-                        "xver"     => 0
+                        "serverNames"  => [$p['reality']['domain']],
+                        "shortIds"     => [$p['reality']['shortId']],
+                        "show"         => false,
+                        "xver"         => 0
                     ],
-                    "tcpSettings" => [
-                        "acceptProxyProtocol" => true
-                    ],
-                    "sockopt" => [
-                        "acceptProxyProtocol" => true
-                    ],
+                    "tcpSettings" => ["acceptProxyProtocol" => true],
+                    "sockopt" => ["acceptProxyProtocol" => true],
                     "security" => "reality"
                 ];
-                if ($realityInboundIndex !== null && $realityInboundIndex !== 0) {
-                    unset($x['inbounds'][$realityInboundIndex]);
-                    $x['inbounds'] = array_values($x['inbounds']);
-                }
+                $x['inbounds'] = [$baseInbound, $apiInbound];
                 break;
 
             default:
-                if ($realityInboundIndex !== null && $realityInboundIndex !== 0) {
-                    unset($x['inbounds'][$realityInboundIndex]);
-                    $x['inbounds'] = array_values($x['inbounds']);
-                }
-                $x['inbounds'][0]['streamSettings'] = [
+                $baseInbound['streamSettings'] = [
                     "network"    => "ws",
-                    "wsSettings" => [
-                        "path" => "/ws$h"
-                    ]
+                    "wsSettings" => ["path" => "/ws$h"]
                 ];
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
-                }
+                $x['inbounds'] = [$baseInbound, $apiInbound];
                 break;
         }
 
