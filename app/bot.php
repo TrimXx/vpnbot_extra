@@ -658,6 +658,9 @@ class Bot
             case preg_match('~^/selfFakeDomain$~', $this->input['callback'], $m):
                 $this->selfFakeDomain();
                 break;
+            case preg_match('~^/changeTargetDestination$~', $this->input['callback'], $m):
+                $this->changeTargetDestination();
+                break;
             case preg_match('~^/changeTGDomain$~', $this->input['callback'], $m):
                 $this->changeTGDomain();
                 break;
@@ -7374,6 +7377,10 @@ DNS-over-HTTPS with IP:
                     'callback_data' => "/changeFakeDomain",
                 ],
                 [
+                    'text'          => 'change target ip/domain',
+                    'callback_data' => "/changeTargetDestination",
+                ],
+                [
                     'text'          => $this->i18n('selfFakeDomain'),
                     'callback_data' => "/selfFakeDomain",
                 ],
@@ -10066,6 +10073,22 @@ DNS-over-HTTPS with IP:
         ];
     }
 
+    public function changeTargetDestination()
+    {
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter target ip/domain with optional port",
+            $this->input['message_id'],
+            reply: 'enter target ip/domain',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message'  => $this->input['message_id'],
+            'start_callback' => $this->input['callback_id'],
+            'callback'       => 'setTargetDestination',
+            'args'           => [],
+        ];
+    }
+
     public function setFakeDomain($domain, $self = false)
     {
         $c = $this->getXray();
@@ -10077,6 +10100,33 @@ DNS-over-HTTPS with IP:
         $this->setPacConf($p);
         $this->restartXray($c);
         $this->setUpstreamDomain($domain);
+        $this->xray();
+    }
+
+    public function setTargetDestination($target)
+    {
+        $target = trim((string) $target);
+        if ($target === '') {
+            $this->answer($this->input['callback_id'], 'empty target', true);
+            return;
+        }
+        if (!preg_match('~:\d+$~', $target)) {
+            $target .= ':443';
+        }
+
+        $xray = $this->getXray();
+        $pac  = $this->getPacConf();
+        $pac['reality']['destination'] = $target;
+
+        foreach (($xray['inbounds'] ?? []) as $idx => $inbound) {
+            if (!isset($xray['inbounds'][$idx]['streamSettings']['realitySettings'])) {
+                continue;
+            }
+            $xray['inbounds'][$idx]['streamSettings']['realitySettings']['dest'] = $target;
+        }
+
+        $this->setPacConf($pac);
+        $this->restartXray($xray);
         $this->xray();
     }
 
