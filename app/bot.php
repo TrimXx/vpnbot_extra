@@ -775,7 +775,7 @@ class Bot
         $c['inbounds'][0]['settings']['clients'] = array_values($c['inbounds'][0]['settings']['clients']);
         $this->ensureUniqueXrayClientEmails($c);
         $pac = $this->getPacConf();
-        if (($pac['transport'] ?? '') === 'Both' && !empty($c['inbounds'][1]['settings'])) {
+        if (($pac['transport'] ?? '') === 'Both') {
             $realityClients = [];
             foreach ($c['inbounds'][0]['settings']['clients'] as $client) {
                 if (!empty($client['off'])) {
@@ -785,7 +785,16 @@ class Bot
                 $copy['flow'] = 'xtls-rprx-vision';
                 $realityClients[] = $copy;
             }
-            $c['inbounds'][1]['settings']['clients'] = $realityClients;
+            foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
+                if (($inbound['tag'] ?? '') === 'vless_reality' || (($inbound['streamSettings']['security'] ?? '') === 'reality')) {
+                    if (!isset($c['inbounds'][$idx]['settings']) || !is_array($c['inbounds'][$idx]['settings'])) {
+                        $c['inbounds'][$idx]['settings'] = [];
+                    }
+                    $c['inbounds'][$idx]['settings']['clients'] = $realityClients;
+                    $c['inbounds'][$idx]['settings']['decryption'] = 'none';
+                    break;
+                }
+            }
         }
         $c['log']['access'] = '/logs/xray';
         foreach ($c['inbounds'] as $v) {
@@ -804,6 +813,18 @@ class Bot
                 ],
                 "tag" => "api"
             ];
+        }
+        foreach (($c['inbounds'] ?? []) as $idx => $inboundCfg) {
+            if (($inboundCfg['tag'] ?? '') !== 'api') {
+                continue;
+            }
+            $c['inbounds'][$idx]['listen'] = '127.0.0.1';
+            $c['inbounds'][$idx]['port'] = 8080;
+            $c['inbounds'][$idx]['protocol'] = 'dokodemo-door';
+            $c['inbounds'][$idx]['settings'] = [
+                'address' => '127.0.0.1',
+            ];
+            break;
         }
         foreach ($c['routing']['rules'] as $v) {
             if ($v['outboundTag'] == 'api') {
@@ -1365,7 +1386,7 @@ class Bot
         } else {
             $c['plugin']      = 'v2ray-plugin';
             $c['plugin_opts'] = 'server;loglevel=none';
-            $l['server']      = 'up';
+            $l['server']      = 'upstream';
             $l['server_port'] = $ssl ? 443 : 80;
             $l['plugin']      = 'v2ray-plugin';
             $l['plugin_opts'] = ($ssl ? 'tls;' : '') . "fast-open;path=/v2ray;host=$domain";
@@ -6746,7 +6767,7 @@ DNS-over-HTTPS with IP:
         }
         $this->setPacConf($pac);
         file_put_contents('/config/deny', $text ?: '');
-        $this->ssh('nginx -s reload', 'up');
+        $this->ssh('nginx -s reload', 'upstream');
     }
 
     public function linkXray($i, $s = false)
@@ -9073,12 +9094,20 @@ DNS-over-HTTPS with IP:
                 }
                 break;
         }
-        $realityInbound = $xr['inbounds'][1] ?? $xr['inbounds'][0];
-        $realityShortId = $realityInbound['streamSettings']['realitySettings']['shortIds'][0]
-            ?? $xr['inbounds'][0]['streamSettings']['realitySettings']['shortIds'][0]
+        $realityInbound = null;
+        foreach (($xr['inbounds'] ?? []) as $inbound) {
+            if (($inbound['streamSettings']['security'] ?? '') === 'reality') {
+                $realityInbound = $inbound;
+                break;
+            }
+        }
+        $realitySettings = $realityInbound['streamSettings']['realitySettings'] ?? [];
+        $fallbackRealitySettings = $xr['inbounds'][0]['streamSettings']['realitySettings'] ?? [];
+        $realityShortId = $realitySettings['shortIds'][0]
+            ?? $fallbackRealitySettings['shortIds'][0]
             ?? '';
-        $realityServerName = $realityInbound['streamSettings']['realitySettings']['serverNames'][0]
-            ?? $xr['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
+        $realityServerName = $realitySettings['serverNames'][0]
+            ?? $fallbackRealitySettings['serverNames'][0]
             ?? $domain;
         $c = json_decode($this->replaceTags(json_encode($c), [
             '"~pac~"'        => json_encode(array_keys(array_filter($pac['includelist'] ?? []))),
@@ -9432,9 +9461,12 @@ DNS-over-HTTPS with IP:
     public function setUpstreamDomain($domain)
     {
         $nginx = file_get_contents('/config/upstream.conf');
-        $t = preg_replace('~#domain.+#domain~s', "#domain\n$domain reality;\n#domain", $nginx);
+        $t = preg_replace('~#domain\s*\R.*?\R\s*#domain~s', "#domain\n$domain reality;\n#domain", $nginx);
+        if ($t === null) {
+            $t = $nginx;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
     public function setUpstreamRealityPort($port)
@@ -9444,27 +9476,44 @@ DNS-over-HTTPS with IP:
             $port = 443;
         }
         $nginx = file_get_contents('/config/upstream.conf');
-        $t = preg_replace('~(upstream\s+reality\s*\{\s*server\s+xr:)\d+(\s*;)~s', '$1' . $port . '$2', $nginx);
+        $realityBlock = "upstream reality {\n        server xr:$port;\n    }";
+        $t = preg_replace('~upstream\s+reality\s*\{[^}]*\}~s', $realityBlock, $nginx, 1, $replaced);
+        if ($t === null) {
+            $t = $nginx;
+            $replaced = 0;
+        }
+        if (empty($replaced)) {
+            $t = preg_replace('~(upstream\s+other\s*\{[^}]*\}\s*)~s', '$1' . "\n    $realityBlock\n\n", $t, 1);
+            if ($t === null) {
+                $t = $nginx;
+            }
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
     public function setUpstreamDomainOcserv($domain)
     {
         $sub   = $this->getHashSubdomain('oc');
         $nginx = file_get_contents('/config/upstream.conf');
-        $t     = preg_replace('~#ocserv.+#ocserv~s', $domain ? "#ocserv\n" . ($sub ? '' : '#' ) . "$sub.$domain ocserv;\n#ocserv" : "#ocserv\n#$sub.\$domain ocserv;\n#ocserv", $nginx);
+        $t     = preg_replace('~#ocserv\s*\R.*?\R\s*#ocserv~s', $domain ? "#ocserv\n" . ($sub ? '' : '#' ) . "$sub.$domain ocserv;\n#ocserv" : "#ocserv\n#$sub.\$domain ocserv;\n#ocserv", $nginx);
+        if ($t === null) {
+            $t = $nginx;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
     public function setUpstreamDomainNaive($domain)
     {
         $sub   = $this->getHashSubdomain('np');
         $nginx = file_get_contents('/config/upstream.conf');
-        $t = preg_replace('~#naive.+#naive~s', $domain ? "#naive\n" . ($sub ? '' : '#' ) . "$sub.$domain naive;\n#naive" : "#naive\n#$sub.\$domain naive;\n#naive", $nginx);
+        $t = preg_replace('~#naive\s*\R.*?\R\s*#naive~s', $domain ? "#naive\n" . ($sub ? '' : '#' ) . "$sub.$domain naive;\n#naive" : "#naive\n#$sub.\$domain naive;\n#naive", $nginx);
+        if ($t === null) {
+            $t = $nginx;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
     public function getHashBot($notset = false)
@@ -10989,7 +11038,18 @@ DNS-over-HTTPS with IP:
     public function ssh($cmd, $service = 'wg', $wait = true, $log = '/dev/null')
     {
         try {
-            $c = ssh2_connect($service, 22);
+            $hosts = [$service];
+            if ($service === 'up' || $service === 'upstream') {
+                $hosts = ['upstream', 'up'];
+            }
+            $c = null;
+            foreach ($hosts as $host) {
+                $c = @ssh2_connect($host, 22);
+                if (!empty($c)) {
+                    $service = $host;
+                    break;
+                }
+            }
             if (empty($c)) {
                 throw new Exception("no connection to $service: \n$cmd\n" . var_export($c, true));
             }
