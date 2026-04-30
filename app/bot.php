@@ -5567,11 +5567,30 @@ DNS-over-HTTPS with IP:
         if (!in_array($owner['id'], $owner['subscription_legacy_ids'], true)) {
             $owner['subscription_legacy_ids'][] = (string) $owner['id'];
         }
-        $newId = $this->createXrayUuid();
-        while ($this->findXrayClientIndexById($xray, $newId) !== null) {
-            $newId = $this->createXrayUuid();
+        // Parent UUID retirement is deferred until all known HWIDs
+        // (from hwid.json for this subscription) confirm runtime migration.
+        if (!array_key_exists('runtime_parent_retired', $owner)) {
+            $owner['runtime_parent_retired'] = 0;
         }
-        $owner['id'] = $newId;
+        return true;
+    }
+
+    protected function canRetireParentRuntimeUuid(array $devices): bool
+    {
+        if (empty($devices) || !is_array($devices)) {
+            return false;
+        }
+        foreach ($devices as $info) {
+            if (!is_array($info)) {
+                return false;
+            }
+            if (empty($info['device_uuid'])) {
+                return false;
+            }
+            if (empty($info['runtime_confirmed'])) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -5649,6 +5668,7 @@ DNS-over-HTTPS with IP:
                     'os_version' => '',
                     'device_model' => '',
                     'device_uuid' => (string) $meta['id'],
+                    'runtime_confirmed' => 0,
                 ];
                 continue;
             }
@@ -5704,6 +5724,7 @@ DNS-over-HTTPS with IP:
                 'os_version' => $_SERVER['HTTP_X_VER_OS'] ?? '',
                 'device_model' => $_SERVER['HTTP_X_DEVICE_MODEL'] ?? '',
                 'device_uuid' => $deviceUuid,
+                'runtime_confirmed' => 1,
             ];
             if (empty($existingByHwid[$hwid]['id'])) {
                 $xray['inbounds'][0]['settings']['clients'][] = $this->createRuntimeDeviceClient($owner, $ownerSubId, $deviceUuid, $hwid);
@@ -5728,6 +5749,21 @@ DNS-over-HTTPS with IP:
             $devices[$hwid]['device_os'] = $_SERVER['HTTP_X_DEVICE_OS'] ?? '';
             $devices[$hwid]['os_version'] = $_SERVER['HTTP_X_VER_OS'] ?? '';
             $devices[$hwid]['device_model'] = $_SERVER['HTTP_X_DEVICE_MODEL'] ?? '';
+            $devices[$hwid]['runtime_confirmed'] = 1;
+        }
+
+        // Rotate parent UUID only when all known HWIDs have confirmed runtime migration.
+        if ($this->canRetireParentRuntimeUuid($devices)) {
+            $owner = &$xray['inbounds'][0]['settings']['clients'][$ownerIndex];
+            if (empty($owner['runtime_parent_retired'])) {
+                $newId = $this->createXrayUuid();
+                while ($this->findXrayClientIndexById($xray, $newId) !== null) {
+                    $newId = $this->createXrayUuid();
+                }
+                $owner['id'] = $newId;
+                $owner['runtime_parent_retired'] = 1;
+                $changed = true;
+            }
         }
 
         $storage[$ownerSubId] = $devices;
