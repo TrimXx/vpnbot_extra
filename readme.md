@@ -25,6 +25,13 @@ wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/in
 wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
 ```
 
+By default upgrade updates only `app/` to avoid overwriting existing server configs.
+For full repo upgrade (old behavior), run:
+
+```shell
+UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
+```
+
 ## One-command install/upgrade
 
 Use the same command for both first install and safe in-place upgrade:
@@ -34,8 +41,8 @@ wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/in
 ```
 
 - Fresh server: clones repo, creates `app/config.php`, starts containers.
-- Existing server (`/root/vpnbot_extra` or legacy `/root/vpnbot`): pulls latest code and runs `make u` without wiping runtime data (`config/`, `certs/`, `.env`, stats, HWID storage).
-- If local git changes exist, script auto-saves them to `git stash` before update.
+- Existing server (`/root/vpnbot_extra` or legacy `/root/vpnbot`): by default updates only `app/` and runs `make u` without wiping runtime data (`config/`, `certs/`, `.env`, stats, HWID storage).
+- Full repo update is optional via `UPGRADE_SCOPE=all` (with auto-stash of local changes).
 #### Restart:
 ```shell
 make r

@@ -4,6 +4,7 @@ set -eu
 REPO_URL="https://github.com/TrimXx/vpnbot_extra.git"
 LEGACY_DIR="/root/vpnbot"
 DEFAULT_DIR="/root/vpnbot_extra"
+UPGRADE_SCOPE="${UPGRADE_SCOPE:-app}"
 if [ -z "${APP_DIR:-}" ]; then
     if [ -d "$LEGACY_DIR/.git" ] && [ ! -d "$DEFAULT_DIR/.git" ]; then
         APP_DIR="$LEGACY_DIR"
@@ -52,14 +53,19 @@ if [ -d "$APP_DIR/.git" ]; then
     echo "[vpnbot] Existing installation detected in $APP_DIR"
     cd "$APP_DIR"
     git remote set-url origin "$REPO_URL"
-    if [ -n "$(git status --porcelain)" ]; then
-        STASH_NAME="vpnbot-init-$(date +%s)"
-        echo "[vpnbot] Local changes detected, saving to stash: $STASH_NAME"
-        git stash push --include-untracked -m "$STASH_NAME" >/dev/null
-    fi
     git fetch --tags origin
-    git checkout "$TAG"
-    git pull --ff-only origin "$TAG"
+    if [ "$UPGRADE_SCOPE" = "all" ]; then
+        if [ -n "$(git status --porcelain)" ]; then
+            STASH_NAME="vpnbot-init-$(date +%s)"
+            echo "[vpnbot] Local changes detected, saving to stash: $STASH_NAME"
+            git stash push --include-untracked -m "$STASH_NAME" >/dev/null
+        fi
+        git checkout "$TAG"
+        git pull --ff-only origin "$TAG"
+    else
+        echo "[vpnbot] App-only upgrade mode (default): updating ./app from origin/$TAG"
+        git checkout "origin/$TAG" -- app
+    fi
 else
     echo "[vpnbot] Fresh install to $APP_DIR"
     if [ -z "$BOT_KEY" ]; then
