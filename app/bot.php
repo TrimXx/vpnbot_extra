@@ -664,6 +664,12 @@ class Bot
             case preg_match('~^/subscriptionBranding$~', $this->input['callback'], $m):
                 $this->subscriptionBranding();
                 break;
+            case preg_match('~^/subscriptionBrandingBulk$~', $this->input['callback'], $m):
+                $this->subscriptionBrandingBulk();
+                break;
+            case preg_match('~^/subscriptionBrandingField (\w+)$~', $this->input['callback'], $m):
+                $this->subscriptionBrandingField($m[1]);
+                break;
             case preg_match('~^/changeTGDomain$~', $this->input['callback'], $m):
                 $this->changeTGDomain();
                 break;
@@ -2823,7 +2829,8 @@ class Bot
     public function subscriptionBranding()
     {
         $c = $this->getPacConf();
-        $hint = [
+        $lines = [
+            'Menu -> xray -> subscription branding',
             'metaTitle=' . (string) ($c['subscription_meta_title'] ?? ''),
             'announce=' . (string) ($c['subscription_announce'] ?? ''),
             'metaDescription=' . (string) ($c['subscription_meta_description'] ?? ''),
@@ -2831,9 +2838,39 @@ class Bot
             'brandingTitle=' . (string) ($c['subscription_branding_title'] ?? ''),
             'brandingLogoUrl=' . (string) ($c['subscription_branding_logo_url'] ?? ''),
         ];
+        $data = [
+            [
+                ['text' => 'metaTitle', 'callback_data' => '/subscriptionBrandingField metaTitle'],
+                ['text' => 'announce', 'callback_data' => '/subscriptionBrandingField announce'],
+            ],
+            [
+                ['text' => 'metaDescription', 'callback_data' => '/subscriptionBrandingField metaDescription'],
+                ['text' => 'supportUrl', 'callback_data' => '/subscriptionBrandingField supportUrl'],
+            ],
+            [
+                ['text' => 'brandingTitle', 'callback_data' => '/subscriptionBrandingField brandingTitle'],
+                ['text' => 'brandingLogoUrl', 'callback_data' => '/subscriptionBrandingField brandingLogoUrl'],
+            ],
+            [
+                ['text' => 'edit all (key=value)', 'callback_data' => '/subscriptionBrandingBulk'],
+            ],
+            [
+                ['text' => $this->i18n('back'), 'callback_data' => '/xray'],
+            ],
+        ];
+        $this->update(
+            $this->input['chat'],
+            $this->input['message_id'],
+            implode("\n", $lines),
+            $data,
+        );
+    }
+
+    public function subscriptionBrandingBulk()
+    {
         $r = $this->send(
             $this->input['chat'],
-            "@{$this->input['username']} edit subscription branding as key=value (one per line)\n\n" . implode("\n", $hint),
+            "@{$this->input['username']} edit subscription branding as key=value (one per line)",
             $this->input['message_id'],
             reply: 'key=value lines',
         );
@@ -2841,6 +2878,26 @@ class Bot
             'start_message' => $this->input['message_id'],
             'callback'      => 'setSubscriptionBranding',
             'args'          => [],
+        ];
+    }
+
+    public function subscriptionBrandingField($field)
+    {
+        $allowed = ['metaTitle', 'announce', 'metaDescription', 'supportUrl', 'brandingTitle', 'brandingLogoUrl'];
+        if (!in_array($field, $allowed, true)) {
+            $this->answer($this->input['callback_id'], 'invalid field', true);
+            return;
+        }
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter value for $field",
+            $this->input['message_id'],
+            reply: "value for $field",
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setSubscriptionBrandingField',
+            'args'          => [$field],
         ];
     }
 
@@ -2868,7 +2925,27 @@ class Bot
             $pac[$map[$key]] = $value;
         }
         $this->setPacConf($pac);
-        $this->xray();
+        $this->subscriptionBranding();
+    }
+
+    public function setSubscriptionBrandingField($text, $field)
+    {
+        $map = [
+            'metaTitle' => 'subscription_meta_title',
+            'announce' => 'subscription_announce',
+            'metaDescription' => 'subscription_meta_description',
+            'supportUrl' => 'subscription_support_url',
+            'brandingTitle' => 'subscription_branding_title',
+            'brandingLogoUrl' => 'subscription_branding_logo_url',
+        ];
+        if (empty($map[$field])) {
+            $this->answer($this->input['callback_id'], 'invalid field', true);
+            return;
+        }
+        $pac = $this->getPacConf();
+        $pac[$map[$field]] = trim((string) $text);
+        $this->setPacConf($pac);
+        $this->subscriptionBranding();
     }
 
     public function setSubdomain($text)
