@@ -7646,11 +7646,13 @@ DNS-over-HTTPS with IP:
                     'text'          => 'change target ip/domain',
                     'callback_data' => "/changeTargetDestination",
                 ],
-                [
+            ];
+            if ($p['transport'] === 'Reality') {
+                $data[count($data) - 1][] = [
                     'text'          => $this->i18n('selfFakeDomain'),
                     'callback_data' => "/selfFakeDomain",
-                ],
-            ];
+                ];
+            }
         }
         $data[] = [
             [
@@ -10375,10 +10377,26 @@ DNS-over-HTTPS with IP:
     {
         $c = $this->getXray();
         $p = $this->getPacConf();
-        $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
-        $c['inbounds'][0]['streamSettings']['realitySettings']['dest'] = $self ? "10.10.1.2:443" : "$domain:443";
+        // In Both mode, keep reality destination on fake domain only.
+        if (($p['transport'] ?? '') === 'Both') {
+            $self = false;
+        }
+        $dest = $self ? "10.10.1.2:443" : "$domain:443";
+        $updated = false;
+        foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
+            if (empty($c['inbounds'][$idx]['streamSettings']['realitySettings'])) {
+                continue;
+            }
+            $c['inbounds'][$idx]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
+            $c['inbounds'][$idx]['streamSettings']['realitySettings']['dest'] = $dest;
+            $updated = true;
+        }
+        if (!$updated) {
+            $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
+            $c['inbounds'][0]['streamSettings']['realitySettings']['dest'] = $dest;
+        }
         $p['reality']['domain'] = $domain;
-        $p['reality']['destination'] = $self ? "10.10.1.2:443" : "$domain:443";
+        $p['reality']['destination'] = $dest;
         $this->setPacConf($p);
         $this->restartXray($c);
         $this->setUpstreamDomain($domain);
@@ -10493,6 +10511,7 @@ DNS-over-HTTPS with IP:
                 foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
                     unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
                 }
+                $p['reality']['destination'] = ($p['reality']['domain'] ?: 'yandex.ru') . ':443';
                 $x['inbounds'][0]['streamSettings'] = [
                     "network"    => "ws",
                     "wsSettings" => [
