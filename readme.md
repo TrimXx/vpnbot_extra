@@ -1,5 +1,7 @@
 telegram bot to manage servers (inside the bot)
 
+Tested upgrade compatibility: `2.28.1` -> `2.29`.
+
 - VLESS (Reality / Websocket / Both)
 - NaiveProxy
 - OpenConnect
