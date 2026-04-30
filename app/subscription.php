@@ -37,7 +37,7 @@ foreach ($connectedDevices as $deviceHwid => $deviceInfo) {
         'traffic_download' => (int)($deviceTrafficMap[$hwidKey]['download'] ?? 0),
     ];
 }
-$appsConfigUrl = 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json';
+$appsConfigUrl = (string) ($pacConfig['subscription_apps_config_url'] ?? 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json');
 // Переменные для страницы подписки vpnbot
 /*
     $suburl - ссылка на страницу подписки пользователя

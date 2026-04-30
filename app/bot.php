@@ -670,6 +670,12 @@ class Bot
             case preg_match('~^/subscriptionBrandingField (\w+)$~', $this->input['callback'], $m):
                 $this->subscriptionBrandingField($m[1]);
                 break;
+            case preg_match('~^/subscriptionAppsConfig (\w+)$~', $this->input['callback'], $m):
+                $this->subscriptionAppsConfigPreset($m[1]);
+                break;
+            case preg_match('~^/subscriptionAppsConfigCustom$~', $this->input['callback'], $m):
+                $this->subscriptionAppsConfigCustom();
+                break;
             case preg_match('~^/changeTGDomain$~', $this->input['callback'], $m):
                 $this->changeTGDomain();
                 break;
@@ -2627,6 +2633,7 @@ class Bot
             'subscription_support_url' => 'https://t.me/example_support',
             'subscription_branding_title' => 'VPN Service',
             'subscription_branding_logo_url' => 'https://example.com/logo.svg',
+            'subscription_apps_config_url' => 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json',
             'white' => [],
             'deny' => [],
         ];
@@ -2829,6 +2836,13 @@ class Bot
     public function subscriptionBranding()
     {
         $c = $this->getPacConf();
+        $appsConfigUrl = (string) ($c['subscription_apps_config_url'] ?? '');
+        $appsMode = 'custom';
+        if ($appsConfigUrl === 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json') {
+            $appsMode = 'hwid';
+        } elseif ($appsConfigUrl === 'https://cdn.jsdelivr.net/gh/legiz-ru/my-remnawave@main/sub-page/subpage-config/multiapp.json') {
+            $appsMode = 'all';
+        }
         $lines = [
             'Menu -> xray -> subscription branding',
             'metaTitle=' . (string) ($c['subscription_meta_title'] ?? ''),
@@ -2837,6 +2851,7 @@ class Bot
             'supportUrl=' . (string) ($c['subscription_support_url'] ?? ''),
             'brandingTitle=' . (string) ($c['subscription_branding_title'] ?? ''),
             'brandingLogoUrl=' . (string) ($c['subscription_branding_logo_url'] ?? ''),
+            'appsConfigUrl=' . $appsConfigUrl,
         ];
         $data = [
             [
@@ -2853,6 +2868,15 @@ class Bot
             ],
             [
                 ['text' => 'edit all (key=value)', 'callback_data' => '/subscriptionBrandingBulk'],
+            ],
+            [
+                ['text' => 'apps: only HWID' . ($appsMode === 'hwid' ? ' ✅' : ''), 'callback_data' => '/subscriptionAppsConfig hwid'],
+            ],
+            [
+                ['text' => 'apps: all apps' . ($appsMode === 'all' ? ' ✅' : ''), 'callback_data' => '/subscriptionAppsConfig all'],
+            ],
+            [
+                ['text' => 'apps: custom URL' . ($appsMode === 'custom' ? ' ✅' : ''), 'callback_data' => '/subscriptionAppsConfigCustom'],
             ],
             [
                 ['text' => $this->i18n('back'), 'callback_data' => '/xray'],
@@ -2899,6 +2923,46 @@ class Bot
             'callback'      => 'setSubscriptionBrandingField',
             'args'          => [$field],
         ];
+    }
+
+    public function subscriptionAppsConfigPreset($mode)
+    {
+        $pac = $this->getPacConf();
+        if ($mode === 'all') {
+            $pac['subscription_apps_config_url'] = 'https://cdn.jsdelivr.net/gh/legiz-ru/my-remnawave@main/sub-page/subpage-config/multiapp.json';
+        } else {
+            $pac['subscription_apps_config_url'] = 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json';
+        }
+        $this->setPacConf($pac);
+        $this->subscriptionBranding();
+    }
+
+    public function subscriptionAppsConfigCustom()
+    {
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter custom apps config url",
+            $this->input['message_id'],
+            reply: 'https://example.com/config.json',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setSubscriptionAppsConfigCustom',
+            'args'          => [],
+        ];
+    }
+
+    public function setSubscriptionAppsConfigCustom($url)
+    {
+        $url = trim((string) $url);
+        if (!preg_match('~^https?://~i', $url)) {
+            $this->answer($this->input['callback_id'], 'invalid url', true);
+            return;
+        }
+        $pac = $this->getPacConf();
+        $pac['subscription_apps_config_url'] = $url;
+        $this->setPacConf($pac);
+        $this->subscriptionBranding();
     }
 
     public function setSubscriptionBranding($text)
