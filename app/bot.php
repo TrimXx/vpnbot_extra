@@ -7295,14 +7295,14 @@ DNS-over-HTTPS with IP:
         $fake = $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
             ?? $c['inbounds'][1]['streamSettings']['realitySettings']['serverNames'][0]
             ?? null;
-        if (!empty($fake)) {
+        if (!empty($fake) && in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
             $text[] = "fake domain: <code>$fake</code>";
         }
         $text[] = 'transport: ' . ($p['transport'] ?: 'Websocket');
         $st = $this->getXrayStats();
         $td = $this->getBytes($st['global']['download'] + $st['session']['download']);
         $tu = $this->getBytes($st['global']['upload'] + $st['session']['upload']);
-        $text[] = "?$td  ?$tu";
+        $text[] = "⬇ $td  ⬆ $tu";
         $data[] = [
             [
                 'text'          => $this->i18n('reset stats'),

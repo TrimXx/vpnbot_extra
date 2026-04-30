@@ -37,6 +37,7 @@ add `@reboot cd /root/vpnbot_extra && make r` and save
 - Added connected devices section in subscription UI with device traffic.
 - Added backward compatibility for legacy subscription links after migration.
 - Added transport mode `Both` for subscription generation (WS + Reality profiles).
+- Added Telegram control to change Reality target destination (`ip/domain:port`) for `Reality`/`Both`.
 - Fixed garbled button labels in Telegram UI.
 - Improved PHP logging setup and error capture.
 - Migrated traffic accounting to stable `users_by_id` key with fallback compatibility.
