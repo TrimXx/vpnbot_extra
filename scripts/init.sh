@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 REPO_URL="https://github.com/TrimXx/vpnbot_extra.git"
 LEGACY_DIR="/root/vpnbot"
@@ -16,13 +16,16 @@ BOT_KEY=""
 TAG="master"
 ARG1="${1:-}"
 ARG2="${2:-}"
-if [[ -n "$ARG1" ]]; then
-    if [[ "$ARG1" =~ ^[0-9]{6,}:[A-Za-z0-9_-]{20,}$ ]]; then
+if [ -n "$ARG1" ]; then
+    case "$ARG1" in
+        *:*)
         BOT_KEY="$ARG1"
         TAG="${ARG2:-master}"
-    else
+        ;;
+        *)
         TAG="$ARG1"
-    fi
+        ;;
+    esac
 fi
 
 echo "[vpnbot] Installing dependencies..."
