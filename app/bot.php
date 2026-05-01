@@ -9095,6 +9095,9 @@ DNS-over-HTTPS with IP:
                                     continue;
                                 }
                                 if ($baseProxyName !== '' && in_array($baseProxyName, $group['proxies'], true)) {
+                                    $c['proxy-groups'][$gk]['type'] = 'fallback';
+                                    $c['proxy-groups'][$gk]['url'] = $c['proxy-groups'][$gk]['url'] ?? 'http://www.gstatic.com/generate_204';
+                                    $c['proxy-groups'][$gk]['interval'] = $c['proxy-groups'][$gk]['interval'] ?? 300;
                                     $c['proxy-groups'][$gk]['proxies'][] = $realityProxy['name'];
                                 }
                             }
