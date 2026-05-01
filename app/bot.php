@@ -6775,6 +6775,7 @@ DNS-over-HTTPS with IP:
         $c      = $this->getXray();
         $pac    = $this->getPacConf();
         $domain = $this->getDomain($pac['transport'] != 'Reality');
+        [$realityTargetHost, $realityTargetPort] = $this->getRealityClientEndpoint($pac, $domain);
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
         $si     = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
@@ -6797,7 +6798,7 @@ DNS-over-HTTPS with IP:
             default:
                 switch ($pac['transport']) {
                     case 'Reality':
-                        $link = "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$domain:443"
+                        $link = "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$realityTargetHost:$realityTargetPort"
                                     . "?security=reality"
                                     . "&sni={$c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]}"
                                     . "&fp=chrome&pbk={$pac['xray']}"
@@ -7585,6 +7586,10 @@ DNS-over-HTTPS with IP:
         }
         if (!empty($fake) && in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
             $text[] = "fake domain: <code>$fake</code>";
+        }
+        if (in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
+            [$targetHost, $targetPort] = $this->getRealityClientEndpoint($p, $this->getDomain(false));
+            $text[] = "reality target: <code>$targetHost:$targetPort</code>";
         }
         $text[] = 'transport: ' . ($p['transport'] ?: 'Websocket');
         $st = $this->getXrayStats();
@@ -8645,6 +8650,7 @@ DNS-over-HTTPS with IP:
         $pac    = $this->getPacConf();
         $useCdnDomain = !in_array(($pac['transport'] ?? ''), ['Reality', 'Both'], true);
         $domain = !empty($_GET['cdn'] ?? '') ? $_GET['cdn'] : ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
+        [$realityTargetHost, $realityTargetPort] = $this->getRealityClientEndpoint($pac, $domain);
         $xr     = $this->getXray();
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
@@ -8813,6 +8819,8 @@ DNS-over-HTTPS with IP:
                 $fingerprint = $c['outbounds'][$index]['streamSettings']['realitySettings']['fingerprint'] ?? $c['outbounds'][$index]['streamSettings']['tlsSettings']['fingerprint'] ?? 'chrome';
                 switch ($pac['transport']) {
                     case 'Reality':
+                        $c['outbounds'][$index]['settings']['vnext'][0]['address'] = $realityTargetHost;
+                        $c['outbounds'][$index]['settings']['vnext'][0]['port'] = $realityTargetPort;
                         $c['outbounds'][$index]['settings']['vnext'][0]['users'][0]["flow"] = "xtls-rprx-vision";
                         $c['outbounds'][$index]['streamSettings']                           = [
                             "network"         => "tcp",
@@ -8882,6 +8890,8 @@ DNS-over-HTTPS with IP:
                         unset($c['outbounds'][$index]['mux']);
                         $realityOutbound = $c['outbounds'][$index];
                         $realityOutbound['tag'] = ($realityOutbound['tag'] ?? 'proxy') . '_reality';
+                        $realityOutbound['settings']['vnext'][0]['address'] = $realityTargetHost;
+                        $realityOutbound['settings']['vnext'][0]['port'] = $realityTargetPort;
                         $realityOutbound['settings']['vnext'][0]['users'][0]["flow"] = "xtls-rprx-vision";
                         $realityOutbound['streamSettings'] = [
                             "network"         => "tcp",
@@ -8923,6 +8933,8 @@ DNS-over-HTTPS with IP:
                 switch ($pac['transport']) {
                     case 'Reality':
                         unset($c['outbounds'][$index]["transport"]);
+                        $c['outbounds'][$index]['server'] = $realityTargetHost;
+                        $c['outbounds'][$index]['server_port'] = $realityTargetPort;
                         $c['outbounds'][$index]['flow']                         = 'xtls-rprx-vision';
                         $c['outbounds'][$index]['tls']['reality']['public_key'] = '~public_key~';
                         $c['outbounds'][$index]['tls']['server_name']           = '~server_name~';
@@ -8965,6 +8977,8 @@ DNS-over-HTTPS with IP:
                         $realityOutbound = $c['outbounds'][$index];
                         $realityOutbound['tag'] = ($realityOutbound['tag'] ?? 'proxy') . '_reality';
                         unset($realityOutbound["transport"]);
+                        $realityOutbound['server'] = $realityTargetHost;
+                        $realityOutbound['server_port'] = $realityTargetPort;
                         $realityOutbound['flow'] = 'xtls-rprx-vision';
                         $realityOutbound['tls']['reality']['public_key'] = '~public_key~';
                         $realityOutbound['tls']['server_name'] = '~server_name~';
@@ -8990,6 +9004,8 @@ DNS-over-HTTPS with IP:
                     case 'Reality':
                         unset($c['proxies'][$index]["ws-opts"]);
                         unset($c['proxies'][$index]["skip-cert-verify"]);
+                        $c['proxies'][$index]['server']       = $realityTargetHost;
+                        $c['proxies'][$index]['port']         = $realityTargetPort;
                         $c['proxies'][$index]["network"]      = "tcp";
                         $c['proxies'][$index]['flow']         = 'xtls-rprx-vision';
                         $c['proxies'][$index]['servername']  = '~server_name~';
@@ -9061,6 +9077,8 @@ DNS-over-HTTPS with IP:
                         $realityProxy['name'] = ($realityProxy['name'] ?? 'proxy') . ' Reality';
                         unset($realityProxy["ws-opts"]);
                         unset($realityProxy["skip-cert-verify"]);
+                        $realityProxy['server']      = $realityTargetHost;
+                        $realityProxy['port']        = $realityTargetPort;
                         $realityProxy["network"]      = "tcp";
                         $realityProxy['flow']         = 'xtls-rprx-vision';
                         $realityProxy['servername']   = '~server_name~';
@@ -9077,6 +9095,9 @@ DNS-over-HTTPS with IP:
                                     continue;
                                 }
                                 if ($baseProxyName !== '' && in_array($baseProxyName, $group['proxies'], true)) {
+                                    $c['proxy-groups'][$gk]['type'] = 'fallback';
+                                    $c['proxy-groups'][$gk]['url'] = $c['proxy-groups'][$gk]['url'] ?? 'http://www.gstatic.com/generate_204';
+                                    $c['proxy-groups'][$gk]['interval'] = $c['proxy-groups'][$gk]['interval'] ?? 300;
                                     $c['proxy-groups'][$gk]['proxies'][] = $realityProxy['name'];
                                 }
                             }
@@ -10464,24 +10485,55 @@ DNS-over-HTTPS with IP:
             $this->answer($this->input['callback_id'], 'empty target', true);
             return;
         }
-        if (!preg_match('~:\d+$~', $target)) {
-            $target .= ':443';
+        [$host, $port] = $this->parseHostPort($target);
+        if ($host === '') {
+            $this->answer($this->input['callback_id'], 'empty target', true);
+            return;
         }
-
-        $xray = $this->getXray();
-        $pac  = $this->getPacConf();
-        $pac['reality']['destination'] = $target;
-
-        foreach (($xray['inbounds'] ?? []) as $idx => $inbound) {
-            if (!isset($xray['inbounds'][$idx]['streamSettings']['realitySettings'])) {
-                continue;
-            }
-            $xray['inbounds'][$idx]['streamSettings']['realitySettings']['dest'] = $target;
-        }
-
+        $pac = $this->getPacConf();
+        $pac['reality']['target'] = $host;
+        $pac['reality']['target_port'] = $port;
         $this->setPacConf($pac);
-        $this->restartXray($xray);
         $this->xray();
+    }
+
+    protected function getRealityClientEndpoint(array $pac, string $fallbackDomain): array
+    {
+        $host = trim((string) ($pac['reality']['target'] ?? ''));
+        $port = (int) ($pac['reality']['target_port'] ?? 0);
+
+        if ($host !== '') {
+            [$parsedHost, $parsedPort] = $this->parseHostPort($host, $port > 0 ? $port : 443);
+            return [$parsedHost, $parsedPort];
+        }
+
+        return [$fallbackDomain, 443];
+    }
+
+    protected function parseHostPort(string $target, int $defaultPort = 443): array
+    {
+        $target = trim($target);
+        $target = preg_replace('~^[a-z][a-z0-9+.-]*://~i', '', $target);
+        $target = preg_replace('~/.*$~', '', $target);
+        $port = $defaultPort > 0 ? $defaultPort : 443;
+
+        if (preg_match('~^\[([^\]]+)\](?::(\d+))?$~', $target, $m)) {
+            $host = $m[1];
+            if (!empty($m[2])) {
+                $port = (int) $m[2];
+            }
+        } elseif (preg_match('~^([^:]+):(\d+)$~', $target, $m)) {
+            $host = $m[1];
+            $port = (int) $m[2];
+        } else {
+            $host = $target;
+        }
+
+        if ($port < 1 || $port > 65535) {
+            $port = 443;
+        }
+
+        return [$host, $port];
     }
 
     public function selfFakeDomain()
