@@ -595,6 +595,9 @@ class Bot
             case preg_match('~^/domain$~', $this->input['callback'], $m):
                 $this->domain();
                 break;
+            case preg_match('~^/domainAliases$~', $this->input['callback'], $m):
+                $this->domainAliases();
+                break;
             case preg_match('~^/warp$~', $this->input['callback'], $m):
                 $this->warp();
                 break;
@@ -1272,7 +1275,7 @@ class Bot
         }
         $this->setPacConf($pac);
         $this->chocdomain($pac['domain']);
-        $this->setUpstreamDomainOcserv($pac['domain']);
+        $this->setUpstreamDomainOcserv($this->getAllConfiguredDomains($pac));
         $this->menu('oc');
     }
 
@@ -1286,7 +1289,7 @@ class Bot
         }
         $this->setPacConf($pac);
         $this->restartNaive();
-        $this->setUpstreamDomainNaive($pac['domain']);
+        $this->setUpstreamDomainNaive($this->getAllConfiguredDomains($pac));
         $this->menu('naive');
     }
 
@@ -2091,8 +2094,8 @@ class Bot
                 $this->restartHysteria();
             }
             if (!empty($json['pac']['domain'])) {
-                $this->setUpstreamDomainOcserv($json['pac']['domain']);
-                $this->setUpstreamDomainNaive($json['pac']['domain']);
+                $this->setUpstreamDomainOcserv($this->getAllConfiguredDomains($this->getPacConf()));
+                $this->setUpstreamDomainNaive($this->getAllConfiguredDomains($this->getPacConf()));
             }
             // dnstt
             if (!empty($json['dnstt'])) {
@@ -2428,16 +2431,82 @@ class Bot
         $this->addDomain(str_replace('.', '-', $this->ip) . '.nip.io');
     }
 
+    protected function normalizeDomainName(string $domain): string
+    {
+        $domain = trim(strtolower($domain));
+        $domain = preg_replace('~^\w+://~', '', $domain);
+        $domain = preg_replace('~/.*$~', '', $domain);
+        $domain = trim($domain, " \t\n\r\0\x0B.");
+        if ($domain === '') {
+            return '';
+        }
+        $ascii = idn_to_ascii($domain);
+        if (!empty($ascii)) {
+            $domain = $ascii;
+        }
+        return preg_replace('~[^a-z0-9\.\-]~', '', $domain);
+    }
+
+    protected function parseDomainListInput(string $text): array
+    {
+        $parts = preg_split('~[\s,;]+~', $text) ?: [];
+        $domains = [];
+        foreach ($parts as $part) {
+            $part = $this->normalizeDomainName((string) $part);
+            if ($part === '') {
+                continue;
+            }
+            $domains[] = $part;
+        }
+        return array_values(array_unique($domains));
+    }
+
+    protected function getMainDomainFromConfig(array $conf): string
+    {
+        return $this->normalizeDomainName((string) ($conf['domain_main'] ?: $conf['domain'] ?: ''));
+    }
+
+    protected function getDomainAliasesFromConfig(array $conf): array
+    {
+        $main = $this->getMainDomainFromConfig($conf);
+        $raw = $conf['domain_aliases'] ?? [];
+        if (!is_array($raw)) {
+            $raw = $this->parseDomainListInput((string) $raw);
+        }
+        $aliases = [];
+        foreach ($raw as $alias) {
+            $alias = $this->normalizeDomainName((string) $alias);
+            if ($alias === '' || $alias === $main) {
+                continue;
+            }
+            $aliases[] = $alias;
+        }
+        return array_values(array_unique($aliases));
+    }
+
+    public function getAllConfiguredDomains(array $conf): array
+    {
+        $main = $this->getMainDomainFromConfig($conf);
+        if ($main === '') {
+            return [];
+        }
+        return array_values(array_unique(array_merge([$main], $this->getDomainAliasesFromConfig($conf))));
+    }
+
     public function addDomain($domain, $nomenu = false)
     {
-        $domain = trim($domain);
-        if (!empty($domain)) {
+        $domains = $this->parseDomainListInput((string) $domain);
+        if (!empty($domains)) {
+            $mainDomain = array_shift($domains);
             $conf = $this->getPacConf();
-            $conf['domain'] = idn_to_ascii($domain);
+            $conf['domain_main'] = $mainDomain;
+            $conf['domain'] = $mainDomain;
+            $conf['domain_aliases'] = array_values(array_unique($domains));
             $this->setPacConf($conf);
-            $this->chocdomain($domain);
-            $this->setUpstreamDomainOcserv($domain);
-            $this->setUpstreamDomainNaive($domain);
+            $this->chocdomain($mainDomain);
+            $allDomains = $this->getAllConfiguredDomains($conf);
+            $this->setUpstreamDomainOcserv($allDomains);
+            $this->setUpstreamDomainNaive($allDomains);
             $this->cloakNginx();
         }
         if (empty($nomenu)) {
@@ -2512,21 +2581,43 @@ class Bot
     public function setSSL($name)
     {
         $conf = $this->getPacConf();
+        $bundle = '';
         switch ($name) {
             case 'letsencrypt':
                 $out[] = 'Install certificate:';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $adguardClient = $conf['adguardkey'] ? "-d {$conf['adguardkey']}.{$conf['domain']}" : '';
+                $domains = $this->getAllConfiguredDomains($conf);
+                $mainDomain = $domains[0] ?? '';
+                if ($mainDomain === '') {
+                    $this->send($this->input['chat'], "ERROR\nmain domain is empty");
+                    break;
+                }
                 $oc = $this->getHashSubdomain('oc');
                 $np = $this->getHashSubdomain('np');
-                exec("certbot certonly --force-renew --preferred-chain 'ISRG Root X1' -n --agree-tos --email mail@{$conf['domain']} -d {$conf['domain']}" . ($oc ? " -d $oc.{$conf['domain']}" : '') . ($np ? " -d $np.{$conf['domain']}" : '') . " $adguardClient --webroot -w /certs/ --logs-dir /logs --max-log-backups 0 2>&1", $out, $code);
+                $certDomains = [];
+                foreach ($domains as $domainName) {
+                    $certDomains[] = $domainName;
+                    if (!empty($oc)) {
+                        $certDomains[] = "$oc.$domainName";
+                    }
+                    if (!empty($np)) {
+                        $certDomains[] = "$np.$domainName";
+                    }
+                    if (!empty($conf['adguardkey'])) {
+                        $certDomains[] = "{$conf['adguardkey']}.$domainName";
+                    }
+                }
+                $certDomains = array_values(array_unique($certDomains));
+                $domainArgs = implode(' ', array_map(fn($d) => '-d ' . escapeshellarg($d), $certDomains));
+                $email = escapeshellarg("mail@$mainDomain");
+                exec("certbot certonly --force-renew --preferred-chain 'ISRG Root X1' -n --agree-tos --email $email $domainArgs --webroot -w /certs/ --logs-dir /logs --max-log-backups 0 2>&1", $out, $code);
                 if ($code > 0) {
                     $this->send($this->input['chat'], "ERROR\n" . implode("\n", $out));
                     break;
                 }
                 $out[] = 'Generate bundle';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $bundle = file_get_contents("/etc/letsencrypt/live/{$conf['domain']}/privkey.pem") . file_get_contents("/etc/letsencrypt/live/{$conf['domain']}/fullchain.pem");
+                $bundle = file_get_contents("/etc/letsencrypt/live/$mainDomain/privkey.pem") . file_get_contents("/etc/letsencrypt/live/$mainDomain/fullchain.pem");
                 $conf['letsencrypt'] = 'letsencrypt';
                 break;
             case 'self':
@@ -2535,7 +2626,7 @@ class Bot
                 $conf['letsencrypt'] = 'self';
                 break;
         }
-        if (preg_match('~[^\s]+BEGIN PRIVATE KEY.+?END PRIVATE KEY[^\s]+~s', $bundle, $m)) {
+        if (!empty($bundle) && preg_match('~[^\s]+BEGIN PRIVATE KEY.+?END PRIVATE KEY[^\s]+~s', $bundle, $m)) {
             $this->setPacConf($conf);
             file_put_contents('/certs/cert_private', $m[0]);
             file_put_contents('/certs/cert_public', preg_replace('~[^\s]+BEGIN PRIVATE KEY.+?END PRIVATE KEY[^\s]+~s', '', $bundle));
@@ -2574,9 +2665,12 @@ class Bot
     {
         $this->deleteSSL(1);
         $conf = $this->getPacConf();
+        unset($conf['domain_main']);
+        $conf['domain_aliases'] = [];
         unset($conf['domain']);
         $this->setPacConf($conf);
-        $this->setUpstreamDomainOcserv('');
+        $this->setUpstreamDomainOcserv([]);
+        $this->setUpstreamDomainNaive([]);
         $this->chocdomain('');
         $this->adguardSync();
         $this->cloakNginx();
@@ -2610,6 +2704,8 @@ class Bot
             'language' => 'en',
             'limitpage' => 5,
             'domain' => '',
+            'domain_main' => '',
+            'domain_aliases' => [],
             'transport' => 'Websocket',
             'reality' => [
                 'domain' => '',
@@ -2658,8 +2754,12 @@ class Bot
             'white' => [],
             'deny' => [],
         ];
-
-        return array_replace_recursive($defaults, $raw);
+        $conf = array_replace_recursive($defaults, $raw);
+        $mainDomain = $this->getMainDomainFromConfig($conf);
+        $conf['domain_main'] = $mainDomain;
+        $conf['domain'] = $mainDomain;
+        $conf['domain_aliases'] = $this->getDomainAliasesFromConfig($conf);
+        return $conf;
     }
 
     public function setPacConf(array $conf)
@@ -2671,15 +2771,66 @@ class Bot
     {
         $r = $this->send(
             $this->input['chat'],
-            "@{$this->input['username']} enter domain",
+            "@{$this->input['username']} enter main domain (you can add aliases later)",
             $this->input['message_id'],
-            reply: 'enter domain',
+            reply: 'enter main domain',
         );
         $_SESSION['reply'][$r['result']['message_id']] = [
             'start_message' => $this->input['message_id'],
             'callback'      => 'addDomain',
             'args'          => [],
         ];
+    }
+
+    public function domainAliases()
+    {
+        $conf = $this->getPacConf();
+        $main = $this->getMainDomainFromConfig($conf);
+        if ($main === '') {
+            $this->answer($this->input['callback_id'], 'set main domain first', true);
+            $this->menu('config');
+            return;
+        }
+        $aliases = $this->getDomainAliasesFromConfig($conf);
+        $current = empty($aliases) ? '(empty)' : implode(", ", $aliases);
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter aliases separated by comma/new line. Current: $current\nUse 0 to clear aliases.",
+            $this->input['message_id'],
+            reply: 'enter domain aliases',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setDomainAliases',
+            'args'          => [],
+        ];
+    }
+
+    public function setDomainAliases($text)
+    {
+        $conf = $this->getPacConf();
+        $main = $this->getMainDomainFromConfig($conf);
+        if ($main === '') {
+            $this->menu('config');
+            return;
+        }
+        if (trim((string) $text) === '0') {
+            $aliases = [];
+        } else {
+            $aliases = array_values(array_filter(
+                $this->parseDomainListInput((string) $text),
+                fn($domain) => $domain !== $main
+            ));
+        }
+        $conf['domain_main'] = $main;
+        $conf['domain'] = $main;
+        $conf['domain_aliases'] = $aliases;
+        $this->setPacConf($conf);
+        $allDomains = $this->getAllConfiguredDomains($conf);
+        $this->setUpstreamDomainOcserv($allDomains);
+        $this->setUpstreamDomainNaive($allDomains);
+        $this->cloakNginx();
+        $this->menu('config');
     }
 
     public function selfssl()
@@ -9492,11 +9643,23 @@ DNS-over-HTTPS with IP:
         $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
-    public function setUpstreamDomainOcserv($domain)
+    public function setUpstreamDomainOcserv($domains)
     {
         $sub   = $this->getHashSubdomain('oc');
         $nginx = file_get_contents('/config/upstream.conf');
-        $t     = preg_replace('~#ocserv\s*\R.*?\R\s*#ocserv~s', $domain ? "#ocserv\n" . ($sub ? '' : '#' ) . "$sub.$domain ocserv;\n#ocserv" : "#ocserv\n#$sub.\$domain ocserv;\n#ocserv", $nginx);
+        if (!is_array($domains)) {
+            $domains = [$domains];
+        }
+        $rules = [];
+        foreach ($domains as $domain) {
+            $domain = $this->normalizeDomainName((string) $domain);
+            if ($domain === '' || $sub === '') {
+                continue;
+            }
+            $rules[] = "$sub.$domain ocserv;";
+        }
+        $body = empty($rules) ? "#$sub.\$domain ocserv;" : implode("\n", $rules);
+        $t     = preg_replace('~#ocserv\s*\R.*?\R\s*#ocserv~s', "#ocserv\n$body\n#ocserv", $nginx);
         if ($t === null) {
             $t = $nginx;
         }
@@ -9504,11 +9667,23 @@ DNS-over-HTTPS with IP:
         $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
-    public function setUpstreamDomainNaive($domain)
+    public function setUpstreamDomainNaive($domains)
     {
         $sub   = $this->getHashSubdomain('np');
         $nginx = file_get_contents('/config/upstream.conf');
-        $t = preg_replace('~#naive\s*\R.*?\R\s*#naive~s', $domain ? "#naive\n" . ($sub ? '' : '#' ) . "$sub.$domain naive;\n#naive" : "#naive\n#$sub.\$domain naive;\n#naive", $nginx);
+        if (!is_array($domains)) {
+            $domains = [$domains];
+        }
+        $rules = [];
+        foreach ($domains as $domain) {
+            $domain = $this->normalizeDomainName((string) $domain);
+            if ($domain === '' || $sub === '') {
+                continue;
+            }
+            $rules[] = "$sub.$domain naive;";
+        }
+        $body = empty($rules) ? "#$sub.\$domain naive;" : implode("\n", $rules);
+        $t = preg_replace('~#naive\s*\R.*?\R\s*#naive~s', "#naive\n$body\n#naive", $nginx);
         if ($t === null) {
             $t = $nginx;
         }
@@ -9534,7 +9709,12 @@ DNS-over-HTTPS with IP:
         $conf     = $this->getPacConf();
         $template = file_get_contents('/config/nginx_default.conf');
         // $template = preg_replace('~server_name ip~', "server_name {$this->ip}", $template);
-        $template = preg_replace('~server_name domain~', "server_name " . ($conf['domain'] ? " *.{$conf['domain']} {$conf['domain']}" : '_'), $template);
+        $serverNames = [];
+        foreach ($this->getAllConfiguredDomains($conf) as $domainName) {
+            $serverNames[] = "*.$domainName";
+            $serverNames[] = $domainName;
+        }
+        $template = preg_replace('~server_name domain~', "server_name " . ($serverNames ? implode(' ', array_unique($serverNames)) : '_'), $template);
         if ($conf['domain'] && $conf['letsencrypt']) {
             $template = preg_replace('/#~([^\n]+)?/', "#~{$conf['letsencrypt']}", $template);
             preg_match_all('~#-domain.+?#-domain~s', $template, $m);
@@ -9871,17 +10051,23 @@ DNS-over-HTTPS with IP:
         $conf = $this->getPacConf();
         $oc   = $this->getHashSubdomain('oc');
         $np   = $this->getHashSubdomain('np');
-        if (!empty($conf['domain'])) {
+        $mainDomain = $this->getMainDomainFromConfig($conf);
+        $aliases = $this->getDomainAliasesFromConfig($conf);
+        $allDomains = $this->getAllConfiguredDomains($conf);
+        if (!empty($mainDomain)) {
             $ssl_expiry = $this->expireCert();
             $certs      = $this->domainsCert() ?: [];
 
             $text[] = "<blockquote>";
             $text[] = "Domains:";
-            $text[] = $conf['domain'] . (in_array($conf['domain'], $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-            $text[] = 'naive ' . "$np.{$conf['domain']}" . (in_array("$np.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-            $text[] = 'openconnect ' . "$oc.{$conf['domain']}" . (in_array("$oc.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-            if (!empty($conf['adguardkey'])) {
-                $text[] = "{$conf['adguardkey']}.{$conf['domain']}" . (in_array("{$conf['adguardkey']}.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';;
+            foreach ($allDomains as $idx => $domainName) {
+                $prefix = $idx === 0 ? 'main' : 'alias';
+                $text[] = "$prefix $domainName" . (in_array($domainName, $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
+                $text[] = 'naive ' . "$np.$domainName" . (in_array("$np.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
+                $text[] = 'openconnect ' . "$oc.$domainName" . (in_array("$oc.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
+                if (!empty($conf['adguardkey'])) {
+                    $text[] = "{$conf['adguardkey']}.$domainName" . (in_array("{$conf['adguardkey']}.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';
+                }
             }
             $text[] = "</blockquote>";
         } else {
@@ -9891,8 +10077,8 @@ DNS-over-HTTPS with IP:
         $data = [
             [
                 [
-                    'text'          => $conf['domain'] ? "{$this->i18n('delete')} {$conf['domain']}" : $this->i18n('install domain'),
-                    'callback_data' => $conf['domain'] ? '/deldomain' : '/domain',
+                    'text'          => $mainDomain ? "{$this->i18n('delete')} {$mainDomain}" : $this->i18n('install domain'),
+                    'callback_data' => $mainDomain ? '/deldomain' : '/domain',
                 ],
                 [
                     'text'          => $this->i18n('nip.io'),
@@ -9900,7 +10086,13 @@ DNS-over-HTTPS with IP:
                 ],
             ],
         ];
-        if ($conf['domain']) {
+        if ($mainDomain) {
+            $data[] = [
+                [
+                    'text'          => 'domain aliases: ' . count($aliases),
+                    'callback_data' => '/domainAliases',
+                ],
+            ];
             if ($cert = $this->nginxGetTypeCert()) {
                 switch ($cert) {
                     case 'letsencrypt':
