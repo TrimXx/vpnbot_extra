@@ -45,6 +45,7 @@ $appsConfigUrl = (string) ($pacConfig['subscription_apps_config_url'] ?? 'https:
     $singbox - ссылка на singbox конфиг
     $clash - ссылка на mihomo конфиг
     $xray - ссылка на xray конфига
+    $wgconf - ссылка на device-specific wg/amnezia конфига
     $windows - ссылка на архив скриптов сингбокс под винду
     $download
     $upload
@@ -92,6 +93,7 @@ function generate_panelData(
     string $singbox,
     string $windows,
     string $xray,
+    string $wgconf,
     ?int $expire = null, // Может быть null или timestamp
     array $connectedDevices = [],
     int $connectedDevicesMax = 0,
@@ -106,6 +108,9 @@ function generate_panelData(
         $windows . '#sing-box windows script',
         $xray    . '#xray conf',
     ];
+    if (!empty($wgconf)) {
+        $links[] = $wgconf . '#amnezia wg conf';
+    }
 
     // daysLeft и expiresAt рассчитываются автоматически
     if ($expire === null) {
@@ -198,7 +203,7 @@ function send_profile_headers(string $email, string $subscription_url, string $s
     header('flclashx-view: type:list; sort:none; layout:standard; icon:standard; card:min');
 }
 
-$panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword));
+$panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $wgconf ?? '', $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword));
 $panelDataB64 = $panelData; // Already base64 encoded
 
 switch (true) {
