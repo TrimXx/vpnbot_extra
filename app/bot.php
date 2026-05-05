@@ -595,6 +595,9 @@ class Bot
             case preg_match('~^/domain$~', $this->input['callback'], $m):
                 $this->domain();
                 break;
+            case preg_match('~^/domainAliases$~', $this->input['callback'], $m):
+                $this->domainAliases();
+                break;
             case preg_match('~^/warp$~', $this->input['callback'], $m):
                 $this->warp();
                 break;
@@ -657,6 +660,24 @@ class Bot
                 break;
             case preg_match('~^/selfFakeDomain$~', $this->input['callback'], $m):
                 $this->selfFakeDomain();
+                break;
+            case preg_match('~^/changeTargetDestination$~', $this->input['callback'], $m):
+                $this->changeTargetDestination();
+                break;
+            case preg_match('~^/subscriptionBranding$~', $this->input['callback'], $m):
+                $this->subscriptionBranding();
+                break;
+            case preg_match('~^/subscriptionBrandingBulk$~', $this->input['callback'], $m):
+                $this->subscriptionBrandingBulk();
+                break;
+            case preg_match('~^/subscriptionBrandingField (\w+)$~', $this->input['callback'], $m):
+                $this->subscriptionBrandingField($m[1]);
+                break;
+            case preg_match('~^/subscriptionAppsConfig (\w+)$~', $this->input['callback'], $m):
+                $this->subscriptionAppsConfigPreset($m[1]);
+                break;
+            case preg_match('~^/subscriptionAppsConfigCustom$~', $this->input['callback'], $m):
+                $this->subscriptionAppsConfigCustom();
                 break;
             case preg_match('~^/changeTGDomain$~', $this->input['callback'], $m):
                 $this->changeTGDomain();
@@ -757,7 +778,7 @@ class Bot
         $c['inbounds'][0]['settings']['clients'] = array_values($c['inbounds'][0]['settings']['clients']);
         $this->ensureUniqueXrayClientEmails($c);
         $pac = $this->getPacConf();
-        if (($pac['transport'] ?? '') === 'Both' && !empty($c['inbounds'][1]['settings'])) {
+        if (($pac['transport'] ?? '') === 'Both') {
             $realityClients = [];
             foreach ($c['inbounds'][0]['settings']['clients'] as $client) {
                 if (!empty($client['off'])) {
@@ -767,7 +788,16 @@ class Bot
                 $copy['flow'] = 'xtls-rprx-vision';
                 $realityClients[] = $copy;
             }
-            $c['inbounds'][1]['settings']['clients'] = $realityClients;
+            foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
+                if (($inbound['tag'] ?? '') === 'vless_reality' || (($inbound['streamSettings']['security'] ?? '') === 'reality')) {
+                    if (!isset($c['inbounds'][$idx]['settings']) || !is_array($c['inbounds'][$idx]['settings'])) {
+                        $c['inbounds'][$idx]['settings'] = [];
+                    }
+                    $c['inbounds'][$idx]['settings']['clients'] = $realityClients;
+                    $c['inbounds'][$idx]['settings']['decryption'] = 'none';
+                    break;
+                }
+            }
         }
         $c['log']['access'] = '/logs/xray';
         foreach ($c['inbounds'] as $v) {
@@ -786,6 +816,18 @@ class Bot
                 ],
                 "tag" => "api"
             ];
+        }
+        foreach (($c['inbounds'] ?? []) as $idx => $inboundCfg) {
+            if (($inboundCfg['tag'] ?? '') !== 'api') {
+                continue;
+            }
+            $c['inbounds'][$idx]['listen'] = '127.0.0.1';
+            $c['inbounds'][$idx]['port'] = 8080;
+            $c['inbounds'][$idx]['protocol'] = 'dokodemo-door';
+            $c['inbounds'][$idx]['settings'] = [
+                'address' => '127.0.0.1',
+            ];
+            break;
         }
         foreach ($c['routing']['rules'] as $v) {
             if ($v['outboundTag'] == 'api') {
@@ -1233,7 +1275,7 @@ class Bot
         }
         $this->setPacConf($pac);
         $this->chocdomain($pac['domain']);
-        $this->setUpstreamDomainOcserv($pac['domain']);
+        $this->setUpstreamDomainOcserv($this->getAllConfiguredDomains($pac));
         $this->menu('oc');
     }
 
@@ -1247,7 +1289,7 @@ class Bot
         }
         $this->setPacConf($pac);
         $this->restartNaive();
-        $this->setUpstreamDomainNaive($pac['domain']);
+        $this->setUpstreamDomainNaive($this->getAllConfiguredDomains($pac));
         $this->menu('naive');
     }
 
@@ -1347,7 +1389,7 @@ class Bot
         } else {
             $c['plugin']      = 'v2ray-plugin';
             $c['plugin_opts'] = 'server;loglevel=none';
-            $l['server']      = 'up';
+            $l['server']      = 'upstream';
             $l['server_port'] = $ssl ? 443 : 80;
             $l['plugin']      = 'v2ray-plugin';
             $l['plugin_opts'] = ($ssl ? 'tls;' : '') . "fast-open;path=/v2ray;host=$domain";
@@ -2052,8 +2094,8 @@ class Bot
                 $this->restartHysteria();
             }
             if (!empty($json['pac']['domain'])) {
-                $this->setUpstreamDomainOcserv($json['pac']['domain']);
-                $this->setUpstreamDomainNaive($json['pac']['domain']);
+                $this->setUpstreamDomainOcserv($this->getAllConfiguredDomains($this->getPacConf()));
+                $this->setUpstreamDomainNaive($this->getAllConfiguredDomains($this->getPacConf()));
             }
             // dnstt
             if (!empty($json['dnstt'])) {
@@ -2389,16 +2431,82 @@ class Bot
         $this->addDomain(str_replace('.', '-', $this->ip) . '.nip.io');
     }
 
+    protected function normalizeDomainName(string $domain): string
+    {
+        $domain = trim(strtolower($domain));
+        $domain = preg_replace('~^\w+://~', '', $domain);
+        $domain = preg_replace('~/.*$~', '', $domain);
+        $domain = trim($domain, " \t\n\r\0\x0B.");
+        if ($domain === '') {
+            return '';
+        }
+        $ascii = idn_to_ascii($domain);
+        if (!empty($ascii)) {
+            $domain = $ascii;
+        }
+        return preg_replace('~[^a-z0-9\.\-]~', '', $domain);
+    }
+
+    protected function parseDomainListInput(string $text): array
+    {
+        $parts = preg_split('~[\s,;]+~', $text) ?: [];
+        $domains = [];
+        foreach ($parts as $part) {
+            $part = $this->normalizeDomainName((string) $part);
+            if ($part === '') {
+                continue;
+            }
+            $domains[] = $part;
+        }
+        return array_values(array_unique($domains));
+    }
+
+    protected function getMainDomainFromConfig(array $conf): string
+    {
+        return $this->normalizeDomainName((string) ($conf['domain_main'] ?: $conf['domain'] ?: ''));
+    }
+
+    protected function getDomainAliasesFromConfig(array $conf): array
+    {
+        $main = $this->getMainDomainFromConfig($conf);
+        $raw = $conf['domain_aliases'] ?? [];
+        if (!is_array($raw)) {
+            $raw = $this->parseDomainListInput((string) $raw);
+        }
+        $aliases = [];
+        foreach ($raw as $alias) {
+            $alias = $this->normalizeDomainName((string) $alias);
+            if ($alias === '' || $alias === $main) {
+                continue;
+            }
+            $aliases[] = $alias;
+        }
+        return array_values(array_unique($aliases));
+    }
+
+    public function getAllConfiguredDomains(array $conf): array
+    {
+        $main = $this->getMainDomainFromConfig($conf);
+        if ($main === '') {
+            return [];
+        }
+        return array_values(array_unique(array_merge([$main], $this->getDomainAliasesFromConfig($conf))));
+    }
+
     public function addDomain($domain, $nomenu = false)
     {
-        $domain = trim($domain);
-        if (!empty($domain)) {
+        $domains = $this->parseDomainListInput((string) $domain);
+        if (!empty($domains)) {
+            $mainDomain = array_shift($domains);
             $conf = $this->getPacConf();
-            $conf['domain'] = idn_to_ascii($domain);
+            $conf['domain_main'] = $mainDomain;
+            $conf['domain'] = $mainDomain;
+            $conf['domain_aliases'] = array_values(array_unique($domains));
             $this->setPacConf($conf);
-            $this->chocdomain($domain);
-            $this->setUpstreamDomainOcserv($domain);
-            $this->setUpstreamDomainNaive($domain);
+            $this->chocdomain($mainDomain);
+            $allDomains = $this->getAllConfiguredDomains($conf);
+            $this->setUpstreamDomainOcserv($allDomains);
+            $this->setUpstreamDomainNaive($allDomains);
             $this->cloakNginx();
         }
         if (empty($nomenu)) {
@@ -2473,21 +2581,43 @@ class Bot
     public function setSSL($name)
     {
         $conf = $this->getPacConf();
+        $bundle = '';
         switch ($name) {
             case 'letsencrypt':
                 $out[] = 'Install certificate:';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $adguardClient = $conf['adguardkey'] ? "-d {$conf['adguardkey']}.{$conf['domain']}" : '';
+                $domains = $this->getAllConfiguredDomains($conf);
+                $mainDomain = $domains[0] ?? '';
+                if ($mainDomain === '') {
+                    $this->send($this->input['chat'], "ERROR\nmain domain is empty");
+                    break;
+                }
                 $oc = $this->getHashSubdomain('oc');
                 $np = $this->getHashSubdomain('np');
-                exec("certbot certonly --force-renew --preferred-chain 'ISRG Root X1' -n --agree-tos --email mail@{$conf['domain']} -d {$conf['domain']}" . ($oc ? " -d $oc.{$conf['domain']}" : '') . ($np ? " -d $np.{$conf['domain']}" : '') . " $adguardClient --webroot -w /certs/ --logs-dir /logs --max-log-backups 0 2>&1", $out, $code);
+                $certDomains = [];
+                foreach ($domains as $domainName) {
+                    $certDomains[] = $domainName;
+                    if (!empty($oc)) {
+                        $certDomains[] = "$oc.$domainName";
+                    }
+                    if (!empty($np)) {
+                        $certDomains[] = "$np.$domainName";
+                    }
+                    if (!empty($conf['adguardkey'])) {
+                        $certDomains[] = "{$conf['adguardkey']}.$domainName";
+                    }
+                }
+                $certDomains = array_values(array_unique($certDomains));
+                $domainArgs = implode(' ', array_map(fn($d) => '-d ' . escapeshellarg($d), $certDomains));
+                $email = escapeshellarg("mail@$mainDomain");
+                exec("certbot certonly --force-renew --preferred-chain 'ISRG Root X1' -n --agree-tos --email $email $domainArgs --webroot -w /certs/ --logs-dir /logs --max-log-backups 0 2>&1", $out, $code);
                 if ($code > 0) {
                     $this->send($this->input['chat'], "ERROR\n" . implode("\n", $out));
                     break;
                 }
                 $out[] = 'Generate bundle';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $bundle = file_get_contents("/etc/letsencrypt/live/{$conf['domain']}/privkey.pem") . file_get_contents("/etc/letsencrypt/live/{$conf['domain']}/fullchain.pem");
+                $bundle = file_get_contents("/etc/letsencrypt/live/$mainDomain/privkey.pem") . file_get_contents("/etc/letsencrypt/live/$mainDomain/fullchain.pem");
                 $conf['letsencrypt'] = 'letsencrypt';
                 break;
             case 'self':
@@ -2496,7 +2626,7 @@ class Bot
                 $conf['letsencrypt'] = 'self';
                 break;
         }
-        if (preg_match('~[^\s]+BEGIN PRIVATE KEY.+?END PRIVATE KEY[^\s]+~s', $bundle, $m)) {
+        if (!empty($bundle) && preg_match('~[^\s]+BEGIN PRIVATE KEY.+?END PRIVATE KEY[^\s]+~s', $bundle, $m)) {
             $this->setPacConf($conf);
             file_put_contents('/certs/cert_private', $m[0]);
             file_put_contents('/certs/cert_public', preg_replace('~[^\s]+BEGIN PRIVATE KEY.+?END PRIVATE KEY[^\s]+~s', '', $bundle));
@@ -2535,9 +2665,12 @@ class Bot
     {
         $this->deleteSSL(1);
         $conf = $this->getPacConf();
+        unset($conf['domain_main']);
+        $conf['domain_aliases'] = [];
         unset($conf['domain']);
         $this->setPacConf($conf);
-        $this->setUpstreamDomainOcserv('');
+        $this->setUpstreamDomainOcserv([]);
+        $this->setUpstreamDomainNaive([]);
         $this->chocdomain('');
         $this->adguardSync();
         $this->cloakNginx();
@@ -2571,6 +2704,8 @@ class Bot
             'language' => 'en',
             'limitpage' => 5,
             'domain' => '',
+            'domain_main' => '',
+            'domain_aliases' => [],
             'transport' => 'Websocket',
             'reality' => [
                 'domain' => '',
@@ -2609,11 +2744,22 @@ class Bot
             'v2raytemplates' => [],
             'singtemplates' => [],
             'classtemplates' => [],
+            'subscription_meta_title' => 'VPN Subscription',
+            'subscription_announce' => 'Welcome',
+            'subscription_meta_description' => 'Secure and private connection',
+            'subscription_support_url' => 'https://t.me/example_support',
+            'subscription_branding_title' => 'VPN Service',
+            'subscription_branding_logo_url' => 'https://example.com/logo.svg',
+            'subscription_apps_config_url' => 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json',
             'white' => [],
             'deny' => [],
         ];
-
-        return array_replace_recursive($defaults, $raw);
+        $conf = array_replace_recursive($defaults, $raw);
+        $mainDomain = $this->getMainDomainFromConfig($conf);
+        $conf['domain_main'] = $mainDomain;
+        $conf['domain'] = $mainDomain;
+        $conf['domain_aliases'] = $this->getDomainAliasesFromConfig($conf);
+        return $conf;
     }
 
     public function setPacConf(array $conf)
@@ -2625,15 +2771,66 @@ class Bot
     {
         $r = $this->send(
             $this->input['chat'],
-            "@{$this->input['username']} enter domain",
+            "@{$this->input['username']} enter main domain (you can add aliases later)",
             $this->input['message_id'],
-            reply: 'enter domain',
+            reply: 'enter main domain',
         );
         $_SESSION['reply'][$r['result']['message_id']] = [
             'start_message' => $this->input['message_id'],
             'callback'      => 'addDomain',
             'args'          => [],
         ];
+    }
+
+    public function domainAliases()
+    {
+        $conf = $this->getPacConf();
+        $main = $this->getMainDomainFromConfig($conf);
+        if ($main === '') {
+            $this->answer($this->input['callback_id'], 'set main domain first', true);
+            $this->menu('config');
+            return;
+        }
+        $aliases = $this->getDomainAliasesFromConfig($conf);
+        $current = empty($aliases) ? '(empty)' : implode(", ", $aliases);
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter aliases separated by comma/new line. Current: $current\nUse 0 to clear aliases.",
+            $this->input['message_id'],
+            reply: 'enter domain aliases',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setDomainAliases',
+            'args'          => [],
+        ];
+    }
+
+    public function setDomainAliases($text)
+    {
+        $conf = $this->getPacConf();
+        $main = $this->getMainDomainFromConfig($conf);
+        if ($main === '') {
+            $this->menu('config');
+            return;
+        }
+        if (trim((string) $text) === '0') {
+            $aliases = [];
+        } else {
+            $aliases = array_values(array_filter(
+                $this->parseDomainListInput((string) $text),
+                fn($domain) => $domain !== $main
+            ));
+        }
+        $conf['domain_main'] = $main;
+        $conf['domain'] = $main;
+        $conf['domain_aliases'] = $aliases;
+        $this->setPacConf($conf);
+        $allDomains = $this->getAllConfiguredDomains($conf);
+        $this->setUpstreamDomainOcserv($allDomains);
+        $this->setUpstreamDomainNaive($allDomains);
+        $this->cloakNginx();
+        $this->menu('config');
     }
 
     public function selfssl()
@@ -2806,6 +3003,192 @@ class Bot
         }
         $this->setPacConf($c);
         $this->xray();
+    }
+
+    public function subscriptionBranding()
+    {
+        $c = $this->getPacConf();
+        $appsConfigUrl = (string) ($c['subscription_apps_config_url'] ?? '');
+        $appsMode = 'custom';
+        if ($appsConfigUrl === 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json') {
+            $appsMode = 'hwid';
+        } elseif ($appsConfigUrl === 'https://cdn.jsdelivr.net/gh/legiz-ru/my-remnawave@main/sub-page/subpage-config/multiapp.json') {
+            $appsMode = 'all';
+        }
+        $lines = [
+            'Menu -> xray -> subscription branding',
+            'metaTitle=' . (string) ($c['subscription_meta_title'] ?? ''),
+            'announce=' . (string) ($c['subscription_announce'] ?? ''),
+            'metaDescription=' . (string) ($c['subscription_meta_description'] ?? ''),
+            'supportUrl=' . (string) ($c['subscription_support_url'] ?? ''),
+            'brandingTitle=' . (string) ($c['subscription_branding_title'] ?? ''),
+            'brandingLogoUrl=' . (string) ($c['subscription_branding_logo_url'] ?? ''),
+            'appsConfigUrl=' . $appsConfigUrl,
+        ];
+        $data = [
+            [
+                ['text' => 'metaTitle', 'callback_data' => '/subscriptionBrandingField metaTitle'],
+                ['text' => 'announce', 'callback_data' => '/subscriptionBrandingField announce'],
+            ],
+            [
+                ['text' => 'metaDescription', 'callback_data' => '/subscriptionBrandingField metaDescription'],
+                ['text' => 'supportUrl', 'callback_data' => '/subscriptionBrandingField supportUrl'],
+            ],
+            [
+                ['text' => 'brandingTitle', 'callback_data' => '/subscriptionBrandingField brandingTitle'],
+                ['text' => 'brandingLogoUrl', 'callback_data' => '/subscriptionBrandingField brandingLogoUrl'],
+            ],
+            [
+                ['text' => 'edit all (key=value)', 'callback_data' => '/subscriptionBrandingBulk'],
+            ],
+            [
+                ['text' => 'apps: only HWID' . ($appsMode === 'hwid' ? ' ✅' : ''), 'callback_data' => '/subscriptionAppsConfig hwid'],
+            ],
+            [
+                ['text' => 'apps: all apps' . ($appsMode === 'all' ? ' ✅' : ''), 'callback_data' => '/subscriptionAppsConfig all'],
+            ],
+            [
+                ['text' => 'apps: custom URL' . ($appsMode === 'custom' ? ' ✅' : ''), 'callback_data' => '/subscriptionAppsConfigCustom'],
+            ],
+            [
+                ['text' => $this->i18n('back'), 'callback_data' => '/xray'],
+            ],
+        ];
+        $this->update(
+            $this->input['chat'],
+            $this->input['message_id'],
+            implode("\n", $lines),
+            $data,
+        );
+    }
+
+    public function subscriptionBrandingBulk()
+    {
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} edit subscription branding as key=value (one per line)",
+            $this->input['message_id'],
+            reply: 'key=value lines',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setSubscriptionBranding',
+            'args'          => [],
+        ];
+    }
+
+    public function subscriptionBrandingField($field)
+    {
+        $allowed = ['metaTitle', 'announce', 'metaDescription', 'supportUrl', 'brandingTitle', 'brandingLogoUrl'];
+        if (!in_array($field, $allowed, true)) {
+            $this->answer($this->input['callback_id'], 'invalid field', true);
+            return;
+        }
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter value for $field",
+            $this->input['message_id'],
+            reply: "value for $field",
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setSubscriptionBrandingField',
+            'args'          => [$field],
+        ];
+    }
+
+    public function subscriptionAppsConfigPreset($mode)
+    {
+        $pac = $this->getPacConf();
+        if ($mode === 'all') {
+            $pac['subscription_apps_config_url'] = 'https://cdn.jsdelivr.net/gh/legiz-ru/my-remnawave@main/sub-page/subpage-config/multiapp.json';
+        } else {
+            $pac['subscription_apps_config_url'] = 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json';
+        }
+        $this->setPacConf($pac);
+        $this->subscriptionBranding();
+    }
+
+    public function subscriptionAppsConfigCustom()
+    {
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter custom apps config url",
+            $this->input['message_id'],
+            reply: 'https://example.com/config.json',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setSubscriptionAppsConfigCustom',
+            'args'          => [],
+        ];
+    }
+
+    public function setSubscriptionAppsConfigCustom($url)
+    {
+        $url = trim((string) $url);
+        if ($url === '') {
+            $this->send($this->input['chat'], 'empty url', $this->input['message_id']);
+            return;
+        }
+        if (!preg_match('~^https?://~i', $url)) {
+            $url = 'https://' . $url;
+        }
+        if (!filter_var($url, FILTER_VALIDATE_URL)) {
+            $this->send($this->input['chat'], 'invalid url', $this->input['message_id']);
+            return;
+        }
+        $pac = $this->getPacConf();
+        $pac['subscription_apps_config_url'] = $url;
+        $this->setPacConf($pac);
+        $this->subscriptionBranding();
+    }
+
+    public function setSubscriptionBranding($text)
+    {
+        $pac = $this->getPacConf();
+        $map = [
+            'metaTitle' => 'subscription_meta_title',
+            'announce' => 'subscription_announce',
+            'metaDescription' => 'subscription_meta_description',
+            'supportUrl' => 'subscription_support_url',
+            'brandingTitle' => 'subscription_branding_title',
+            'brandingLogoUrl' => 'subscription_branding_logo_url',
+        ];
+        $lines = preg_split('~\r?\n~', (string) $text);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || strpos($line, '=') === false) {
+                continue;
+            }
+            [$key, $value] = array_map('trim', explode('=', $line, 2));
+            if (!isset($map[$key])) {
+                continue;
+            }
+            $pac[$map[$key]] = $value;
+        }
+        $this->setPacConf($pac);
+        $this->subscriptionBranding();
+    }
+
+    public function setSubscriptionBrandingField($text, $field)
+    {
+        $map = [
+            'metaTitle' => 'subscription_meta_title',
+            'announce' => 'subscription_announce',
+            'metaDescription' => 'subscription_meta_description',
+            'supportUrl' => 'subscription_support_url',
+            'brandingTitle' => 'subscription_branding_title',
+            'brandingLogoUrl' => 'subscription_branding_logo_url',
+        ];
+        if (empty($map[$field])) {
+            $this->answer($this->input['callback_id'], 'invalid field', true);
+            return;
+        }
+        $pac = $this->getPacConf();
+        $pac[$map[$field]] = trim((string) $text);
+        $this->setPacConf($pac);
+        $this->subscriptionBranding();
     }
 
     public function setSubdomain($text)
@@ -5237,6 +5620,23 @@ DNS-over-HTTPS with IP:
         $pac = $this->getPacConf();
         $pac['hwid_runtime_mode_enabled'] = !empty($pac['hwid_runtime_mode_enabled']) ? 0 : 1;
         $this->setPacConf($pac);
+        if (empty($pac['hwid_runtime_mode_enabled'])) {
+            $xray = $this->getXray();
+            $changed = false;
+            foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $idx => $client) {
+                if (!empty($client['device_parent_id'])) {
+                    continue;
+                }
+                if (!array_key_exists('hwid_runtime_mode', $client) || empty($client['hwid_runtime_mode'])) {
+                    if ($this->reactivateParentUuidForClient($xray, $idx)) {
+                        $changed = true;
+                    }
+                }
+            }
+            if ($changed) {
+                $this->restartXray($xray);
+            }
+        }
         $this->answer($this->input['callback_id'], 'HWID runtime mode: ' . (!empty($pac['hwid_runtime_mode_enabled']) ? 'on' : 'off'), true);
         if ($context === 'xray') {
             $this->xray();
@@ -5567,11 +5967,60 @@ DNS-over-HTTPS with IP:
         if (!in_array($owner['id'], $owner['subscription_legacy_ids'], true)) {
             $owner['subscription_legacy_ids'][] = (string) $owner['id'];
         }
-        $newId = $this->createXrayUuid();
-        while ($this->findXrayClientIndexById($xray, $newId) !== null) {
-            $newId = $this->createXrayUuid();
+        // Parent UUID retirement is deferred until all known HWIDs
+        // (from hwid.json for this subscription) confirm runtime migration.
+        if (!array_key_exists('runtime_parent_retired', $owner)) {
+            $owner['runtime_parent_retired'] = 0;
         }
-        $owner['id'] = $newId;
+        return true;
+    }
+
+    protected function canRetireParentRuntimeUuid(array $devices): bool
+    {
+        if (empty($devices) || !is_array($devices)) {
+            return false;
+        }
+        foreach ($devices as $info) {
+            if (!is_array($info)) {
+                return false;
+            }
+            if (empty($info['device_uuid'])) {
+                return false;
+            }
+            if (empty($info['runtime_confirmed'])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    protected function reactivateParentUuidForClient(array &$xray, int $ownerIndex): bool
+    {
+        if (!isset($xray['inbounds'][0]['settings']['clients'][$ownerIndex])) {
+            return false;
+        }
+        $owner = &$xray['inbounds'][0]['settings']['clients'][$ownerIndex];
+        if (!empty($owner['device_parent_id'])) {
+            return false;
+        }
+        $subscriptionId = (string) ($owner['subscription_id'] ?? '');
+        if ($subscriptionId === '') {
+            return false;
+        }
+        $currentId = (string) ($owner['id'] ?? '');
+        if ($currentId === $subscriptionId) {
+            if (!empty($owner['runtime_parent_retired'])) {
+                $owner['runtime_parent_retired'] = 0;
+                return true;
+            }
+            return false;
+        }
+        $existing = $this->findXrayClientIndexById($xray, $subscriptionId);
+        if ($existing !== null && $existing !== $ownerIndex) {
+            return false;
+        }
+        $owner['id'] = $subscriptionId;
+        $owner['runtime_parent_retired'] = 0;
         return true;
     }
 
@@ -5649,6 +6098,7 @@ DNS-over-HTTPS with IP:
                     'os_version' => '',
                     'device_model' => '',
                     'device_uuid' => (string) $meta['id'],
+                    'runtime_confirmed' => 0,
                 ];
                 continue;
             }
@@ -5704,6 +6154,7 @@ DNS-over-HTTPS with IP:
                 'os_version' => $_SERVER['HTTP_X_VER_OS'] ?? '',
                 'device_model' => $_SERVER['HTTP_X_DEVICE_MODEL'] ?? '',
                 'device_uuid' => $deviceUuid,
+                'runtime_confirmed' => 1,
             ];
             if (empty($existingByHwid[$hwid]['id'])) {
                 $xray['inbounds'][0]['settings']['clients'][] = $this->createRuntimeDeviceClient($owner, $ownerSubId, $deviceUuid, $hwid);
@@ -5728,6 +6179,21 @@ DNS-over-HTTPS with IP:
             $devices[$hwid]['device_os'] = $_SERVER['HTTP_X_DEVICE_OS'] ?? '';
             $devices[$hwid]['os_version'] = $_SERVER['HTTP_X_VER_OS'] ?? '';
             $devices[$hwid]['device_model'] = $_SERVER['HTTP_X_DEVICE_MODEL'] ?? '';
+            $devices[$hwid]['runtime_confirmed'] = 1;
+        }
+
+        // Rotate parent UUID only when all known HWIDs have confirmed runtime migration.
+        if ($this->canRetireParentRuntimeUuid($devices)) {
+            $owner = &$xray['inbounds'][0]['settings']['clients'][$ownerIndex];
+            if (empty($owner['runtime_parent_retired'])) {
+                $newId = $this->createXrayUuid();
+                while ($this->findXrayClientIndexById($xray, $newId) !== null) {
+                    $newId = $this->createXrayUuid();
+                }
+                $owner['id'] = $newId;
+                $owner['runtime_parent_retired'] = 1;
+                $changed = true;
+            }
         }
 
         $storage[$ownerSubId] = $devices;
@@ -5747,6 +6213,13 @@ DNS-over-HTTPS with IP:
         $pac = $this->getPacConf();
         $runtimeModeEnabled = $this->isHwidRuntimeModeEnabled($client);
         header('X-HWID-Runtime-Mode: ' . ($runtimeModeEnabled ? 'on' : 'off'));
+
+        if (!$runtimeModeEnabled && $clientIndex !== null) {
+            $xray = $this->getXray();
+            if ($this->reactivateParentUuidForClient($xray, $clientIndex)) {
+                $this->restartXray($xray);
+            }
+        }
 
         if (empty($pac['hwid_limit_enabled']) || !empty($client['hwid_disabled'])) {
             return true;
@@ -6445,7 +6918,7 @@ DNS-over-HTTPS with IP:
         }
         $this->setPacConf($pac);
         file_put_contents('/config/deny', $text ?: '');
-        $this->ssh('nginx -s reload', 'up');
+        $this->ssh('nginx -s reload', 'upstream');
     }
 
     public function linkXray($i, $s = false)
@@ -7253,17 +7726,22 @@ DNS-over-HTTPS with IP:
         $c      = $this->getXray();
         $p      = $this->getPacConf();
         $text[] = "Menu -> " . $this->i18n('xray');
-        $fake = $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
-            ?? $c['inbounds'][1]['streamSettings']['realitySettings']['serverNames'][0]
-            ?? null;
-        if (!empty($fake)) {
+        $fake = null;
+        foreach (($c['inbounds'] ?? []) as $inbound) {
+            $candidate = $inbound['streamSettings']['realitySettings']['serverNames'][0] ?? '';
+            if ($candidate !== '') {
+                $fake = $candidate;
+                break;
+            }
+        }
+        if (!empty($fake) && in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
             $text[] = "fake domain: <code>$fake</code>";
         }
         $text[] = 'transport: ' . ($p['transport'] ?: 'Websocket');
         $st = $this->getXrayStats();
         $td = $this->getBytes($st['global']['download'] + $st['session']['download']);
         $tu = $this->getBytes($st['global']['upload'] + $st['session']['upload']);
-        $text[] = "?$td  ?$tu";
+        $text[] = "⬇ $td  ⬆ $tu";
         $data[] = [
             [
                 'text'          => $this->i18n('reset stats'),
@@ -7284,6 +7762,10 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => $p['linkdomain'] ?: $this->i18n('cdn'),
                 'callback_data' => '/addLinkDomain',
+            ],
+            [
+                'text'          => 'subscription branding',
+                'callback_data' => '/subscriptionBranding',
             ],
         ];
         $data[] = [
@@ -7338,10 +7820,16 @@ DNS-over-HTTPS with IP:
                     'callback_data' => "/changeFakeDomain",
                 ],
                 [
-                    'text'          => $this->i18n('selfFakeDomain'),
-                    'callback_data' => "/selfFakeDomain",
+                    'text'          => 'change target ip/domain',
+                    'callback_data' => "/changeTargetDestination",
                 ],
             ];
+            if ($p['transport'] === 'Reality') {
+                $data[count($data) - 1][] = [
+                    'text'          => $this->i18n('selfFakeDomain'),
+                    'callback_data' => "/selfFakeDomain",
+                ];
+            }
         }
         $data[] = [
             [
@@ -8067,6 +8555,10 @@ DNS-over-HTTPS with IP:
             unset($client['hwid_runtime_mode']);
         }
 
+        if (empty($client['hwid_runtime_mode'])) {
+            $this->reactivateParentUuidForClient($xray, $i);
+        }
+
         file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         $this->hwidUser($i);
     }
@@ -8753,12 +9245,20 @@ DNS-over-HTTPS with IP:
                 }
                 break;
         }
-        $realityInbound = $xr['inbounds'][1] ?? $xr['inbounds'][0];
-        $realityShortId = $realityInbound['streamSettings']['realitySettings']['shortIds'][0]
-            ?? $xr['inbounds'][0]['streamSettings']['realitySettings']['shortIds'][0]
+        $realityInbound = null;
+        foreach (($xr['inbounds'] ?? []) as $inbound) {
+            if (($inbound['streamSettings']['security'] ?? '') === 'reality') {
+                $realityInbound = $inbound;
+                break;
+            }
+        }
+        $realitySettings = $realityInbound['streamSettings']['realitySettings'] ?? [];
+        $fallbackRealitySettings = $xr['inbounds'][0]['streamSettings']['realitySettings'] ?? [];
+        $realityShortId = $realitySettings['shortIds'][0]
+            ?? $fallbackRealitySettings['shortIds'][0]
             ?? '';
-        $realityServerName = $realityInbound['streamSettings']['realitySettings']['serverNames'][0]
-            ?? $xr['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
+        $realityServerName = $realitySettings['serverNames'][0]
+            ?? $fallbackRealitySettings['serverNames'][0]
             ?? $domain;
         $c = json_decode($this->replaceTags(json_encode($c), [
             '"~pac~"'        => json_encode(array_keys(array_filter($pac['includelist'] ?? []))),
@@ -9112,27 +9612,83 @@ DNS-over-HTTPS with IP:
     public function setUpstreamDomain($domain)
     {
         $nginx = file_get_contents('/config/upstream.conf');
-        $t = preg_replace('~#domain.+#domain~s', "#domain\n$domain reality;\n#domain", $nginx);
+        $t = preg_replace('~#domain\s*\R.*?\R\s*#domain~s', "#domain\n$domain reality;\n#domain", $nginx);
+        if ($t === null) {
+            $t = $nginx;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
-    public function setUpstreamDomainOcserv($domain)
+    public function setUpstreamRealityPort($port)
+    {
+        $port = (int) $port;
+        if ($port <= 0) {
+            $port = 443;
+        }
+        $nginx = file_get_contents('/config/upstream.conf');
+        $realityBlock = "upstream reality {\n        server xr:$port;\n    }";
+        $t = preg_replace('~upstream\s+reality\s*\{[^}]*\}~s', $realityBlock, $nginx, 1, $replaced);
+        if ($t === null) {
+            $t = $nginx;
+            $replaced = 0;
+        }
+        if (empty($replaced)) {
+            $t = preg_replace('~(upstream\s+other\s*\{[^}]*\}\s*)~s', '$1' . "\n    $realityBlock\n\n", $t, 1);
+            if ($t === null) {
+                $t = $nginx;
+            }
+        }
+        file_put_contents('/config/upstream.conf', $t);
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
+    }
+
+    public function setUpstreamDomainOcserv($domains)
     {
         $sub   = $this->getHashSubdomain('oc');
         $nginx = file_get_contents('/config/upstream.conf');
-        $t     = preg_replace('~#ocserv.+#ocserv~s', $domain ? "#ocserv\n" . ($sub ? '' : '#' ) . "$sub.$domain ocserv;\n#ocserv" : "#ocserv\n#$sub.\$domain ocserv;\n#ocserv", $nginx);
+        if (!is_array($domains)) {
+            $domains = [$domains];
+        }
+        $rules = [];
+        foreach ($domains as $domain) {
+            $domain = $this->normalizeDomainName((string) $domain);
+            if ($domain === '' || $sub === '') {
+                continue;
+            }
+            $rules[] = "$sub.$domain ocserv;";
+        }
+        $body = empty($rules) ? "#$sub.\$domain ocserv;" : implode("\n", $rules);
+        $t     = preg_replace('~#ocserv\s*\R.*?\R\s*#ocserv~s', "#ocserv\n$body\n#ocserv", $nginx);
+        if ($t === null) {
+            $t = $nginx;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
-    public function setUpstreamDomainNaive($domain)
+    public function setUpstreamDomainNaive($domains)
     {
         $sub   = $this->getHashSubdomain('np');
         $nginx = file_get_contents('/config/upstream.conf');
-        $t = preg_replace('~#naive.+#naive~s', $domain ? "#naive\n" . ($sub ? '' : '#' ) . "$sub.$domain naive;\n#naive" : "#naive\n#$sub.\$domain naive;\n#naive", $nginx);
+        if (!is_array($domains)) {
+            $domains = [$domains];
+        }
+        $rules = [];
+        foreach ($domains as $domain) {
+            $domain = $this->normalizeDomainName((string) $domain);
+            if ($domain === '' || $sub === '') {
+                continue;
+            }
+            $rules[] = "$sub.$domain naive;";
+        }
+        $body = empty($rules) ? "#$sub.\$domain naive;" : implode("\n", $rules);
+        $t = preg_replace('~#naive\s*\R.*?\R\s*#naive~s', "#naive\n$body\n#naive", $nginx);
+        if ($t === null) {
+            $t = $nginx;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        $this->ssh("nginx -s reload 2>&1", 'upstream');
     }
 
     public function getHashBot($notset = false)
@@ -9153,7 +9709,12 @@ DNS-over-HTTPS with IP:
         $conf     = $this->getPacConf();
         $template = file_get_contents('/config/nginx_default.conf');
         // $template = preg_replace('~server_name ip~', "server_name {$this->ip}", $template);
-        $template = preg_replace('~server_name domain~', "server_name " . ($conf['domain'] ? " *.{$conf['domain']} {$conf['domain']}" : '_'), $template);
+        $serverNames = [];
+        foreach ($this->getAllConfiguredDomains($conf) as $domainName) {
+            $serverNames[] = "*.$domainName";
+            $serverNames[] = $domainName;
+        }
+        $template = preg_replace('~server_name domain~', "server_name " . ($serverNames ? implode(' ', array_unique($serverNames)) : '_'), $template);
         if ($conf['domain'] && $conf['letsencrypt']) {
             $template = preg_replace('/#~([^\n]+)?/', "#~{$conf['letsencrypt']}", $template);
             preg_match_all('~#-domain.+?#-domain~s', $template, $m);
@@ -9490,17 +10051,23 @@ DNS-over-HTTPS with IP:
         $conf = $this->getPacConf();
         $oc   = $this->getHashSubdomain('oc');
         $np   = $this->getHashSubdomain('np');
-        if (!empty($conf['domain'])) {
+        $mainDomain = $this->getMainDomainFromConfig($conf);
+        $aliases = $this->getDomainAliasesFromConfig($conf);
+        $allDomains = $this->getAllConfiguredDomains($conf);
+        if (!empty($mainDomain)) {
             $ssl_expiry = $this->expireCert();
             $certs      = $this->domainsCert() ?: [];
 
             $text[] = "<blockquote>";
             $text[] = "Domains:";
-            $text[] = $conf['domain'] . (in_array($conf['domain'], $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-            $text[] = 'naive ' . "$np.{$conf['domain']}" . (in_array("$np.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-            $text[] = 'openconnect ' . "$oc.{$conf['domain']}" . (in_array("$oc.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-            if (!empty($conf['adguardkey'])) {
-                $text[] = "{$conf['adguardkey']}.{$conf['domain']}" . (in_array("{$conf['adguardkey']}.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';;
+            foreach ($allDomains as $idx => $domainName) {
+                $prefix = $idx === 0 ? 'main' : 'alias';
+                $text[] = "$prefix $domainName" . (in_array($domainName, $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
+                $text[] = 'naive ' . "$np.$domainName" . (in_array("$np.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
+                $text[] = 'openconnect ' . "$oc.$domainName" . (in_array("$oc.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
+                if (!empty($conf['adguardkey'])) {
+                    $text[] = "{$conf['adguardkey']}.$domainName" . (in_array("{$conf['adguardkey']}.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';
+                }
             }
             $text[] = "</blockquote>";
         } else {
@@ -9510,8 +10077,8 @@ DNS-over-HTTPS with IP:
         $data = [
             [
                 [
-                    'text'          => $conf['domain'] ? "{$this->i18n('delete')} {$conf['domain']}" : $this->i18n('install domain'),
-                    'callback_data' => $conf['domain'] ? '/deldomain' : '/domain',
+                    'text'          => $mainDomain ? "{$this->i18n('delete')} {$mainDomain}" : $this->i18n('install domain'),
+                    'callback_data' => $mainDomain ? '/deldomain' : '/domain',
                 ],
                 [
                     'text'          => $this->i18n('nip.io'),
@@ -9519,7 +10086,13 @@ DNS-over-HTTPS with IP:
                 ],
             ],
         ];
-        if ($conf['domain']) {
+        if ($mainDomain) {
+            $data[] = [
+                [
+                    'text'          => 'domain aliases: ' . count($aliases),
+                    'callback_data' => '/domainAliases',
+                ],
+            ];
             if ($cert = $this->nginxGetTypeCert()) {
                 switch ($cert) {
                     case 'letsencrypt':
@@ -10030,17 +10603,76 @@ DNS-over-HTTPS with IP:
         ];
     }
 
+    public function changeTargetDestination()
+    {
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter target ip/domain with optional port",
+            $this->input['message_id'],
+            reply: 'enter target ip/domain',
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message'  => $this->input['message_id'],
+            'start_callback' => $this->input['callback_id'],
+            'callback'       => 'setTargetDestination',
+            'args'           => [],
+        ];
+    }
+
     public function setFakeDomain($domain, $self = false)
     {
         $c = $this->getXray();
         $p = $this->getPacConf();
-        $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
-        $c['inbounds'][0]['streamSettings']['realitySettings']['dest'] = $self ? "10.10.1.2:443" : "$domain:443";
+        // In Both mode, keep reality destination on fake domain only.
+        if (($p['transport'] ?? '') === 'Both') {
+            $self = false;
+        }
+        $dest = $self ? "10.10.1.2:443" : "$domain:443";
+        $updated = false;
+        foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
+            if (empty($c['inbounds'][$idx]['streamSettings']['realitySettings'])) {
+                continue;
+            }
+            $c['inbounds'][$idx]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
+            $c['inbounds'][$idx]['streamSettings']['realitySettings']['dest'] = $dest;
+            $updated = true;
+        }
+        if (!$updated) {
+            $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
+            $c['inbounds'][0]['streamSettings']['realitySettings']['dest'] = $dest;
+        }
         $p['reality']['domain'] = $domain;
-        $p['reality']['destination'] = $self ? "10.10.1.2:443" : "$domain:443";
+        $p['reality']['destination'] = $dest;
         $this->setPacConf($p);
         $this->restartXray($c);
         $this->setUpstreamDomain($domain);
+        $this->xray();
+    }
+
+    public function setTargetDestination($target)
+    {
+        $target = trim((string) $target);
+        if ($target === '') {
+            $this->answer($this->input['callback_id'], 'empty target', true);
+            return;
+        }
+        if (!preg_match('~:\d+$~', $target)) {
+            $target .= ':443';
+        }
+
+        $xray = $this->getXray();
+        $pac  = $this->getPacConf();
+        $pac['reality']['destination'] = $target;
+
+        foreach (($xray['inbounds'] ?? []) as $idx => $inbound) {
+            if (!isset($xray['inbounds'][$idx]['streamSettings']['realitySettings'])) {
+                continue;
+            }
+            $xray['inbounds'][$idx]['streamSettings']['realitySettings']['dest'] = $target;
+        }
+
+        $this->setPacConf($pac);
+        $this->restartXray($xray);
         $this->xray();
     }
 
@@ -10064,10 +10696,18 @@ DNS-over-HTTPS with IP:
         $p['reality']['destination'] = $p['reality']['destination'] ?: $p['reality']['domain'] . ':443';
         $p['transport']              = $transport;
 
-        $realityInbound = $x['inbounds'][1] ?? $x['inbounds'][0];
-        $p['reality']['domain']      = $realityInbound['streamSettings']['realitySettings']['serverNames'][0] ?: $p['reality']['domain'];
-        $p['reality']['destination'] = $realityInbound['streamSettings']['realitySettings']['dest'] ?: $p['reality']['destination'];
-        $p['reality']['shortId']     = $realityInbound['streamSettings']['realitySettings']['shortIds'][0] ?: $p['reality']['shortId'];
+        $realityInbound = null;
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (($inbound['streamSettings']['security'] ?? '') === 'reality') {
+                $realityInbound = $inbound;
+                break;
+            }
+        }
+        if (is_array($realityInbound)) {
+            $p['reality']['domain']      = $realityInbound['streamSettings']['realitySettings']['serverNames'][0] ?? $p['reality']['domain'];
+            $p['reality']['destination'] = $realityInbound['streamSettings']['realitySettings']['dest'] ?? $p['reality']['destination'];
+            $p['reality']['shortId']     = $realityInbound['streamSettings']['realitySettings']['shortIds'][0] ?? ($p['reality']['shortId'] ?? '');
+        }
 
         if (empty($p['xray'])) {
             $shortId = trim($this->ssh('openssl rand -hex 8', 'xr'));
@@ -10082,12 +10722,65 @@ DNS-over-HTTPS with IP:
         }
 
 
+        $clients = [];
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (!empty($inbound['settings']['clients']) && is_array($inbound['settings']['clients'])) {
+                $clients = $inbound['settings']['clients'];
+                break;
+            }
+        }
+        $sniffing = [
+            "destOverride" => ["http", "tls", "quic"],
+            "enabled"      => true,
+        ];
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (!empty($inbound['sniffing']) && is_array($inbound['sniffing'])) {
+                $sniffing = $inbound['sniffing'];
+                break;
+            }
+        }
+        $apiInbound = [
+            "listen"   => "127.0.0.1",
+            "port"     => 8080,
+            "protocol" => "dokodemo-door",
+            "settings" => ["address" => "127.0.0.1"],
+            "tag"      => "api",
+        ];
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (($inbound['tag'] ?? '') === 'api' || ($inbound['protocol'] ?? '') === 'dokodemo-door') {
+                $apiInbound = $inbound;
+                break;
+            }
+        }
+        $apiInbound['listen'] = '127.0.0.1';
+        $apiInbound['port'] = 8080;
+        $apiInbound['protocol'] = 'dokodemo-door';
+        $apiInbound['settings'] = ['address' => '127.0.0.1'];
+        $apiInbound['tag'] = 'api';
+
+        $clientsWs = $clients;
+        foreach ($clientsWs as $k => $v) {
+            unset($clientsWs[$k]['flow']);
+        }
+        $clientsReality = $clients;
+        foreach ($clientsReality as $k => $v) {
+            $clientsReality[$k]['flow'] = 'xtls-rprx-vision';
+        }
+
+        $baseInbound = [
+            "port"     => 443,
+            "protocol" => "vless",
+            "settings" => [
+                "clients"    => $clientsWs,
+                "decryption" => "none",
+            ],
+            "sniffing" => $sniffing,
+            "tag"      => "vless_tls",
+        ];
+
         switch ($transport) {
             case 'xhttp':
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
-                }
-                $x['inbounds'][0]['streamSettings'] = [
+                $baseInbound['streamSettings'] = [
                     "network"       => "xhttp",
                     "xhttpSettings" => [
                         "mode"  => "auto",
@@ -10101,19 +10794,24 @@ DNS-over-HTTPS with IP:
                         ]
                     ]
                 ];
+                $x['inbounds'] = [$baseInbound, $apiInbound];
                 break;
+
             case 'Both':
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
-                }
-                $x['inbounds'][0]['streamSettings'] = [
+                $p['reality']['destination'] = ($p['reality']['domain'] ?: 'yandex.ru') . ':443';
+                $baseInbound['streamSettings'] = [
                     "network"    => "ws",
-                    "wsSettings" => [
-                        "path" => "/ws$h"
-                    ]
+                    "wsSettings" => ["path" => "/ws$h"]
                 ];
-                if (isset($x['inbounds'][1])) {
-                    $x['inbounds'][1]['streamSettings'] = [
+                $realityInbound = [
+                    "port"     => 33443,
+                    "protocol" => "vless",
+                    "settings" => [
+                        "clients"    => $clientsWs,
+                        "decryption" => "none",
+                    ],
+                    "sniffing" => $sniffing,
+                    "streamSettings" => [
                         "network"         => "tcp",
                         "realitySettings" => [
                             "dest"         => $p['reality']['destination'],
@@ -10126,63 +10824,48 @@ DNS-over-HTTPS with IP:
                             "show"         => false,
                             "xver"         => 0
                         ],
-                        "tcpSettings" => [
-                            "acceptProxyProtocol" => true
-                        ],
-                        "sockopt" => [
-                            "acceptProxyProtocol" => true
-                        ],
+                        "tcpSettings" => ["acceptProxyProtocol" => true],
+                        "sockopt" => ["acceptProxyProtocol" => true],
                         "security" => "reality"
-                    ];
-                }
+                    ],
+                    "tag" => "vless_reality",
+                ];
+                $x['inbounds'] = [$baseInbound, $apiInbound, $realityInbound];
                 break;
 
             case 'Reality':
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    $x['inbounds'][0]['settings']['clients'][$k]['flow'] = 'xtls-rprx-vision';
-                }
-                $x['inbounds'][0]['streamSettings'] = [
+                $baseInbound['settings']['clients'] = $clientsReality;
+                $baseInbound['streamSettings'] = [
                     "network"         => "tcp",
                     "realitySettings" => [
-                        "dest"         => $p['reality']['destination'] ?: $x['inbounds'][0]['streamSettings']['realitySettings']['dest'],
+                        "dest"         => $p['reality']['destination'],
                         "maxClientVer" => "",
                         "maxTimeDiff"  => 0,
                         "minClientVer" => "",
                         "privateKey"   => $p['reality']['privateKey'],
-                        "serverNames"  => [
-                            $p['reality']['domain'] ?: $x['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]
-                        ],
-                        "shortIds" => [$p['reality']['shortId']] ?: $x['inbounds'][0]['streamSettings']['realitySettings']['shortIds'][0],
-                        "show"     => false,
-                        "xver"     => 0
+                        "serverNames"  => [$p['reality']['domain']],
+                        "shortIds"     => [$p['reality']['shortId']],
+                        "show"         => false,
+                        "xver"         => 0
                     ],
-                    "tcpSettings" => [
-                        "acceptProxyProtocol" => true
-                    ],
-                    "sockopt" => [
-                        "acceptProxyProtocol" => true
-                    ],
+                    "tcpSettings" => ["acceptProxyProtocol" => true],
+                    "sockopt" => ["acceptProxyProtocol" => true],
                     "security" => "reality"
                 ];
+                $x['inbounds'] = [$baseInbound, $apiInbound];
                 break;
 
             default:
-                $x['inbounds'][0]['streamSettings'] = [
+                $baseInbound['streamSettings'] = [
                     "network"    => "ws",
-                    "wsSettings" => [
-                        "path" => "/ws$h"
-                    ]
+                    "wsSettings" => ["path" => "/ws$h"]
                 ];
-                foreach ($x['inbounds'][0]['settings']['clients'] as $k => $v) {
-                    unset($x['inbounds'][0]['settings']['clients'][$k]['flow']);
-                }
+                $x['inbounds'] = [$baseInbound, $apiInbound];
                 break;
         }
 
-        $this->setUpstreamDomain(in_array($transport, ['Reality', 'Both'], true)
-            ? ($p['reality']['domain'] ?: ($x['inbounds'][1]['streamSettings']['realitySettings']['serverNames'][0] ?? $x['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]))
-            : 't'
-        );
+        $this->setUpstreamDomain(in_array($transport, ['Reality', 'Both'], true) ? ($p['reality']['domain'] ?: 't') : 't');
+        $this->setUpstreamRealityPort($transport === 'Both' ? 33443 : 443);
         $this->setPacConf($p);
         $this->restartXray($x);
         $this->xray();
@@ -10547,7 +11230,18 @@ DNS-over-HTTPS with IP:
     public function ssh($cmd, $service = 'wg', $wait = true, $log = '/dev/null')
     {
         try {
-            $c = ssh2_connect($service, 22);
+            $hosts = [$service];
+            if ($service === 'up' || $service === 'upstream') {
+                $hosts = ['upstream', 'up'];
+            }
+            $c = null;
+            foreach ($hosts as $host) {
+                $c = @ssh2_connect($host, 22);
+                if (!empty($c)) {
+                    $service = $host;
+                    break;
+                }
+            }
             if (empty($c)) {
                 throw new Exception("no connection to $service: \n$cmd\n" . var_export($c, true));
             }
