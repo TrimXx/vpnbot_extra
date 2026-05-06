@@ -6319,6 +6319,145 @@ DNS-over-HTTPS with IP:
         return $clientConf ?? null;
     }
 
+    protected function splitEndpointHostPort(string $endpoint): array
+    {
+        $endpoint = trim($endpoint);
+        if ($endpoint === '') {
+            return ['', 0];
+        }
+        if (preg_match('~^\[([^\]]+)\]:(\d+)$~', $endpoint, $m)) {
+            return [$m[1], (int) $m[2]];
+        }
+        if (preg_match('~^([^:]+):(\d+)$~', $endpoint, $m)) {
+            return [$m[1], (int) $m[2]];
+        }
+        return [$endpoint, 0];
+    }
+
+    protected function buildRuntimeWgClashProxy(array $ownerClient, string $hwid = '', string $deviceUuid = ''): ?array
+    {
+        if (!$this->isRuntimeDeviceWgEnabled($ownerClient)) {
+            return null;
+        }
+        $ownerSubId = $this->getClientSubscriptionId($ownerClient);
+        if ($ownerSubId === '') {
+            return null;
+        }
+        if ($deviceUuid === '' && $hwid !== '') {
+            $devices = $this->getHwidDevicesByUser($ownerSubId);
+            $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
+        }
+        if ($deviceUuid === '') {
+            return null;
+        }
+
+        $clients = $this->readClients();
+        $idx = $this->findDeviceWgClientIndex($clients, $ownerSubId, $hwid, $deviceUuid);
+        if ($idx === null || !isset($clients[$idx]) || !is_array($clients[$idx])) {
+            return null;
+        }
+        $wgClient = $clients[$idx];
+        $iface = $wgClient['interface'] ?? [];
+        $peer = $wgClient['peers'][0] ?? [];
+        if (!is_array($iface) || !is_array($peer)) {
+            return null;
+        }
+
+        $privateKey = (string) ($iface['PrivateKey'] ?? '');
+        $publicKey = (string) ($peer['PublicKey'] ?? '');
+        if ($privateKey === '' || $publicKey === '') {
+            return null;
+        }
+
+        $endpoint = (string) ($iface['## endpoint_custom'] ?? $peer['Endpoint'] ?? '');
+        [$server, $port] = $this->splitEndpointHostPort($endpoint);
+        if ($server === '' || $port <= 0) {
+            return null;
+        }
+
+        $address = (string) ($iface['Address'] ?? '');
+        $ip = '';
+        $ipv6 = '';
+        foreach (array_map('trim', explode(',', $address)) as $entry) {
+            $entry = preg_replace('~/.*$~', '', $entry);
+            if ($entry === '') {
+                continue;
+            }
+            if (strpos($entry, ':') !== false) {
+                $ipv6 = $entry;
+            } else {
+                $ip = $entry;
+            }
+        }
+
+        $allowedIpsRaw = (string) ($peer['AllowedIPs'] ?? '0.0.0.0/0');
+        $allowedIps = array_values(array_filter(array_map('trim', explode(',', $allowedIpsRaw))));
+        if (empty($allowedIps)) {
+            $allowedIps = ['0.0.0.0/0'];
+        }
+
+        $proxyName = !empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia']) ? 'AWG Device' : 'WG Device';
+        $proxy = [
+            'name' => $proxyName,
+            'type' => 'wireguard',
+            'server' => $server,
+            'port' => $port,
+            'private-key' => $privateKey,
+            'public-key' => $publicKey,
+            'allowed-ips' => $allowedIps,
+            'udp' => true,
+        ];
+        if ($ip !== '') {
+            $proxy['ip'] = $ip;
+        }
+        if ($ipv6 !== '') {
+            $proxy['ipv6'] = $ipv6;
+        }
+        if (!empty($peer['PresharedKey'])) {
+            $proxy['pre-shared-key'] = (string) $peer['PresharedKey'];
+        }
+        if (!empty($peer['PersistentKeepalive'])) {
+            $proxy['persistent-keepalive'] = (int) $peer['PersistentKeepalive'];
+        }
+        if (!empty($iface['MTU'])) {
+            $proxy['mtu'] = (int) $iface['MTU'];
+        }
+
+        $amneziaMap = [
+            'Jc' => 'jc',
+            'Jmin' => 'jmin',
+            'Jmax' => 'jmax',
+            'S1' => 's1',
+            'S2' => 's2',
+            'S3' => 's3',
+            'S4' => 's4',
+            'H1' => 'h1',
+            'H2' => 'h2',
+            'H3' => 'h3',
+            'H4' => 'h4',
+            'I1' => 'i1',
+            'I2' => 'i2',
+            'I3' => 'i3',
+            'I4' => 'i4',
+            'I5' => 'i5',
+            'J1' => 'j1',
+            'J2' => 'j2',
+            'J3' => 'j3',
+            'Itime' => 'itime',
+        ];
+        $amneziaOption = [];
+        foreach ($amneziaMap as $src => $dst) {
+            if (array_key_exists($src, $iface) && $iface[$src] !== '' && $iface[$src] !== null) {
+                $amneziaOption[$dst] = is_numeric($iface[$src]) ? (int) $iface[$src] : $iface[$src];
+            }
+        }
+        if (!empty($amneziaOption)) {
+            $proxy['amnezia-wg-option'] = $amneziaOption;
+        }
+
+        return $proxy;
+    }
+
     protected function deleteDeviceWgProfileByUuid(string $deviceUuid): void
     {
         if ($deviceUuid === '') {
@@ -9600,6 +9739,7 @@ DNS-over-HTTPS with IP:
             case 'cl':
                 $c['proxies'][$index]['server'] = '~domain~';
                 $c['proxies'][$index]['uuid']   = '~uid~';
+                $baseProxyName = (string) ($c['proxies'][$index]['name'] ?? '');
                 switch ($pac['transport']) {
                     case 'Reality':
                         unset($c['proxies'][$index]["ws-opts"]);
@@ -9685,7 +9825,6 @@ DNS-over-HTTPS with IP:
                             $c['proxies'][] = $realityProxy;
 
                             if (!empty($c['proxy-groups']) && is_array($c['proxy-groups'])) {
-                                $baseProxyName = $c['proxies'][$index]['name'] ?? '';
                                 foreach ($c['proxy-groups'] as $gk => $group) {
                                     if (empty($group['proxies']) || !is_array($group['proxies'])) {
                                         continue;
@@ -9706,6 +9845,24 @@ DNS-over-HTTPS with IP:
                         $c['proxies'][$index]["skip-cert-verify"] = false;
                         $c['proxies'][$index]['servername']       = '~domain~';
                         break;
+                }
+                $runtimeWgProxy = $this->buildRuntimeWgClashProxy(
+                    $client,
+                    trim((string) ($_SERVER['HTTP_X_HWID'] ?? '')),
+                    (string) ($_SERVER['VPNBOT_DEVICE_UUID'] ?? '')
+                );
+                if (is_array($runtimeWgProxy)) {
+                    $c['proxies'][] = $runtimeWgProxy;
+                    if (!empty($c['proxy-groups']) && is_array($c['proxy-groups'])) {
+                        foreach ($c['proxy-groups'] as $gk => $group) {
+                            if (empty($group['proxies']) || !is_array($group['proxies'])) {
+                                continue;
+                            }
+                            if ($baseProxyName !== '' && in_array($baseProxyName, $group['proxies'], true)) {
+                                $c['proxy-groups'][$gk]['proxies'][] = $runtimeWgProxy['name'];
+                            }
+                        }
+                    }
                 }
                 break;
         }
