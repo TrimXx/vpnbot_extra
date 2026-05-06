@@ -622,6 +622,15 @@ class Bot
             case preg_match('~^/xray(?: (\d+))?$~', $this->input['callback'], $m):
                 $this->xray($m[1] ?: 0);
                 break;
+            case preg_match('~^/xrayCore$~', $this->input['callback'], $m):
+                $this->xrayCore();
+                break;
+            case preg_match('~^/xrayHwid$~', $this->input['callback'], $m):
+                $this->xrayHwid();
+                break;
+            case preg_match('~^/xrayTemplates$~', $this->input['callback'], $m):
+                $this->xrayTemplates();
+                break;
             case preg_match('~^/xtlsblock(?: (\d+))?$~', $this->input['callback'], $m):
                 $this->xtlsblock($m[1] ?: 0);
                 break;
@@ -8215,121 +8224,18 @@ DNS-over-HTTPS with IP:
         $td = $this->getBytes($st['global']['download'] + $st['session']['download']);
         $tu = $this->getBytes($st['global']['upload'] + $st['session']['upload']);
         $text[] = "⬇ $td  ⬆ $tu";
-        $data[] = [
-            [
-                'text'          => $this->i18n('reset stats'),
-                'callback_data' => '/resetXrStats',
-            ],
-            [
-                'text'          => $this->i18n('reset monthly') . ": " . $this->i18n($this->getPacConf()['reset_monthly'] ? 'on' : 'off'),
-                'callback_data' => '/switchMonthlyStats',
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('main outbound name: ') . ($p['outbound'] ?: 'proxy'),
-                'callback_data' => '/mainOutbound',
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $p['linkdomain'] ?: $this->i18n('cdn'),
-                'callback_data' => '/addLinkDomain',
-            ],
-            [
-                'text'          => 'subscription branding',
-                'callback_data' => '/subscriptionBranding',
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('Reality') . ' ' . ($p['transport'] == 'Reality' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport Reality",
-            ],
-            [
-                'text'          => $this->i18n('Websocket') . ' ' . ($p['transport'] == 'Websocket' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport Websocket",
-            ],
-            [
-                'text'          => $this->i18n('XHTTP') . ($p['transport'] == 'xhttp' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport xhttp",
-            ],
-            [
-                'text'          => 'Both ' . ($p['transport'] == 'Both' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport Both",
-            ],
-        ];
-
-        $ip_count      = (int) ($p['ip_count'] ?? 1);
-        $hwidEnabled   = !empty($p['hwid_limit_enabled']);
-        $runtimeGlobal = !empty($p['hwid_runtime_mode_enabled']);
-        $runtimeWgEnabled = !empty($p['hwid_runtime_wg_profile_enabled']);
-        $runtimeWgEndpoint = trim((string) ($p['hwid_runtime_wg_endpoint'] ?? ''));
-        $defaultHwids  = max(1, (int) ($p['hwid_device_count'] ?: 1));
-        $data[] = [
-            [
-                'text'          => $this->i18n('ip limit') . ' ' . (!empty($p['ip_limit']) ? ": {$p['ip_limit']} sec & $ip_count" : $this->i18n('off')),
-                'callback_data' => "/setIpLimit",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('hwid limit') . ': ' . $this->i18n($hwidEnabled ? 'on' : 'off') . " ({$defaultHwids})",
-                'callback_data' => '/toggleHwidLimit xray',
-            ],
-            [
-                'text'          => $this->i18n('set hwid devices count'),
-                'callback_data' => '/setHwidDevices xray',
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => 'HWID runtime mode: ' . $this->i18n($runtimeGlobal ? 'on' : 'off'),
-                'callback_data' => '/toggleHwidRuntimeMode xray',
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => 'runtime WG/AWG profile: ' . $this->i18n($runtimeWgEnabled ? 'on' : 'off'),
-                'callback_data' => '/toggleRuntimeWgProfile',
-            ],
-            [
-                'text'          => 'runtime endpoint: ' . ($runtimeWgEndpoint ?: 'default'),
-                'callback_data' => '/setRuntimeWgEndpoint',
-            ],
-        ];
-        if (in_array($p['transport'], ['Reality', 'Both'], true)) {
-            $data[] = [
-                [
-                    'text'          => $this->i18n('changeFakeDomain'),
-                    'callback_data' => "/changeFakeDomain",
-                ],
-                [
-                    'text'          => 'change target ip/domain',
-                    'callback_data' => "/changeTargetDestination",
-                ],
-            ];
-            if ($p['transport'] === 'Reality') {
-                $data[count($data) - 1][] = [
-                    'text'          => $this->i18n('selfFakeDomain'),
-                    'callback_data' => "/selfFakeDomain",
-                ];
-            }
-        }
-        $data[] = [
-            [
-                'text'          => $this->i18n('v2ray templates'),
-                'callback_data' => "/templates v2ray",
-            ],
-            [
-                'text'          => $this->i18n('sing-box templates'),
-                'callback_data' => "/templates sing",
-            ],
-            [
-                'text'          => $this->i18n('mihomo templates'),
-                'callback_data' => "/templates clash",
-            ],
-        ];
+        $data[] = [[
+            'text' => 'core/network',
+            'callback_data' => '/xrayCore',
+        ]];
+        $data[] = [[
+            'text' => 'limits & HWID/runtime',
+            'callback_data' => '/xrayHwid',
+        ]];
+        $data[] = [[
+            'text' => 'templates & branding',
+            'callback_data' => '/xrayTemplates',
+        ]];
         $data[] = [
             [
                 'text'          => $this->i18n('routes'),
@@ -8403,6 +8309,182 @@ DNS-over-HTTPS with IP:
                 'callback_data' => "/menu",
             ],
         ];
+        $this->update(
+            $this->input['chat'],
+            $this->input['message_id'],
+            implode("\n", $text ?: ['...']),
+            $data ?: false,
+        );
+    }
+
+    public function xrayCore()
+    {
+        $c = $this->getXray();
+        $p = $this->getPacConf();
+        $text[] = "Menu -> " . $this->i18n('xray') . " -> core/network";
+        $fake = null;
+        foreach (($c['inbounds'] ?? []) as $inbound) {
+            $candidate = $inbound['streamSettings']['realitySettings']['serverNames'][0] ?? '';
+            if ($candidate !== '') {
+                $fake = $candidate;
+                break;
+            }
+        }
+        $text[] = 'main outbound: ' . ($p['outbound'] ?: 'proxy');
+        $text[] = 'transport: ' . ($p['transport'] ?: 'Websocket');
+        if (!empty($fake) && in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
+            $text[] = "fake domain: <code>$fake</code>";
+        }
+
+        $data[] = [
+            [
+                'text'          => $this->i18n('reset stats'),
+                'callback_data' => '/resetXrStats',
+            ],
+            [
+                'text'          => $this->i18n('reset monthly') . ": " . $this->i18n($this->getPacConf()['reset_monthly'] ? 'on' : 'off'),
+                'callback_data' => '/switchMonthlyStats',
+            ],
+        ];
+        $data[] = [[
+            'text' => $this->i18n('main outbound name: ') . ($p['outbound'] ?: 'proxy'),
+            'callback_data' => '/mainOutbound',
+        ]];
+        $data[] = [[
+            'text' => $p['linkdomain'] ?: $this->i18n('cdn'),
+            'callback_data' => '/addLinkDomain',
+        ]];
+        $data[] = [
+            [
+                'text'          => $this->i18n('Reality') . ' ' . ($p['transport'] == 'Reality' ? $this->i18n('on') : $this->i18n('off')),
+                'callback_data' => "/changeTransport Reality",
+            ],
+            [
+                'text'          => $this->i18n('Websocket') . ' ' . ($p['transport'] == 'Websocket' ? $this->i18n('on') : $this->i18n('off')),
+                'callback_data' => "/changeTransport Websocket",
+            ],
+            [
+                'text'          => $this->i18n('XHTTP') . ($p['transport'] == 'xhttp' ? $this->i18n('on') : $this->i18n('off')),
+                'callback_data' => "/changeTransport xhttp",
+            ],
+            [
+                'text'          => 'Both ' . ($p['transport'] == 'Both' ? $this->i18n('on') : $this->i18n('off')),
+                'callback_data' => "/changeTransport Both",
+            ],
+        ];
+        if (in_array($p['transport'], ['Reality', 'Both'], true)) {
+            $row = [
+                [
+                    'text'          => $this->i18n('changeFakeDomain'),
+                    'callback_data' => "/changeFakeDomain",
+                ],
+                [
+                    'text'          => 'change target ip/domain',
+                    'callback_data' => "/changeTargetDestination",
+                ],
+            ];
+            if ($p['transport'] === 'Reality') {
+                $row[] = [
+                    'text'          => $this->i18n('selfFakeDomain'),
+                    'callback_data' => "/selfFakeDomain",
+                ];
+            }
+            $data[] = $row;
+        }
+        $data[] = [[
+            'text' => $this->i18n('back'),
+            'callback_data' => '/xray',
+        ]];
+        $this->update(
+            $this->input['chat'],
+            $this->input['message_id'],
+            implode("\n", $text ?: ['...']),
+            $data ?: false,
+        );
+    }
+
+    public function xrayHwid()
+    {
+        $p = $this->getPacConf();
+        $text[] = "Menu -> " . $this->i18n('xray') . " -> limits & HWID/runtime";
+        $ipCount = (int) ($p['ip_count'] ?? 1);
+        $hwidEnabled = !empty($p['hwid_limit_enabled']);
+        $runtimeGlobal = !empty($p['hwid_runtime_mode_enabled']);
+        $runtimeWgEnabled = !empty($p['hwid_runtime_wg_profile_enabled']);
+        $runtimeWgEndpoint = trim((string) ($p['hwid_runtime_wg_endpoint'] ?? ''));
+        $defaultHwids = max(1, (int) ($p['hwid_device_count'] ?: 1));
+
+        $text[] = 'ip limit: ' . (!empty($p['ip_limit']) ? "{$p['ip_limit']} sec & {$ipCount}" : 'off');
+        $text[] = 'hwid limit: ' . ($hwidEnabled ? 'on' : 'off') . " ({$defaultHwids})";
+        $text[] = 'runtime mode: ' . ($runtimeGlobal ? 'on' : 'off');
+        $text[] = 'runtime WG/AWG profile: ' . ($runtimeWgEnabled ? 'on' : 'off');
+        $text[] = 'runtime endpoint: ' . ($runtimeWgEndpoint ?: 'default');
+
+        $data[] = [[
+            'text'          => $this->i18n('ip limit') . ' ' . (!empty($p['ip_limit']) ? ": {$p['ip_limit']} sec & {$ipCount}" : $this->i18n('off')),
+            'callback_data' => "/setIpLimit",
+        ]];
+        $data[] = [
+            [
+                'text'          => $this->i18n('hwid limit') . ': ' . $this->i18n($hwidEnabled ? 'on' : 'off') . " ({$defaultHwids})",
+                'callback_data' => '/toggleHwidLimit xray',
+            ],
+            [
+                'text'          => $this->i18n('set hwid devices count'),
+                'callback_data' => '/setHwidDevices xray',
+            ],
+        ];
+        $data[] = [[
+            'text' => 'HWID runtime mode: ' . $this->i18n($runtimeGlobal ? 'on' : 'off'),
+            'callback_data' => '/toggleHwidRuntimeMode xray',
+        ]];
+        $data[] = [
+            [
+                'text'          => 'runtime WG/AWG profile: ' . $this->i18n($runtimeWgEnabled ? 'on' : 'off'),
+                'callback_data' => '/toggleRuntimeWgProfile',
+            ],
+            [
+                'text'          => 'runtime endpoint: ' . ($runtimeWgEndpoint ?: 'default'),
+                'callback_data' => '/setRuntimeWgEndpoint',
+            ],
+        ];
+        $data[] = [[
+            'text' => $this->i18n('back'),
+            'callback_data' => '/xray',
+        ]];
+        $this->update(
+            $this->input['chat'],
+            $this->input['message_id'],
+            implode("\n", $text ?: ['...']),
+            $data ?: false,
+        );
+    }
+
+    public function xrayTemplates()
+    {
+        $text[] = "Menu -> " . $this->i18n('xray') . " -> templates & branding";
+        $data[] = [
+            [
+                'text'          => $this->i18n('v2ray templates'),
+                'callback_data' => "/templates v2ray",
+            ],
+            [
+                'text'          => $this->i18n('sing-box templates'),
+                'callback_data' => "/templates sing",
+            ],
+            [
+                'text'          => $this->i18n('mihomo templates'),
+                'callback_data' => "/templates clash",
+            ],
+        ];
+        $data[] = [[
+            'text'          => 'subscription branding',
+            'callback_data' => '/subscriptionBranding',
+        ]];
+        $data[] = [[
+            'text' => $this->i18n('back'),
+            'callback_data' => '/xray',
+        ]];
         $this->update(
             $this->input['chat'],
             $this->input['message_id'],
