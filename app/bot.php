@@ -6526,6 +6526,10 @@ DNS-over-HTTPS with IP:
         $runtimeModeEnabled = $this->isHwidRuntimeModeEnabled($client);
         header('X-HWID-Runtime-Mode: ' . ($runtimeModeEnabled ? 'on' : 'off'));
 
+        $hwidLimitActive = !empty($pac['hwid_limit_enabled']) && empty($client['hwid_disabled']);
+        $hwidNotSupported = false;
+        $hwidMaxReached = false;
+
         if (!$runtimeModeEnabled && $clientIndex !== null) {
             $xray = $this->getXray();
             if ($this->reactivateParentUuidForClient($xray, $clientIndex)) {
@@ -6533,12 +6537,20 @@ DNS-over-HTTPS with IP:
             }
         }
 
-        if (empty($pac['hwid_limit_enabled']) || !empty($client['hwid_disabled'])) {
+        if (!$hwidLimitActive) {
+            header('x-hwid-active: false');
+            header('x-hwid-not-supported: false');
+            header('x-hwid-max-devices-reached: false');
+            header('x-hwid-limit: false');
             return true;
         }
 
         $limit = (int) ($client['hwid_limit'] ?: ($pac['hwid_device_count'] ?: 0));
         if ($limit <= 0) {
+            header('x-hwid-active: true');
+            header('x-hwid-not-supported: false');
+            header('x-hwid-max-devices-reached: false');
+            header('x-hwid-limit: false');
             return true;
         }
 
@@ -6552,6 +6564,13 @@ DNS-over-HTTPS with IP:
         $paramsRaw = base64_decode($token, true);
         $params    = @unserialize($paramsRaw);
         $isRuleRequest = is_array($params) && !empty($params['r']);
+
+        $hwidNotSupported = !$isRuleRequest && !$isBrowser && $hwid === '';
+        $hwidMaxReached = count($devices) >= $limit;
+        header('x-hwid-active: true');
+        header('x-hwid-not-supported: ' . ($hwidNotSupported ? 'true' : 'false'));
+        header('x-hwid-max-devices-reached: ' . ($hwidMaxReached ? 'true' : 'false'));
+        header('x-hwid-limit: ' . ($hwidMaxReached ? 'true' : 'false'));
 
         if (!$isRuleRequest && $hwid === '') {
             if ($isBrowser) {
