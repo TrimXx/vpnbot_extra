@@ -6343,6 +6343,55 @@ DNS-over-HTTPS with IP:
         return [$endpoint, 0];
     }
 
+    protected function readClientsRaw(string $path): array
+    {
+        $raw = @file_get_contents($path);
+        if ($raw === false || $raw === '') {
+            return [];
+        }
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : [];
+    }
+
+    protected function getRuntimeDeviceWgClientByRefs(string $ownerSubId, string $hwid = '', string $deviceUuid = ''): ?array
+    {
+        $sources = [
+            $this->readClients(),
+            $this->readClientsRaw($this->clients),
+            $this->readClientsRaw($this->clients1),
+        ];
+        foreach ($sources as $clients) {
+            $idx = $this->findDeviceWgClientIndex($clients, $ownerSubId, $hwid, $deviceUuid);
+            if ($idx !== null && isset($clients[$idx]) && is_array($clients[$idx])) {
+                return $clients[$idx];
+            }
+        }
+        if ($deviceUuid === '' && $hwid === '') {
+            foreach ($sources as $clients) {
+                $candidate = null;
+                $count = 0;
+                foreach ($clients as $client) {
+                    if (!is_array($client) || !is_array($client['interface'] ?? null)) {
+                        continue;
+                    }
+                    $iface = $client['interface'];
+                    if (($iface['## owner_sub_id'] ?? '') !== $ownerSubId) {
+                        continue;
+                    }
+                    $candidate = $client;
+                    $count++;
+                    if ($count > 1) {
+                        break;
+                    }
+                }
+                if ($count === 1 && is_array($candidate)) {
+                    return $candidate;
+                }
+            }
+        }
+        return null;
+    }
+
     protected function buildRuntimeWgClashProxy(array $ownerClient, string $hwid = '', string $deviceUuid = ''): ?array
     {
         if (!$this->isRuntimeDeviceWgEnabled($ownerClient)) {
@@ -6360,12 +6409,10 @@ DNS-over-HTTPS with IP:
             return null;
         }
 
-        $clients = $this->readClients();
-        $idx = $this->findDeviceWgClientIndex($clients, $ownerSubId, $hwid, $deviceUuid);
-        if ($idx === null || !isset($clients[$idx]) || !is_array($clients[$idx])) {
+        $wgClient = $this->getRuntimeDeviceWgClientByRefs($ownerSubId, $hwid, $deviceUuid);
+        if (!is_array($wgClient)) {
             return null;
         }
-        $wgClient = $clients[$idx];
         $iface = $wgClient['interface'] ?? [];
         $peer = $wgClient['peers'][0] ?? [];
         if (!is_array($iface) || !is_array($peer)) {
