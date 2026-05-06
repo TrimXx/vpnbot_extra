@@ -9180,12 +9180,10 @@ DNS-over-HTTPS with IP:
         $vless   = $this->linkXray($k);
         $windows = "$scheme://{$domain}/pac$hash?t=si&r=w&s=$uid";
         $wgconf = '';
-        if (!empty($_SERVER['VPNBOT_DEVICE_UUID']) && $this->isRuntimeDeviceWgEnabled($client)) {
-            $wgconf = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
-                'h' => $hash,
-                't' => 'wg',
-                's' => $uid,
-            ]));
+        if ($this->isRuntimeDeviceWgEnabled($client)) {
+            // Keep AWG link visible in subscription even before a concrete device UUID
+            // is resolved; device-specific profile selection still happens on t=wg request.
+            $wgconf = "$scheme://{$domain}/pac$hash?t=wg&r=awg&s=$uid";
         }
         $_GET['s'] = $uid;
         foreach ([
