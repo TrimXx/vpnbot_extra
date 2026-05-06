@@ -6343,6 +6343,23 @@ DNS-over-HTTPS with IP:
         return [$endpoint, 0];
     }
 
+    protected function runInRuntimeWgContext(callable $callback)
+    {
+        $hadWgContext = isset($this->wg);
+        $previousWgContext = $hadWgContext ? $this->wg : null;
+        // Runtime device WG/AWG must always use WG1 context.
+        $this->wg = 1;
+        try {
+            return $callback();
+        } finally {
+            if ($hadWgContext) {
+                $this->wg = $previousWgContext;
+            } else {
+                unset($this->wg);
+            }
+        }
+    }
+
     protected function readClientsRaw(string $path): array
     {
         $raw = @file_get_contents($path);
@@ -6353,39 +6370,23 @@ DNS-over-HTTPS with IP:
         return is_array($data) ? $data : [];
     }
 
-    protected function getRuntimeDeviceWgClientByRefs(string $ownerSubId, string $hwid = '', string $deviceUuid = ''): ?array
+    protected function getRuntimeDeviceWgClientByRefs(string $deviceUuid = ''): ?array
     {
+        if ($deviceUuid === '') {
+            return null;
+        }
         $sources = [
             $this->readClients(),
             $this->readClientsRaw($this->clients),
             $this->readClientsRaw($this->clients1),
         ];
         foreach ($sources as $clients) {
-            $idx = $this->findDeviceWgClientIndex($clients, $ownerSubId, $hwid, $deviceUuid);
-            if ($idx !== null && isset($clients[$idx]) && is_array($clients[$idx])) {
-                return $clients[$idx];
-            }
-        }
-        if ($deviceUuid === '' && $hwid === '') {
-            foreach ($sources as $clients) {
-                $candidate = null;
-                $count = 0;
-                foreach ($clients as $client) {
-                    if (!is_array($client) || !is_array($client['interface'] ?? null)) {
-                        continue;
-                    }
-                    $iface = $client['interface'];
-                    if (($iface['## owner_sub_id'] ?? '') !== $ownerSubId) {
-                        continue;
-                    }
-                    $candidate = $client;
-                    $count++;
-                    if ($count > 1) {
-                        break;
-                    }
+            foreach ($clients as $client) {
+                if (!is_array($client) || !is_array($client['interface'] ?? null)) {
+                    continue;
                 }
-                if ($count === 1 && is_array($candidate)) {
-                    return $candidate;
+                if (($client['interface']['## device_uuid'] ?? '') === $deviceUuid) {
+                    return $client;
                 }
             }
         }
@@ -6397,19 +6398,13 @@ DNS-over-HTTPS with IP:
         if (!$this->isRuntimeDeviceWgEnabled($ownerClient)) {
             return null;
         }
-        $ownerSubId = $this->getClientSubscriptionId($ownerClient);
-        if ($ownerSubId === '') {
-            return null;
-        }
-        if ($deviceUuid === '' && $hwid !== '') {
-            $devices = $this->getHwidDevicesByUser($ownerSubId);
-            $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
-        }
+        // AWG/WG device proxy is strictly bound to a runtime device UUID.
+        // If UUID isn't resolved for current request, don't expose it in subscription.
         if ($deviceUuid === '') {
             return null;
         }
 
-        $wgClient = $this->getRuntimeDeviceWgClientByRefs($ownerSubId, $hwid, $deviceUuid);
+        $wgClient = $this->getRuntimeDeviceWgClientByRefs($deviceUuid);
         if (!is_array($wgClient)) {
             return null;
         }
@@ -6811,7 +6806,9 @@ DNS-over-HTTPS with IP:
             }
             $_SERVER['VPNBOT_DEVICE_UUID'] = $deviceUuid;
             if ($this->isRuntimeDeviceWgEnabled($client)) {
-                $this->ensureDeviceWgProfile($ownerSubId, $hwid, $deviceUuid);
+                $this->runInRuntimeWgContext(function () use ($ownerSubId, $hwid, $deviceUuid) {
+                    $this->ensureDeviceWgProfile($ownerSubId, $hwid, $deviceUuid);
+                });
             }
         } else {
             unset($_SERVER['VPNBOT_DEVICE_UUID']);
@@ -9293,7 +9290,9 @@ DNS-over-HTTPS with IP:
                     unset($xray['inbounds'][0]['settings']['clients'][$idx]);
                     $this->restartXray($xray);
                 }
-                $this->deleteDeviceWgProfileByUuid($deviceUuid);
+                $this->runInRuntimeWgContext(function () use ($deviceUuid) {
+                    $this->deleteDeviceWgProfileByUuid($deviceUuid);
+                });
             }
         }
         $this->hwidUser($i, $page);
@@ -9409,7 +9408,9 @@ DNS-over-HTTPS with IP:
                         } else {
                             file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
                         }
-                        $this->deleteDeviceWgProfileByUuid($deviceUuid);
+                        $this->runInRuntimeWgContext(function () use ($deviceUuid) {
+                            $this->deleteDeviceWgProfileByUuid($deviceUuid);
+                        });
                     } else {
                         file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
                     }
@@ -9598,7 +9599,9 @@ DNS-over-HTTPS with IP:
                 $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
             }
             $ownerSubId = $this->getClientSubscriptionId($client);
-            $wgClient = $this->ensureDeviceWgProfile($ownerSubId, $hwid, $deviceUuid);
+            $wgClient = $this->runInRuntimeWgContext(function () use ($ownerSubId, $hwid, $deviceUuid) {
+                return $this->ensureDeviceWgProfile($ownerSubId, $hwid, $deviceUuid);
+            });
             if (!is_array($wgClient)) {
                 http_response_code(404);
                 header('Content-Type: text/plain; charset=utf-8');
@@ -9606,11 +9609,15 @@ DNS-over-HTTPS with IP:
                 exit;
             }
             if ($return) {
-                return $this->createConfig($wgClient);
+                return $this->runInRuntimeWgContext(function () use ($wgClient) {
+                    return $this->createConfig($wgClient);
+                });
             }
             header('Content-type: text/plain; charset=utf-8');
             header('content-disposition: attachment; filename=' . ($email ?: 'device') . '_wg.conf');
-            echo $this->createConfig($wgClient);
+            echo $this->runInRuntimeWgContext(function () use ($wgClient) {
+                return $this->createConfig($wgClient);
+            });
             exit;
         }
         switch (true) {
