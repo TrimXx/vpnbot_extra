@@ -9880,6 +9880,8 @@ DNS-over-HTTPS with IP:
                     case 'Reality':
                         unset($c['proxies'][$index]["ws-opts"]);
                         unset($c['proxies'][$index]["skip-cert-verify"]);
+                        $c['proxies'][$index]['server']       = '~reality_host~';
+                        $c['proxies'][$index]['port']         = '~reality_port~';
                         $c['proxies'][$index]["network"]      = "tcp";
                         $c['proxies'][$index]['flow']         = 'xtls-rprx-vision';
                         $c['proxies'][$index]['servername']  = '~server_name~';
@@ -9951,6 +9953,8 @@ DNS-over-HTTPS with IP:
                             $realityProxy['name'] = 'BelieSpiski';
                             unset($realityProxy["ws-opts"]);
                             unset($realityProxy["skip-cert-verify"]);
+                            $realityProxy['server']       = '~reality_host~';
+                            $realityProxy['port']         = '~reality_port~';
                             $realityProxy["network"]      = "tcp";
                             $realityProxy['flow']         = 'xtls-rprx-vision';
                             $realityProxy['servername']   = '~server_name~';
@@ -10017,6 +10021,21 @@ DNS-over-HTTPS with IP:
         $realityServerName = $realitySettings['serverNames'][0]
             ?? $fallbackRealitySettings['serverNames'][0]
             ?? $domain;
+        $realityDestination = $this->normalizeRealityTarget((string) (
+            $realitySettings['dest']
+            ?? $fallbackRealitySettings['dest']
+            ?? ($pac['reality']['destination'] ?? '')
+        ));
+        if ($realityDestination === '') {
+            $realityDestination = $this->normalizeRealityTarget($domain . ':443');
+        }
+        [$realityHost, $realityPort] = $this->splitEndpointHostPort($realityDestination);
+        if ($realityHost === '') {
+            $realityHost = $domain;
+        }
+        if ($realityPort <= 0) {
+            $realityPort = 443;
+        }
         $c = json_decode($this->replaceTags(json_encode($c), [
             '"~pac~"'        => json_encode(array_keys(array_filter($pac['includelist'] ?? []))),
             '"~block~"'      => json_encode(array_keys(array_filter($pac['blocklist'] ?? []))),
@@ -10034,6 +10053,8 @@ DNS-over-HTTPS with IP:
             '~email~'        => $email,
             '~public_key~'   => $pac['xray'],
             '~server_name~'  => $realityServerName,
+            '~reality_host~' => $realityHost,
+            '"~reality_port~"' => $realityPort,
             '~ip~'           => $this->ip,
         ]), true);
 
@@ -11376,6 +11397,23 @@ DNS-over-HTTPS with IP:
         ];
     }
 
+    protected function normalizeRealityTarget(string $target, int $defaultPort = 443): string
+    {
+        $target = trim($target);
+        if ($target === '') {
+            return '';
+        }
+        $target = preg_replace('~^\w+://~', '', $target);
+        $target = preg_replace('~/.*$~', '', $target);
+        if ($target === '') {
+            return '';
+        }
+        if (!preg_match('~:\d+$~', $target)) {
+            $target .= ':' . $defaultPort;
+        }
+        return $target;
+    }
+
     public function setFakeDomain($domain, $self = false)
     {
         $c = $this->getXray();
@@ -11384,7 +11422,13 @@ DNS-over-HTTPS with IP:
         if (($p['transport'] ?? '') === 'Both') {
             $self = false;
         }
-        $dest = $self ? "10.10.1.2:443" : "$domain:443";
+        $currentDest = $this->normalizeRealityTarget((string) ($p['reality']['destination'] ?? ''));
+        if ($self) {
+            $dest = '10.10.1.2:443';
+        } else {
+            // Do not override custom target when changing fake domain.
+            $dest = $currentDest !== '' ? $currentDest : $this->normalizeRealityTarget("$domain:443");
+        }
         $updated = false;
         foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
             if (empty($c['inbounds'][$idx]['streamSettings']['realitySettings'])) {
@@ -11408,13 +11452,10 @@ DNS-over-HTTPS with IP:
 
     public function setTargetDestination($target)
     {
-        $target = trim((string) $target);
+        $target = $this->normalizeRealityTarget((string) $target);
         if ($target === '') {
             $this->answer($this->input['callback_id'], 'empty target', true);
             return;
-        }
-        if (!preg_match('~:\d+$~', $target)) {
-            $target .= ':443';
         }
 
         $xray = $this->getXray();
