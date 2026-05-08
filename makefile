@@ -3,6 +3,15 @@ b:
 u: # запуск контейнеров
 	$(eval IP := $(shell hostname -I | awk '{print $$1}'))
 	$(eval VER := $(shell awk 'NR==1{for(i=1;i<=NF;i++) if($$i ~ /^v[0-9]/){print $$i; exit}}' version))
+	@if [ -d .git ]; then \
+		branch=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo master); \
+		git fetch origin $$branch --quiet || git fetch origin --quiet; \
+		if git diff --quiet && git diff --cached --quiet; then \
+			git pull --ff-only origin $$branch || true; \
+		else \
+			echo "skip git pull: local changes detected"; \
+		fi; \
+	fi
 	bash ./update/update.sh &
 	touch ./override.env ./docker-compose.override.yml ./config/location.conf ./config/override.conf
 	IP=$(IP) VER=$(VER) docker compose --env-file ./.env --env-file ./override.env up -d --force-recreate
