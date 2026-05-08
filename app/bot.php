@@ -2535,6 +2535,16 @@ class Bot
         return array_values(array_unique(array_merge([$main], $this->getDomainAliasesFromConfig($conf))));
     }
 
+    protected function getDnsDomainsForOutput(array $conf): array
+    {
+        $domains = $this->getAllConfiguredDomains($conf);
+        if (!empty($domains)) {
+            return $domains;
+        }
+        $fallback = $this->normalizeDomainName((string) ($conf['domain'] ?? ''));
+        return $fallback !== '' ? [$fallback] : [];
+    }
+
     public function addDomain($domain, $nomenu = false)
     {
         $domains = $this->parseDomainListInput((string) $domain);
@@ -5365,7 +5375,10 @@ DNS-over-HTTPS with IP:
                         $main[] = 'openconnect ' . "$oc.{$conf['domain']}" . (in_array("$oc.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
                     }
                     if (!empty($conf['adguardkey'])) {
-                        $main[] = "{$conf['adguardkey']}.{$conf['domain']}" . (in_array("{$conf['adguardkey']}.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';;
+                        foreach ($this->getDnsDomainsForOutput($conf) as $dnsDomain) {
+                            $dotDomain = "{$conf['adguardkey']}.{$dnsDomain}";
+                            $main[] = $dotDomain . (in_array($dotDomain, $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';
+                        }
                     }
                     $main[] = "</blockquote>";
                 } else {
@@ -10139,6 +10152,29 @@ DNS-over-HTTPS with IP:
                         unset($c['rules']);
                     }
                 }
+                $dnsDomains = $this->getDnsDomainsForOutput($pac);
+                if (empty($dnsDomains)) {
+                    $dnsDomains = [$domain];
+                }
+                $dnsUrls = [];
+                foreach ($dnsDomains as $dnsDomain) {
+                    $dnsDomain = trim((string) $dnsDomain);
+                    if ($dnsDomain === '') {
+                        continue;
+                    }
+                    $dnsUrls[] = "{$scheme}://{$dnsDomain}/dns-query{$hash}/{$uid}";
+                }
+                if (!empty($dnsUrls)) {
+                    $existingNameserver = $c['dns']['nameserver'] ?? [];
+                    if (!is_array($existingNameserver)) {
+                        $existingNameserver = [$existingNameserver];
+                    }
+                    $mergedNameserver = array_values(array_unique(array_merge($existingNameserver, $dnsUrls)));
+                    if (!isset($c['dns']) || !is_array($c['dns'])) {
+                        $c['dns'] = [];
+                    }
+                    $c['dns']['nameserver'] = $mergedNameserver;
+                }
                 break;
         }
         if (!empty($return)) {
@@ -10605,12 +10641,19 @@ DNS-over-HTTPS with IP:
         $conf   = $this->getPacConf();
         $ip     = $this->ip;
         $domain = $this->getDomain();
+        $dnsDomains = $this->getDnsDomainsForOutput($conf);
         $hash   = $this->getHashBot();
         $scheme = empty($ssl = $this->nginxGetTypeCert()) ? 'http' : 'https';
         $text   = "$scheme://$domain/adguard$hash\nLogin: admin\nPass: <span class='tg-spoiler'>{$conf['adpswd']}</span>\n\n";
         if ($ssl) {
-            $text .= "DNS over HTTPS:\n<code>$ip</code>\n<code>$scheme://$domain/dns-query$hash" . ($conf['adguardkey'] ? "/{$conf['adguardkey']}" : '') . "</code>\n\n";
-            $text .= "DNS over TLS:\n<code>tls://" . ($conf['adguardkey'] ? "{$conf['adguardkey']}." : '') . "$domain</code>";
+            $text .= "DNS over HTTPS:\n<code>$ip</code>";
+            foreach ($dnsDomains as $dnsDomain) {
+                $text .= "\n<code>$scheme://$dnsDomain/dns-query$hash" . ($conf['adguardkey'] ? "/{$conf['adguardkey']}" : '') . "</code>";
+            }
+            $text .= "\n\nDNS over TLS:";
+            foreach ($dnsDomains as $dnsDomain) {
+                $text .= "\n<code>tls://" . ($conf['adguardkey'] ? "{$conf['adguardkey']}." : '') . "$dnsDomain</code>";
+            }
         }
         $status = $this->i18n(exec("JSON=1 timeout 2 dnslookup google.com ad") ? 'on' : 'off');
         $safesearch = yaml_parse_file($this->adguard)['filtering']['safe_search']['enabled'];
