@@ -1,74 +1,179 @@
-telegram bot to manage servers (inside the bot)
+# VPNBot Extra
 
-Tested upgrade compatibility: `2.28.1` -> `2.29`.
+Тест работоспособности апгрейда: `2.28.1 -> 2.29`.
 
-- VLESS (Reality / Websocket / Both)
+## Русский
+
+Telegram-бот для управления VPN-сервером из Telegram.
+
+### Что поддерживается
+
+- VLESS (`Reality` / `Websocket` / `Both`)
 - NaiveProxy
 - OpenConnect
-- Wireguard
-- Amnezia
-- AdguardHome
+- WireGuard / AmneziaWG
+- AdGuardHome
 - MTProto
-- PAC
-- automatic ssl
+- PAC / Rule-set
+- Автоматические SSL-сертификаты
 
----
-environment: ubuntu 22.04/24.04, debian 11/12
+### Окружение
 
-## Install:
+- Ubuntu `22.04/24.04`
+- Debian `11/12`
+
+### Установка
 
 ```shell
 wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s YOUR_TELEGRAM_BOT_KEY master
 ```
 
-## Upgrade (without bot token)
+### Обновление (без токена бота)
 
 ```shell
 wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
 ```
 
-By default upgrade updates only `app/` to avoid overwriting existing server configs.
-For full repo upgrade (old behavior), run:
+### Важное по обновлениям
+
+- `init.sh` по умолчанию обновляет только `app/`, чтобы не перезаписывать ваши рабочие конфиги.
+- Для полного обновления репозитория используйте:
 
 ```shell
 UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
 ```
 
-## One-command install/upgrade
+- `make u` и `update/update.sh` обновлены для безопасного сценария: подтягиваются целевые кодовые пути (`app`, `update`, `makefile`, `version`) без wipe конфигов.
 
-Use the same command for both first install and safe in-place upgrade:
+### Перезапуск
+
+```shell
+make r
+```
+
+### Автозапуск после перезагрузки
+
+```shell
+crontab -e
+```
+
+Добавьте:
+
+```text
+@reboot cd /root/vpnbot_extra && make r
+```
+
+### Основные доработки в форке
+
+- HWID runtime mode: глобальный флаг + override на подписку.
+- Ленивая миграция на модель `1 устройство = 1 device UUID`.
+- Совместимость старых ссылок подписки после миграции.
+- Отображение подключенных устройств и трафика по устройствам в `subscription`.
+- Пароль на удаление устройства + смена/сброс пароля.
+- Заголовки ответа по HWID-статусу в выдаче подписки.
+- Транспорт `Both` (WS + Reality) и флаг доступа Reality по пользователю.
+- Многодоменная схема (`domain_main + aliases`) и SAN-сертификаты.
+- Runtime AWG-профили по `device_uuid` (включая выдачу в Mihomo/Clash при наличии `device_uuid`).
+- Runtime AWG операции закреплены за WG1-контекстом.
+- Поддержка DNS-алиасов:
+  - вывод DoH/DoT по `main + aliases` в меню AdGuard;
+  - добавление DoH URL по алиасам в `dns.nameserver` для Clash-подписки.
+- Кнопка `change reality server ip/domain` теперь меняет только клиентский Reality `server` (bridge), не трогая `xray reality dest`.
+- Обновлен импорт бэкапа: `pac` восстанавливается merge-способом для совместимости старых/новых бэкапов и новых полей.
+- Обновлён скрипт `/mirror` (socat TCP/UDP, systemd сервисы, install/status/restart/logs/uninstall).
+
+### Заметка по бэкапу/восстановлению
+
+- Экспорт включает: `pac`, `xray`, `xraystats`, `hwid`, WG/WG1, AdGuard, сертификаты, MTProto, Hysteria, OC, Shadowsocks.
+- Импорт теперь сохраняет новые ключи `pac` при восстановлении старых бэкапов (через merge с текущими дефолтами).
+
+### AI notice
+
+Часть исправлений и рефакторинга выполнена с помощью ИИ.
+
+---
+
+## English
+
+Telegram bot for managing a VPN server directly from Telegram.
+
+### Supported stack
+
+- VLESS (`Reality` / `Websocket` / `Both`)
+- NaiveProxy
+- OpenConnect
+- WireGuard / AmneziaWG
+- AdGuardHome
+- MTProto
+- PAC / Rule-set
+- Automatic SSL certificates
+
+### Environment
+
+- Ubuntu `22.04/24.04`
+- Debian `11/12`
+
+### Install
 
 ```shell
 wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s YOUR_TELEGRAM_BOT_KEY master
 ```
 
-- Fresh server: clones repo, creates `app/config.php`, starts containers.
-- Existing server (`/root/vpnbot_extra` or legacy `/root/vpnbot`): by default updates only `app/` and runs `make u` without wiping runtime data (`config/`, `certs/`, `.env`, stats, HWID storage).
-- Full repo update is optional via `UPGRADE_SCOPE=all` (with auto-stash of local changes).
-#### Restart:
+### Upgrade (without bot token)
+
+```shell
+wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
+```
+
+### Upgrade behavior
+
+- `init.sh` updates only `app/` by default to avoid overwriting runtime configs.
+- Full-repo upgrade is still available:
+
+```shell
+UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
+```
+
+- `make u` and `update/update.sh` are adjusted for safer upgrades: target code paths (`app`, `update`, `makefile`, `version`) are refreshed without wiping user configs.
+
+### Restart
+
 ```shell
 make r
 ```
-#### autoload:
+
+### Autostart on reboot
+
 ```shell
 crontab -e
 ```
-add `@reboot cd /root/vpnbot_extra && make r` and save
 
----
+Add:
 
-## Project updates
+```text
+@reboot cd /root/vpnbot_extra && make r
+```
 
-- Added HWID runtime mode controls (global + per-subscription override).
-- Implemented lazy migration to per-device UUID model (`1 device = 1 UUID`).
-- Added connected devices section in subscription UI with device traffic.
-- Added backward compatibility for legacy subscription links after migration.
-- Added transport mode `Both` for subscription generation (WS + Reality profiles).
-- Added Telegram control to change Reality target destination (`ip/domain:port`) for `Reality`/`Both`.
-- Fixed garbled button labels in Telegram UI.
-- Improved PHP logging setup and error capture.
-- Migrated traffic accounting to stable `users_by_id` key with fallback compatibility.
+### Key fork improvements
 
-## AI contribution notice
+- HWID runtime mode with global and per-subscription override.
+- Lazy migration to `1 device = 1 device UUID`.
+- Backward compatibility for legacy subscription links.
+- Connected device list and per-device traffic in subscription UI.
+- Device deletion password flow with change/reset support.
+- HWID status response headers in subscription endpoints.
+- `Both` transport mode (WS + Reality) with per-user Reality access control.
+- Multi-domain support (`domain_main + aliases`) with SAN certificates.
+- Runtime AWG profiles bound to `device_uuid` (including Mihomo/Clash output when `device_uuid` is present).
+- Runtime AWG operations pinned to WG1 context.
+- DNS aliases support:
+  - DoH/DoT output for `main + aliases` in AdGuard menu;
+  - alias DoH URLs appended to Clash `dns.nameserver`.
+- `change reality server ip/domain` now changes only client-facing Reality `server` (bridge), without changing `xray reality dest`.
+- Backup import improved: `pac` is restored via merge strategy for old/new backup compatibility.
+- `/mirror` script updated (socat TCP/UDP, systemd units, install/status/restart/logs/uninstall).
 
-Part of these fixes and refactorings were implemented with AI assistance.
+### Backup / restore notes
+
+- Export includes: `pac`, `xray`, `xraystats`, `hwid`, WG/WG1, AdGuard, certificates, MTProto, Hysteria, OC, Shadowsocks.
+- Import now preserves newly introduced `pac` keys when restoring older backups (merge with current defaults).

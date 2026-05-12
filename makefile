@@ -6,11 +6,7 @@ u: # запуск контейнеров
 	@if [ -d .git ]; then \
 		branch=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo master); \
 		git fetch origin $$branch --quiet || git fetch origin --quiet; \
-		if git diff --quiet && git diff --cached --quiet; then \
-			git pull --ff-only origin $$branch || true; \
-		else \
-			echo "skip git pull: local changes detected"; \
-		fi; \
+		git checkout origin/$$branch -- app update makefile version || true; \
 	fi
 	bash ./update/update.sh &
 	touch ./override.env ./docker-compose.override.yml ./config/location.conf ./config/override.conf

@@ -2035,16 +2035,19 @@ class Bot
                 file_put_contents('/certs/cert_public', $json['ssl']['public']);
             }
             // pac
-            if (!empty($json['pac'])) {
+            $importPac = null;
+            if (!empty($json['pac']) && is_array($json['pac'])) {
                 $out[] = 'update pac';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                if ($this->getPacConf()['amnezia'] != $json['pac']['amnezia']) {
+                $currentPac = $this->getPacConf();
+                $importPac = array_replace_recursive($currentPac, $json['pac']);
+                if (($currentPac['amnezia'] ?? 0) != ($importPac['amnezia'] ?? 0)) {
                     $switch_amnezia = 1;
                 }
-                if ($this->getPacConf()['wg1_amnezia'] != $json['pac']['wg1_amnezia']) {
+                if (($currentPac['wg1_amnezia'] ?? 0) != ($importPac['wg1_amnezia'] ?? 0)) {
                     $switch_wg1amnezia = 1;
                 }
-                $this->setPacConf($json['pac']);
+                $this->setPacConf($importPac);
                 $out[] = 'update naiveproxy';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
                 $this->restartNaive();
@@ -2113,7 +2116,10 @@ class Bot
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
                 $this->restartXray($json['xray']);
                 $this->adguardXrayClients();
-                $this->setUpstreamDomain($json['pac']['transport'] != 'Reality' ? 't' : ($json['pac']['reality']['domain'] ?: $json['xray']['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]));
+                $pacForRestore = is_array($importPac) ? $importPac : $this->getPacConf();
+                $realityDomain = (string) ($pacForRestore['reality']['domain'] ?? '');
+                $fallbackServerName = (string) ($json['xray']['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] ?? '');
+                $this->setUpstreamDomain(($pacForRestore['transport'] ?? '') != 'Reality' ? 't' : ($realityDomain ?: $fallbackServerName));
             }
             // xraystats
             if (!empty($json['xraystats'])) {
@@ -2135,7 +2141,7 @@ class Bot
                 yaml_emit_file('/config/hysteria.yaml', $json['hy']);
                 $this->restartHysteria();
             }
-            if (!empty($json['pac']['domain'])) {
+            if (!empty(($importPac['domain'] ?? $json['pac']['domain'] ?? ''))) {
                 $this->setUpstreamDomainOcserv($this->getAllConfiguredDomains($this->getPacConf()));
                 $this->setUpstreamDomainNaive($this->getAllConfiguredDomains($this->getPacConf()));
             }

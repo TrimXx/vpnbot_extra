@@ -24,7 +24,6 @@ do
         if [[ "$cmd" == "1" ]]
         then
             curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "clearing the directory"/')"
-            git reset --hard && git clean -fd
             curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "downloading the update"/')"
             git fetch
             if [[ -n "$branch" ]]
@@ -33,7 +32,7 @@ do
                 git checkout -t origin/$branch || git checkout $branch
             fi
             curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "applying updates"/')"
-            git pull > ./update/message
+            git checkout origin/$(git rev-parse --abbrev-ref HEAD) -- app update makefile version > ./update/message 2>&1
         fi
         curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "launching the bot"/')"
         > $pwd/update/key
