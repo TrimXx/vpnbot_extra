@@ -316,31 +316,23 @@ switch (true) {
     --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
 }
 
-/* Подключённые устройства: узкий экран — одна колонка; от 640px — одна строка (устройство | ключ | трафик | удалить) */
+/* Подключённые устройства: на узких экранах — колонка, без горизонтального переполнения */
 .connected-device-card {
     border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
 }
-.connected-device-col {
+.connected-device-main,
+.connected-device-meta {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    min-width: 0;
 }
 .connected-device-title {
     font-weight: 600;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.connected-device-os {
-    font-size: 13px;
-    color: var(--text-secondary);
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -350,6 +342,7 @@ switch (true) {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-secondary);
     font-size: 13px;
     word-break: break-all;
@@ -362,55 +355,27 @@ switch (true) {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     font-size: 13px;
-    color: var(--text-secondary);
 }
 .connected-device-traffic {
     font-size: 13px;
     color: var(--text-secondary);
-    white-space: nowrap;
 }
-.connected-device-time {
-    font-size: 13px;
-    color: var(--text-secondary);
-    white-space: nowrap;
-}
-.connected-device-col--actions {
+.connected-device-actions {
     display: flex;
-    justify-content: flex-start;
-}
-@media (max-width: 639px) {
-    .connected-device-os,
-    .connected-device-time {
-        white-space: normal;
-        overflow: visible;
-        text-overflow: clip;
-    }
+    justify-content: flex-end;
 }
 @media (min-width: 640px) {
-    .connected-device-card {
-        flex-direction: row;
-        flex-wrap: nowrap;
-        align-items: flex-start;
-        gap: 16px;
+    .connected-device-main {
+        display: grid;
+        grid-template-columns: minmax(100px, 1fr) minmax(120px, 1.2fr) auto;
+        gap: 10px;
+        align-items: center;
     }
-    .connected-device-col--device {
-        flex: 1 1 0;
-        min-width: 0;
-    }
-    .connected-device-col--network {
-        flex: 1.15 1 0;
-        min-width: 0;
-    }
-    .connected-device-col--stats {
-        flex: 0 0 auto;
-        text-align: right;
-        align-items: flex-end;
-    }
-    .connected-device-col--actions {
-        flex: 0 0 auto;
-        margin-left: auto;
-        align-self: center;
-        justify-content: flex-end;
+    .connected-device-meta {
+        display: grid;
+        grid-template-columns: 1fr 1.2fr auto;
+        gap: 10px;
+        align-items: center;
     }
     .connected-device-hwid {
         white-space: nowrap;
@@ -2141,19 +2106,17 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
 
                 return `
                     <div class="link-item connected-device-card">
-                        <div class="connected-device-col connected-device-col--device">
+                        <div class="connected-device-main">
                             <div class="connected-device-title" title="${model}">📱 ${model}</div>
-                            <div class="connected-device-os">💻 ${os}${osVersion ? ' ' + osVersion : ''}</div>
-                        </div>
-                        <div class="connected-device-col connected-device-col--network">
                             <div class="connected-device-hwid" title="${hwid}">🔑 ${hwid}</div>
-                            <div class="connected-device-ua" title="${userAgent}">🌐 ${userAgent}</div>
-                        </div>
-                        <div class="connected-device-col connected-device-col--stats">
                             <div class="connected-device-traffic">⬇ ${trafficDownload} · ⬆ ${trafficUpload}</div>
+                        </div>
+                        <div class="connected-device-meta">
+                            <div class="connected-device-os">💻 ${os}${osVersion ? ' ' + osVersion : ''}</div>
+                            <div class="connected-device-ua" title="${userAgent}">🌐 ${userAgent}</div>
                             <div class="connected-device-time">🕒 ${lastSeen}</div>
                         </div>
-                        <div class="connected-device-col connected-device-col--actions">
+                        <div class="connected-device-actions">
                             <button type="button" class="btn btn-sm" style="padding: 6px 12px; border-color: var(--error); color: var(--error);" onclick="deleteDeviceByHwid('${escapeForAttribute(device.hwid || '')}')">🗑️</button>
                         </div>
                     </div>

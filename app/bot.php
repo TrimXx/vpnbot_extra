@@ -519,6 +519,9 @@ class Bot
             case preg_match('~^/toggleUserBothReality (\d+)$~', $this->input['callback'], $m):
                 $this->toggleUserBothReality($m[1]);
                 break;
+            case preg_match('~^/toggleUserBothWs (\d+)$~', $this->input['callback'], $m):
+                $this->toggleUserBothWs($m[1]);
+                break;
             case preg_match('~^/choiceTemplate (.+)$~', $this->input['callback'], $m):
                 $this->choiceTemplate($m[1]);
                 break;
@@ -804,46 +807,6 @@ class Bot
     {
         $c['inbounds'][0]['settings']['clients'] = array_values($c['inbounds'][0]['settings']['clients']);
         $this->ensureUniqueXrayClientEmails($c);
-        $pac = $this->getPacConf();
-        if (($pac['transport'] ?? '') === 'Both') {
-            $ownerRealityMap = [];
-            foreach (($c['inbounds'][0]['settings']['clients'] ?? []) as $ownerClient) {
-                if (!empty($ownerClient['device_parent_id'])) {
-                    continue;
-                }
-                $ownerSubId = $this->getClientSubscriptionId($ownerClient);
-                $ownerRealityMap[$ownerSubId] = $this->isBothRealityEnabledForOwner($ownerClient);
-            }
-            $realityClients = [];
-            foreach ($c['inbounds'][0]['settings']['clients'] as $client) {
-                if (!empty($client['off'])) {
-                    continue;
-                }
-                if (!empty($client['device_parent_id'])) {
-                    $allowReality = $ownerRealityMap[$client['device_parent_id']] ?? true;
-                    if (!$allowReality) {
-                        continue;
-                    }
-                } else {
-                    if (!$this->isBothRealityEnabledForOwner($client)) {
-                        continue;
-                    }
-                }
-                $copy = $client;
-                $copy['flow'] = 'xtls-rprx-vision';
-                $realityClients[] = $copy;
-            }
-            foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
-                if (($inbound['tag'] ?? '') === 'vless_reality' || (($inbound['streamSettings']['security'] ?? '') === 'reality')) {
-                    if (!isset($c['inbounds'][$idx]['settings']) || !is_array($c['inbounds'][$idx]['settings'])) {
-                        $c['inbounds'][$idx]['settings'] = [];
-                    }
-                    $c['inbounds'][$idx]['settings']['clients'] = $realityClients;
-                    $c['inbounds'][$idx]['settings']['decryption'] = 'none';
-                    break;
-                }
-            }
-        }
         $c['log']['access'] = '/logs/xray';
         foreach ($c['inbounds'] as $v) {
             if ($v['tag'] == 'api') {
@@ -906,11 +869,11 @@ class Bot
         ];
         if (empty($norestart)) {
             $this->collectSession();
-            file_put_contents('/config/xray.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $this->writeXrayConfig($c);
             $this->ssh('pkill xray', 'xr');
             $this->ssh('xray run -config /xray.json > /dev/null 2>&1 &', 'xr');
         } else {
-            file_put_contents('/config/xray.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $this->writeXrayConfig($c);
         }
     }
 
@@ -5987,6 +5950,195 @@ DNS-over-HTTPS with IP:
         return $trafficByHwid;
     }
 
+    protected function isRuntimeParentRetired(array $client): bool
+    {
+        return !empty($client['runtime_parent_retired']);
+    }
+
+    protected function getRuntimeParentRetiredEmoji(array $client): string
+    {
+        return $this->isRuntimeParentRetired($client) ? ' ✅' : '';
+    }
+
+    /**
+     * Xray-трафик для отображения: сумма устройств; при активном runtime без retirement — плюс родительский UUID.
+     *
+     * @return array{download:int, upload:int, include_parent:bool, legacy_parent_only:bool}
+     */
+    protected function getSubscriptionXrayTrafficTotals(array $stats, array $owner, ?int $ownerIndex): array
+    {
+        $ownerSubId = $this->getClientSubscriptionId($owner);
+        $deviceMap = $this->getHwidDeviceTraffic($ownerSubId);
+        $download = 0;
+        $upload = 0;
+        foreach ($deviceMap as $row) {
+            $download += (int) ($row['download'] ?? 0);
+            $upload += (int) ($row['upload'] ?? 0);
+        }
+        if ($deviceMap === [] && $ownerIndex !== null) {
+            $parent = $this->getClientTrafficStats($stats, $owner, $ownerIndex);
+
+            return [
+                'download'            => (int) $parent['download'],
+                'upload'              => (int) $parent['upload'],
+                'include_parent'      => true,
+                'legacy_parent_only'  => true,
+            ];
+        }
+        $includeParent = $this->isHwidRuntimeModeEnabled($owner) && !$this->isRuntimeParentRetired($owner);
+        if ($includeParent && $ownerIndex !== null) {
+            $parent = $this->getClientTrafficStats($stats, $owner, $ownerIndex);
+            $download += (int) $parent['download'];
+            $upload += (int) $parent['upload'];
+        }
+
+        return [
+            'download'           => $download,
+            'upload'             => $upload,
+            'include_parent'     => $includeParent,
+            'legacy_parent_only' => false,
+        ];
+    }
+
+    protected function formatTrafficUpDown(int $download, int $upload): string
+    {
+        return '↑' . $this->getBytes($upload) . '  ↓' . $this->getBytes($download);
+    }
+
+    protected function formatTrafficDisplayLine(int $download, int $upload, ?array $awg = null): string
+    {
+        $line = 'Traffic: ' . $this->formatTrafficUpDown($download, $upload);
+        if ($awg !== null) {
+            $line .= '    AWG Traffic: ' . $this->formatTrafficUpDown((int) ($awg['download'] ?? 0), (int) ($awg['upload'] ?? 0));
+        }
+
+        return $line;
+    }
+
+    protected function parseWgSizeToBytes(float $value, string $unit): int
+    {
+        $unit = strtoupper(trim($unit));
+        $powers = [
+            'B' => 0, 'KB' => 1, 'MB' => 2, 'GB' => 3, 'TB' => 4,
+            'KIB' => 1, 'MIB' => 2, 'GIB' => 3, 'TIB' => 4,
+        ];
+        if (!isset($powers[$unit])) {
+            return (int) round($value);
+        }
+        $decimal = in_array($unit, ['KB', 'MB', 'GB', 'TB'], true);
+
+        return (int) round($value * pow($decimal ? 1000 : 1024, $powers[$unit]));
+    }
+
+    protected function parseWgPeerTransfer(string $transfer): array
+    {
+        $download = 0;
+        $upload = 0;
+        if (preg_match('~([\d.]+)\s*([KMGTP]?i?B)\s+received~i', $transfer, $m)) {
+            $upload = $this->parseWgSizeToBytes((float) $m[1], $m[2]);
+        }
+        if (preg_match('~([\d.]+)\s*([KMGTP]?i?B)\s+sent~i', $transfer, $m)) {
+            $download = $this->parseWgSizeToBytes((float) $m[1], $m[2]);
+        }
+
+        return ['download' => $download, 'upload' => $upload];
+    }
+
+    /** @var array|null */
+    protected $runtimeWgStatusSnapshot = null;
+
+    protected function getRuntimeWgStatusSnapshot(): array
+    {
+        if ($this->runtimeWgStatusSnapshot !== null) {
+            return $this->runtimeWgStatusSnapshot;
+        }
+        $snapshot = $this->runInRuntimeWgContext(function () {
+            $status = $this->readStatus();
+
+            return is_array($status) ? $status : [];
+        });
+        $this->runtimeWgStatusSnapshot = is_array($snapshot) ? $snapshot : [];
+
+        return $this->runtimeWgStatusSnapshot;
+    }
+
+    protected function findRuntimeWgPeerPublicKey(string $deviceUuid): string
+    {
+        if ($deviceUuid === '') {
+            return '';
+        }
+        return $this->runInRuntimeWgContext(function () use ($deviceUuid) {
+            $conf = $this->readConfig();
+            foreach (($conf['peers'] ?? []) as $peer) {
+                if (!is_array($peer)) {
+                    continue;
+                }
+                if ((string) ($peer['## device_uuid'] ?? '') === $deviceUuid) {
+                    return (string) ($peer['PublicKey'] ?? '');
+                }
+            }
+
+            return '';
+        }) ?? '';
+    }
+
+    /**
+     * @return array{download:int, upload:int, online:bool, enabled:bool}
+     */
+    protected function getRuntimeDeviceAwgStats(string $deviceUuid, bool $wgEnabled): array
+    {
+        $empty = ['download' => 0, 'upload' => 0, 'online' => false, 'enabled' => $wgEnabled];
+        if (!$wgEnabled || $deviceUuid === '') {
+            return $empty;
+        }
+        $pub = $this->findRuntimeWgPeerPublicKey($deviceUuid);
+        if ($pub === '') {
+            return $empty;
+        }
+        $status = $this->getRuntimeWgStatusSnapshot();
+        $peerStatus = $this->getStatusPeer($pub, $status['peers'] ?? []);
+        if (!is_array($peerStatus)) {
+            return $empty;
+        }
+        $transfer = $this->parseWgPeerTransfer((string) ($peerStatus['transfer'] ?? ''));
+        $handshake = (string) ($peerStatus['latest handshake'] ?? '');
+        $online = $handshake !== '' && preg_match('~^(\d+ seconds?|[12] minute)~', $handshake);
+
+        return [
+            'download' => (int) $transfer['download'],
+            'upload'   => (int) $transfer['upload'],
+            'online'   => (bool) $online,
+            'enabled'  => true,
+        ];
+    }
+
+    /**
+     * @return array{download:int, upload:int, any_online:bool}
+     */
+    protected function getSubscriptionAwgTrafficTotals(array $owner, array $deviceTrafficMap): array
+    {
+        $download = 0;
+        $upload = 0;
+        $anyOnline = false;
+        if (!$this->isRuntimeDeviceWgEnabled($owner)) {
+            return ['download' => 0, 'upload' => 0, 'any_online' => false];
+        }
+        foreach ($deviceTrafficMap as $row) {
+            $deviceUuid = (string) ($row['device_uuid'] ?? '');
+            if ($deviceUuid === '') {
+                continue;
+            }
+            $awg = $this->getRuntimeDeviceAwgStats($deviceUuid, true);
+            $download += (int) $awg['download'];
+            $upload += (int) $awg['upload'];
+            if (!empty($awg['online'])) {
+                $anyOnline = true;
+            }
+        }
+
+        return ['download' => $download, 'upload' => $upload, 'any_online' => $anyOnline];
+    }
+
     public function setHwidDevice($uid, $hwid, array $info)
     {
         $storage = $this->getHwidStorage();
@@ -6057,19 +6209,6 @@ DNS-over-HTTPS with IP:
     protected function getClientSubscriptionId(array $client): string
     {
         return (string) ($client['subscription_id'] ?? $client['id'] ?? '');
-    }
-
-    protected function findOwnerClientBySubscriptionId(array $xray, string $requestedId): array
-    {
-        foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $idx => $client) {
-            if (!empty($client['device_parent_id'])) {
-                continue;
-            }
-            if ($this->isSubscriptionIdMatch($client, $requestedId)) {
-                return [$idx, $client];
-            }
-        }
-        return [null, null];
     }
 
     protected function getSubscriptionDevicePasswordHash(array $client): string
@@ -6303,12 +6442,229 @@ DNS-over-HTTPS with IP:
         return !empty($pac['hwid_runtime_wg_profile_enabled']) && $this->isHwidRuntimeModeEnabled($client);
     }
 
+    protected function isBothTransportFlagEnabled(array $client, string $field): bool
+    {
+        if (!array_key_exists($field, $client)) {
+            return true;
+        }
+        $v = $client[$field];
+        if ($v === false || $v === 0 || $v === '0' || $v === '') {
+            return false;
+        }
+
+        return true;
+    }
+
     protected function isBothRealityEnabledForOwner(array $client): bool
     {
-        if (array_key_exists('both_reality_enabled', $client)) {
-            return !empty($client['both_reality_enabled']);
+        return $this->isBothTransportFlagEnabled($client, 'both_reality_enabled');
+    }
+
+    protected function isBothWsEnabledForOwner(array $client): bool
+    {
+        return $this->isBothTransportFlagEnabled($client, 'both_ws_enabled');
+    }
+
+    protected function getXrayMasterClientsList(array $xray): array
+    {
+        $settings = $xray['inbounds'][0]['settings'] ?? [];
+        if (is_array($settings['clients_all'] ?? null) && ($settings['clients_all'] ?? []) !== []) {
+            return array_values($settings['clients_all']);
         }
-        return true;
+
+        return array_values($settings['clients'] ?? []);
+    }
+
+    protected function findOwnerClientBySubscriptionId(array $xray, string $subscriptionId): ?array
+    {
+        if ($subscriptionId === '') {
+            return null;
+        }
+        foreach ($this->getXrayMasterClientsList($xray) as $client) {
+            if (!is_array($client) || !empty($client['device_parent_id'])) {
+                continue;
+            }
+            if ($this->isSubscriptionIdMatch($client, $subscriptionId)) {
+                return $client;
+            }
+        }
+
+        return null;
+    }
+
+    protected function resolveOwnerClientForBothFlags(array $xray, array $client, string $subscriptionId): array
+    {
+        $owner = $this->findOwnerClientBySubscriptionId($xray, $subscriptionId);
+        if (is_array($owner)) {
+            return $owner;
+        }
+        if (empty($client['device_parent_id'])) {
+            return $client;
+        }
+        $parentSubId = (string) $client['device_parent_id'];
+        if ($parentSubId !== '') {
+            $parent = $this->findOwnerClientBySubscriptionId($xray, $parentSubId);
+            if (is_array($parent)) {
+                return $parent;
+            }
+        }
+
+        return $client;
+    }
+
+    protected function removeClashProxiesByNames(array &$c, array $names): void
+    {
+        if ($names === []) {
+            return;
+        }
+        $drop = array_fill_keys($names, true);
+        if (!empty($c['proxies']) && is_array($c['proxies'])) {
+            $c['proxies'] = array_values(array_filter(
+                $c['proxies'],
+                static fn($p) => !isset($drop[(string) ($p['name'] ?? '')])
+            ));
+        }
+        if (empty($c['proxy-groups']) || !is_array($c['proxy-groups'])) {
+            return;
+        }
+        foreach ($c['proxy-groups'] as $gk => $group) {
+            if (empty($group['proxies']) || !is_array($group['proxies'])) {
+                continue;
+            }
+            $c['proxy-groups'][$gk]['proxies'] = array_values(array_filter(
+                $group['proxies'],
+                static fn($name) => !isset($drop[$name])
+            ));
+        }
+    }
+
+    protected function expandXrayRegistryClients(array &$c): void
+    {
+        if (($this->getPacConf()['transport'] ?? '') !== 'Both') {
+            return;
+        }
+        $registry = $c['inbounds'][0]['settings']['clients_all'] ?? null;
+        if (is_array($registry) && $registry !== []) {
+            $c['inbounds'][0]['settings']['clients'] = $registry;
+        }
+    }
+
+    protected function isXrayWsInbound(array $inbound): bool
+    {
+        $tag = (string) ($inbound['tag'] ?? '');
+        if ($tag === 'vless_tls') {
+            return true;
+        }
+        if ($tag === 'vless_reality' || ($inbound['streamSettings']['security'] ?? '') === 'reality') {
+            return false;
+        }
+
+        return ($inbound['protocol'] ?? '') === 'vless'
+            && ($inbound['streamSettings']['network'] ?? '') === 'ws';
+    }
+
+    protected function isXrayRealityInbound(array $inbound): bool
+    {
+        $tag = (string) ($inbound['tag'] ?? '');
+
+        return $tag === 'vless_reality' || (($inbound['streamSettings']['security'] ?? '') === 'reality');
+    }
+
+    protected function applyBothTransportInboundClients(array &$c): void
+    {
+        $pac = $this->getPacConf();
+        if (($pac['transport'] ?? '') !== 'Both') {
+            return;
+        }
+
+        // Бот правит clients (после expand из clients_all); при сохранении — он источник истины, не устаревший clients_all.
+        $master = $c['inbounds'][0]['settings']['clients'] ?? [];
+        if (!is_array($master) || $master === []) {
+            $master = $c['inbounds'][0]['settings']['clients_all'] ?? [];
+        }
+        $master = array_values($master);
+
+        $ownerRealityMap = [];
+        $ownerWsMap = [];
+        foreach ($master as $ownerClient) {
+            if (!is_array($ownerClient) || !empty($ownerClient['device_parent_id'])) {
+                continue;
+            }
+            $ownerSubId = $this->getClientSubscriptionId($ownerClient);
+            if ($ownerSubId === '') {
+                continue;
+            }
+            $ownerRealityMap[$ownerSubId] = $this->isBothRealityEnabledForOwner($ownerClient);
+            $ownerWsMap[$ownerSubId] = $this->isBothWsEnabledForOwner($ownerClient);
+        }
+
+        $wsClients = [];
+        $realityClients = [];
+        foreach ($master as $client) {
+            if (!is_array($client) || !empty($client['off'])) {
+                continue;
+            }
+
+            $allowReality = true;
+            if (!empty($client['device_parent_id'])) {
+                $allowReality = $ownerRealityMap[$client['device_parent_id']] ?? true;
+            } else {
+                $allowReality = $this->isBothRealityEnabledForOwner($client);
+            }
+            if ($allowReality) {
+                $realityCopy = $client;
+                $realityCopy['flow'] = 'xtls-rprx-vision';
+                $realityClients[] = $realityCopy;
+            }
+
+            $allowWs = true;
+            if (!empty($client['device_parent_id'])) {
+                $allowWs = $ownerWsMap[$client['device_parent_id']] ?? true;
+            } else {
+                $allowWs = $this->isBothWsEnabledForOwner($client);
+            }
+            if ($allowWs) {
+                $wsCopy = $client;
+                unset($wsCopy['flow']);
+                $wsClients[] = $wsCopy;
+            }
+        }
+
+        $c['inbounds'][0]['settings']['clients_all'] = $master;
+
+        $wsApplied = false;
+        foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
+            if (!is_array($inbound) || !$this->isXrayWsInbound($inbound)) {
+                continue;
+            }
+            if (!isset($c['inbounds'][$idx]['settings']) || !is_array($c['inbounds'][$idx]['settings'])) {
+                $c['inbounds'][$idx]['settings'] = [];
+            }
+            $c['inbounds'][$idx]['settings']['clients'] = $wsClients;
+            $c['inbounds'][$idx]['settings']['decryption'] = 'none';
+            $wsApplied = true;
+        }
+        if (!$wsApplied) {
+            $c['inbounds'][0]['settings']['clients'] = $wsClients;
+        }
+
+        foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
+            if (!is_array($inbound) || !$this->isXrayRealityInbound($inbound)) {
+                continue;
+            }
+            if (!isset($c['inbounds'][$idx]['settings']) || !is_array($c['inbounds'][$idx]['settings'])) {
+                $c['inbounds'][$idx]['settings'] = [];
+            }
+            $c['inbounds'][$idx]['settings']['clients'] = $realityClients;
+            $c['inbounds'][$idx]['settings']['decryption'] = 'none';
+            break;
+        }
+    }
+
+    protected function writeXrayConfig(array $c): void
+    {
+        $this->applyBothTransportInboundClients($c);
+        file_put_contents('/config/xray.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
     protected function getRuntimeDeviceWgEndpoint(): string
@@ -6846,7 +7202,7 @@ DNS-over-HTTPS with IP:
         if ($changed) {
             $this->restartXray($xray);
         } else {
-            file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $this->writeXrayConfig($xray);
         }
 
         return (string) ($devices[$hwid]['device_uuid'] ?? '');
@@ -7639,6 +7995,50 @@ DNS-over-HTTPS with IP:
                                     . "&fp=chrome"
                                     . "&alpn=h2"
                                     . "#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
+                        break;
+                    case 'Both':
+                        $owner = $c['inbounds'][0]['settings']['clients'][$i];
+                        $ownerSubId = $this->getClientSubscriptionId($owner);
+                        $owner = $this->resolveOwnerClientForBothFlags($c, $owner, $ownerSubId);
+                        if (!$this->isBothWsEnabledForOwner($owner) && $this->isBothRealityEnabledForOwner($owner)) {
+                            $realityInbound = null;
+                            foreach (($c['inbounds'] ?? []) as $inbound) {
+                                if (is_array($inbound) && $this->isXrayRealityInbound($inbound)) {
+                                    $realityInbound = $inbound;
+                                    break;
+                                }
+                            }
+                            $rs = is_array($realityInbound) ? ($realityInbound['streamSettings']['realitySettings'] ?? []) : [];
+                            $serverName = $rs['serverNames'][0] ?? ($pac['reality']['domain'] ?? 'yandex.ru');
+                            $shortId = $rs['shortIds'][0] ?? ($pac['reality']['shortId'] ?? '');
+                            $realityPort = (int) ($realityInbound['port'] ?? 33443);
+                            $link = "vless://{$owner['id']}@$domain:{$realityPort}"
+                                . "?security=reality"
+                                . "&sni={$serverName}"
+                                . "&fp=chrome&pbk={$pac['xray']}"
+                                . "&sid={$shortId}"
+                                . "&type=tcp"
+                                . "&flow=xtls-rprx-vision"
+                                . "#{$owner['email']}";
+                        } elseif ($this->isBothWsEnabledForOwner($owner) && !$this->isBothRealityEnabledForOwner($owner)) {
+                            $link = "vless://{$owner['id']}@$domain:443"
+                                . "?flow="
+                                . "&path=%2Fws$hash"
+                                . "&security=tls"
+                                . "&sni=$domain"
+                                . "&fp=chrome"
+                                . "&type=ws"
+                                . "#{$owner['email']}";
+                        } else {
+                            $link = "vless://{$owner['id']}@$domain:443"
+                                . "?flow="
+                                . "&path=%2Fws$hash"
+                                . "&security=tls"
+                                . "&sni=$domain"
+                                . "&fp=chrome"
+                                . "&type=ws"
+                                . "#{$owner['email']}";
+                        }
                         break;
 
                     default:
@@ -8509,13 +8909,14 @@ DNS-over-HTTPS with IP:
         $page    = $page == -2 ? $all - 1 : $page;
         $clients = $page != -1 ? array_slice($clients, $page * $this->limit, $this->limit, true) : $clients;
         foreach ($clients as $k => $v) {
-            $traffic = $this->getClientTrafficStats($st, $v, $k);
-            $download = $this->getBytes($traffic['download']);
-            $upload   = $this->getBytes($traffic['upload']);
+            $totals   = $this->getSubscriptionXrayTrafficTotals($st, $v, $k);
+            $download = $this->getBytes($totals['download']);
+            $upload   = $this->getBytes($totals['upload']);
             $time     = $v['time'] ? $this->getTime($v['time']) : '';
+            $retired  = $this->getRuntimeParentRetiredEmoji($v);
             $data[]   = [
                 [
-                    'text'          => "{$v['email']}" . ($time ? ": $time" : '') . " (D:$download U:$upload)",
+                    'text'          => "{$v['email']}{$retired}" . ($time ? ": $time" : '') . " (D:$download U:$upload)",
                     'callback_data' => "/userXr $k",
                 ],
             ];
@@ -8981,7 +9382,7 @@ DNS-over-HTTPS with IP:
         } else {
             unset($c['inbounds'][0]['settings']['clients'][$arg[1]]["{$arg[0]}template"]);
         }
-        file_put_contents('/config/xray.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $this->writeXrayConfig($c);
         $this->userXr($arg[1]);
     }
 
@@ -9040,6 +9441,7 @@ DNS-over-HTTPS with IP:
         $runtimeModeText = array_key_exists('hwid_runtime_mode', $c)
             ? ($this->i18n(!empty($c['hwid_runtime_mode']) ? 'on' : 'off') . ' (override)')
             : ('default(' . $this->i18n(!empty($pac['hwid_runtime_mode_enabled']) ? 'on' : 'off') . ')');
+        $runtimeModeText .= $this->getRuntimeParentRetiredEmoji($c);
         $bothRealityEnabled = $this->isBothRealityEnabledForOwner($c);
         $defaultHwid  = max(1, (int) ($pac['hwid_device_count'] ?: 1));
         $hwidLimit    = $c['hwid_limit'] ? (int) $c['hwid_limit'] : $defaultHwid;
@@ -9050,10 +9452,14 @@ DNS-over-HTTPS with IP:
         }
         $text[] = "<pre><code>{$this->linkXray($i)}</code></pre>\n";
         $st       = $this->getXrayStats();
-        $traffic  = $this->getClientTrafficStats($st, $c, $i);
-        $download = $this->getBytes($traffic['download']);
-        $upload   = $this->getBytes($traffic['upload']);
-        $text[] = "traffic: D:$download U:$upload";
+        $deviceTrafficMap = $this->getHwidDeviceTraffic($ownerSubId);
+        $xrayTotals = $this->getSubscriptionXrayTrafficTotals($st, $c, $i);
+        $awgTotals = $this->getSubscriptionAwgTrafficTotals($c, $deviceTrafficMap);
+        $awgLine = $this->isRuntimeDeviceWgEnabled($c) ? $awgTotals : null;
+        $text[] = $this->formatTrafficDisplayLine($xrayTotals['download'], $xrayTotals['upload'], $awgLine);
+        if ($this->isRuntimeParentRetired($c)) {
+            $text[] = $this->i18n('hwid runtime parent retired') . ' ✅';
+        }
         $limBytes = $this->getClientTrafficLimitBytes($c, $pac);
         if ($limBytes > 0) {
             $text[] = $this->i18n('traffic limit line') . ': ' . $this->getBytes($limBytes) . ' (↓+↑)';
@@ -9077,9 +9483,11 @@ DNS-over-HTTPS with IP:
             $text[] = 'inbound ' . htmlspecialchars((string) $tag, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
                 . ': D:' . $this->getBytes($tdl) . ' U:' . $this->getBytes($tul) . ' ' . $this->i18n('inbound stats server note');
         }
+        $resetD = $this->getBytes($xrayTotals['download']);
+        $resetU = $this->getBytes($xrayTotals['upload']);
         $data[]   = [
             [
-                'text'          => $this->i18n('reset stats') . ": D:$download U:$upload",
+                'text'          => $this->i18n('reset stats') . ": D:$resetD U:$resetU",
                 'callback_data' => "/resetXrUser $i",
             ],
         ];
@@ -9110,7 +9518,12 @@ DNS-over-HTTPS with IP:
             ],
         ];
         if (($pac['transport'] ?? '') === 'Both') {
+            $bothWsEnabled = $this->isBothWsEnabledForOwner($c);
             $data[] = [
+                [
+                    'text'          => 'Both WS: ' . $this->i18n($bothWsEnabled ? 'on' : 'off'),
+                    'callback_data' => "/toggleUserBothWs $i",
+                ],
                 [
                     'text'          => 'Both Reality: ' . $this->i18n($bothRealityEnabled ? 'on' : 'off'),
                     'callback_data' => "/toggleUserBothReality $i",
@@ -9283,13 +9696,55 @@ DNS-over-HTTPS with IP:
             $this->answer($this->input['callback_id'], 'user not found', true);
             return;
         }
-        if (!empty($xray['inbounds'][0]['settings']['clients'][$i]['both_reality_enabled'])) {
+        $enabled = $this->isBothRealityEnabledForOwner($xray['inbounds'][0]['settings']['clients'][$i]);
+        if ($enabled) {
             $xray['inbounds'][0]['settings']['clients'][$i]['both_reality_enabled'] = 0;
         } else {
             $xray['inbounds'][0]['settings']['clients'][$i]['both_reality_enabled'] = 1;
         }
+        $this->syncXrayRegistryClientAt($xray, $i);
         $this->restartXray($xray);
         $this->userXr($i);
+    }
+
+    public function toggleUserBothWs($i)
+    {
+        $xray = $this->getXray();
+        if (!isset($xray['inbounds'][0]['settings']['clients'][$i])) {
+            $this->answer($this->input['callback_id'], 'user not found', true);
+            return;
+        }
+        $enabled = $this->isBothWsEnabledForOwner($xray['inbounds'][0]['settings']['clients'][$i]);
+        if ($enabled) {
+            $xray['inbounds'][0]['settings']['clients'][$i]['both_ws_enabled'] = 0;
+        } else {
+            $xray['inbounds'][0]['settings']['clients'][$i]['both_ws_enabled'] = 1;
+        }
+        $this->syncXrayRegistryClientAt($xray, $i);
+        $this->restartXray($xray);
+        $this->userXr($i);
+    }
+
+    protected function syncXrayRegistryClientAt(array &$xray, int $index): void
+    {
+        if (!isset($xray['inbounds'][0]['settings']['clients'][$index])) {
+            return;
+        }
+        $client = $xray['inbounds'][0]['settings']['clients'][$index];
+        $registry = &$xray['inbounds'][0]['settings']['clients_all'];
+        if (!is_array($registry)) {
+            return;
+        }
+        $clientId = (string) ($client['id'] ?? '');
+        foreach ($registry as $rk => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            if ($rk === $index || ($clientId !== '' && (string) ($entry['id'] ?? '') === $clientId)) {
+                $registry[$rk] = $client;
+                break;
+            }
+        }
     }
 
     public function resetDeviceDeletePassword($i)
@@ -9300,7 +9755,7 @@ DNS-over-HTTPS with IP:
             return;
         }
         unset($xray['inbounds'][0]['settings']['clients'][$i]['device_delete_password_md5']);
-        file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $this->writeXrayConfig($xray);
         $this->answer($this->input['callback_id'], 'device delete password reset', true);
         $this->userXr($i);
     }
@@ -9343,7 +9798,10 @@ DNS-over-HTTPS with IP:
         $runtimeStatus = array_key_exists('hwid_runtime_mode', $client)
             ? ($this->i18n(!empty($client['hwid_runtime_mode']) ? 'on' : 'off') . ' (override)')
             : ('default(' . $this->i18n(!empty($pac['hwid_runtime_mode_enabled']) ? 'on' : 'off') . ')');
-        $text[] = 'HWID runtime mode: ' . $runtimeStatus;
+        $text[] = 'HWID runtime mode: ' . $runtimeStatus . $this->getRuntimeParentRetiredEmoji($client);
+        if ($this->isRuntimeParentRetired($client)) {
+            $text[] = $this->i18n('hwid runtime parent retired') . ' ✅';
+        }
 
         $data[] = [
             [
@@ -9375,6 +9833,7 @@ DNS-over-HTTPS with IP:
         }
 
         $deviceTraffic = $this->getHwidDeviceTraffic($ownerSubId);
+        $wgProfileEnabled = $this->isRuntimeDeviceWgEnabled($client);
         foreach ($hwidsPage as $index => $hwid) {
             $info    = $devices[$hwid];
             $number  = $page * $perPage + $index + 1;
@@ -9383,21 +9842,27 @@ DNS-over-HTTPS with IP:
                 $info['os_version'] ?? '',
                 $info['device_model'] ?? '',
             ], fn($v) => $v !== '');
-            $line = $number . '. <code>' . htmlspecialchars($hwid, ENT_HTML5, 'UTF-8') . '</code>';
-            if (!empty($details)) {
-                $line .= ' - ' . htmlspecialchars(implode(' ', $details), ENT_HTML5, 'UTF-8');
-            }
+            $text[] = str_repeat('-', 50);
+            $text[] = $number . '. HWID: <code>' . htmlspecialchars($hwid, ENT_HTML5, 'UTF-8') . '</code>';
+            $osLine = htmlspecialchars(implode(' ', $details), ENT_HTML5, 'UTF-8');
             if (!empty($info['time'])) {
-                $line .= ' (' . date('d.m.Y H:i', $info['time']) . ')';
+                $osLine .= ($osLine !== '' ? ' ' : '') . '(' . date('d.m.Y H:i', $info['time']) . ')';
             }
-            $text[] = $line;
+            if ($osLine !== '') {
+                $text[] = '  OS: ' . $osLine;
+            }
             if (!empty($info['user_agent'])) {
-                $text[] = 'UA: ' . htmlspecialchars($info['user_agent'], ENT_HTML5, 'UTF-8');
+                $text[] = '  UA: ' . htmlspecialchars($info['user_agent'], ENT_HTML5, 'UTF-8');
             }
-            if (!empty($deviceTraffic[$hwid])) {
-                $total = (int) ($deviceTraffic[$hwid]['total'] ?? 0);
-                $text[] = 'Traffic: ' . $this->getBytes($total);
+            $devDown = (int) ($deviceTraffic[$hwid]['download'] ?? 0);
+            $devUp = (int) ($deviceTraffic[$hwid]['upload'] ?? 0);
+            $deviceUuid = (string) ($deviceTraffic[$hwid]['device_uuid'] ?? ($info['device_uuid'] ?? ''));
+            $awg = $this->getRuntimeDeviceAwgStats($deviceUuid, $wgProfileEnabled);
+            $trafficLine = '  ' . $this->formatTrafficDisplayLine($devDown, $devUp, $wgProfileEnabled ? $awg : null);
+            if ($wgProfileEnabled) {
+                $trafficLine .= '     AWG:' . (!empty($awg['online']) ? 'On' : 'Off');
             }
+            $text[] = $trafficLine;
             $token = $this->rememberHwidToken($scope, $hwid);
             $data[] = [
                 [
@@ -9447,7 +9912,7 @@ DNS-over-HTTPS with IP:
         } else {
             $xray['inbounds'][0]['settings']['clients'][$i]['hwid_disabled'] = 1;
         }
-        file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $this->writeXrayConfig($xray);
         $this->answer($this->input['callback_id'], $this->i18n('hwid notice'), true);
         $this->hwidUser($i);
     }
@@ -9470,7 +9935,7 @@ DNS-over-HTTPS with IP:
             $this->reactivateParentUuidForClient($xray, $i);
         }
 
-        file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $this->writeXrayConfig($xray);
         $this->hwidUser($i);
     }
 
@@ -9478,7 +9943,7 @@ DNS-over-HTTPS with IP:
     {
         $xray = $this->getXray();
         unset($xray['inbounds'][0]['settings']['clients'][$i]['hwid_limit']);
-        file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $this->writeXrayConfig($xray);
         $this->hwidUser($i);
     }
 
@@ -9506,7 +9971,7 @@ DNS-over-HTTPS with IP:
         } else {
             unset($xray['inbounds'][0]['settings']['clients'][$i]['hwid_limit']);
         }
-        file_put_contents('/config/xray.json', json_encode($xray, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $this->writeXrayConfig($xray);
         $this->send($this->input['chat'], $this->i18n('hwid notice'), $this->input['message_id']);
         $this->hwidUser($i);
     }
@@ -9618,7 +10083,7 @@ DNS-over-HTTPS with IP:
                         }
                     }
                     $xr['inbounds'][0]['settings']['clients'][$idx]['device_delete_password_md5'] = md5($password);
-                    file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                    $this->writeXrayConfig($xr);
                     echo json_encode(['ok' => true, 'has_password' => true]);
                     exit;
                 case 'device_delete':
@@ -9643,13 +10108,13 @@ DNS-over-HTTPS with IP:
                             unset($xr['inbounds'][0]['settings']['clients'][$idx]);
                             $this->restartXray($xr);
                         } else {
-                            file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                            $this->writeXrayConfig($xr);
                         }
                         $this->runInRuntimeWgContext(function () use ($deviceUuid) {
                             $this->deleteDeviceWgProfileByUuid($deviceUuid);
                         });
                     } else {
-                        file_put_contents('/config/xray.json', json_encode($xr, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                        $this->writeXrayConfig($xr);
                     }
                     echo json_encode(['ok' => true]);
                     exit;
@@ -9775,7 +10240,9 @@ DNS-over-HTTPS with IP:
             $uid = (string) $_SERVER['VPNBOT_DEVICE_UUID'];
         }
         $subscriptionId = $subscriptionId ?? $this->getClientSubscriptionId($client);
-        $bothRealityAllowed = $this->isBothRealityEnabledForOwner($client);
+        $ownerForFlags = $this->resolveOwnerClientForBothFlags($xr, $client, $subscriptionId);
+        $bothRealityAllowed = $this->isBothRealityEnabledForOwner($ownerForFlags);
+        $bothWsAllowed = $this->isBothWsEnabledForOwner($ownerForFlags);
 
         if (!empty($_GET['r'])) {
             $si = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
@@ -10004,20 +10471,20 @@ DNS-over-HTTPS with IP:
                         unset($c['outbounds'][$index]['mux']);
                         break;
                     case 'Both':
-                        $c['outbounds'][$index]['streamSettings'] = [
-                            "network"    => "ws",
-                            "security"   => "tls",
-                            "wsSettings" => [
-                                "path" => "/ws$hash?ed=2560"
-                            ],
-                            "tlsSettings" => [
-                                "allowInsecure" => false,
-                                "serverName"    => '~domain~',
-                                "fingerprint"   => $fingerprint
-                            ]
-                        ];
-                        unset($c['outbounds'][$index]['mux']);
-                        if ($bothRealityAllowed) {
+                        if ($bothWsAllowed && $bothRealityAllowed) {
+                            $c['outbounds'][$index]['streamSettings'] = [
+                                "network"    => "ws",
+                                "security"   => "tls",
+                                "wsSettings" => [
+                                    "path" => "/ws$hash?ed=2560"
+                                ],
+                                "tlsSettings" => [
+                                    "allowInsecure" => false,
+                                    "serverName"    => '~domain~',
+                                    "fingerprint"   => $fingerprint
+                                ]
+                            ];
+                            unset($c['outbounds'][$index]['mux']);
                             $realityOutbound = $c['outbounds'][$index];
                             $realityOutbound['tag'] = ($realityOutbound['tag'] ?? 'proxy') . '_reality';
                             $realityOutbound['settings']['vnext'][0]['address'] = '~reality_server_host~';
@@ -10038,6 +10505,38 @@ DNS-over-HTTPS with IP:
                                 "concurrency" => -1
                             ];
                             $c['outbounds'][] = $realityOutbound;
+                        } elseif ($bothWsAllowed) {
+                            $c['outbounds'][$index]['streamSettings'] = [
+                                "network"    => "ws",
+                                "security"   => "tls",
+                                "wsSettings" => [
+                                    "path" => "/ws$hash?ed=2560"
+                                ],
+                                "tlsSettings" => [
+                                    "allowInsecure" => false,
+                                    "serverName"    => '~domain~',
+                                    "fingerprint"   => $fingerprint
+                                ]
+                            ];
+                            unset($c['outbounds'][$index]['mux']);
+                        } elseif ($bothRealityAllowed) {
+                            $c['outbounds'][$index]['settings']['vnext'][0]['address'] = '~reality_server_host~';
+                            $c['outbounds'][$index]['settings']['vnext'][0]['port'] = '~reality_server_port~';
+                            $c['outbounds'][$index]['settings']['vnext'][0]['users'][0]["flow"] = "xtls-rprx-vision";
+                            $c['outbounds'][$index]['streamSettings'] = [
+                                "network"         => "tcp",
+                                "security"        => "reality",
+                                "realitySettings" => [
+                                    "serverName"  => '~server_name~',
+                                    "fingerprint" => $fingerprint,
+                                    "publicKey"   => '~public_key~',
+                                    "shortId"     => '~short_id~',
+                                ]
+                            ];
+                            $c['outbounds'][$index]['mux'] = [
+                                "enabled"     => false,
+                                "concurrency" => -1
+                            ];
                         }
                         break;
 
@@ -10098,14 +10597,14 @@ DNS-over-HTTPS with IP:
                         ];
                         break;
                     case 'Both':
-                        unset($c['outbounds'][$index]['tls']['reality']);
-                        unset($c['outbounds'][$index]['flow']);
-                        $c['outbounds'][$index]["transport"] = [
-                            "type" => "ws",
-                            "path" => "/ws$hash"
-                        ];
-                        $c['outbounds'][$index]['tls']['server_name'] = '~domain~';
-                        if ($bothRealityAllowed) {
+                        if ($bothWsAllowed && $bothRealityAllowed) {
+                            unset($c['outbounds'][$index]['tls']['reality']);
+                            unset($c['outbounds'][$index]['flow']);
+                            $c['outbounds'][$index]["transport"] = [
+                                "type" => "ws",
+                                "path" => "/ws$hash"
+                            ];
+                            $c['outbounds'][$index]['tls']['server_name'] = '~domain~';
                             $realityOutbound = $c['outbounds'][$index];
                             $realityOutbound['tag'] = ($realityOutbound['tag'] ?? 'proxy') . '_reality';
                             unset($realityOutbound["transport"]);
@@ -10116,6 +10615,22 @@ DNS-over-HTTPS with IP:
                             $realityOutbound['tls']['server_name'] = '~server_name~';
                             $realityOutbound['tls']['reality']['short_id'] = '~short_id~';
                             $c['outbounds'][] = $realityOutbound;
+                        } elseif ($bothWsAllowed) {
+                            unset($c['outbounds'][$index]['tls']['reality']);
+                            unset($c['outbounds'][$index]['flow']);
+                            $c['outbounds'][$index]["transport"] = [
+                                "type" => "ws",
+                                "path" => "/ws$hash"
+                            ];
+                            $c['outbounds'][$index]['tls']['server_name'] = '~domain~';
+                        } elseif ($bothRealityAllowed) {
+                            unset($c['outbounds'][$index]["transport"]);
+                            $c['outbounds'][$index]['server'] = '~reality_server_host~';
+                            $c['outbounds'][$index]['server_port'] = '~reality_server_port~';
+                            $c['outbounds'][$index]['flow'] = 'xtls-rprx-vision';
+                            $c['outbounds'][$index]['tls']['reality']['public_key'] = '~public_key~';
+                            $c['outbounds'][$index]['tls']['server_name'] = '~server_name~';
+                            $c['outbounds'][$index]['tls']['reality']['short_id'] = '~short_id~';
                         }
                         break;
 
@@ -10200,13 +10715,13 @@ DNS-over-HTTPS with IP:
                         ];
                         break;
                     case 'Both':
-                        unset($c['proxies'][$index]['flow']);
-                        unset($c['proxies'][$index]['reality-opts']);
-                        $c['proxies'][$index]["network"]          = "ws";
-                        $c['proxies'][$index]["ws-opts"]['path']  = "/ws$hash";
-                        $c['proxies'][$index]["skip-cert-verify"] = false;
-                        $c['proxies'][$index]['servername']       = '~domain~';
-                        if ($bothRealityAllowed) {
+                        if ($bothWsAllowed && $bothRealityAllowed) {
+                            unset($c['proxies'][$index]['flow']);
+                            unset($c['proxies'][$index]['reality-opts']);
+                            $c['proxies'][$index]["network"]          = "ws";
+                            $c['proxies'][$index]["ws-opts"]['path']  = "/ws$hash";
+                            $c['proxies'][$index]["skip-cert-verify"] = false;
+                            $c['proxies'][$index]['servername']       = '~domain~';
                             $realityProxy = $c['proxies'][$index];
                             $realityProxy['name'] = 'BelieSpiski';
                             unset($realityProxy["ws-opts"]);
@@ -10221,7 +10736,6 @@ DNS-over-HTTPS with IP:
                                 'short-id'   => '~short_id~',
                             ];
                             $c['proxies'][] = $realityProxy;
-
                             if (!empty($c['proxy-groups']) && is_array($c['proxy-groups'])) {
                                 foreach ($c['proxy-groups'] as $gk => $group) {
                                     if (empty($group['proxies']) || !is_array($group['proxies'])) {
@@ -10232,6 +10746,27 @@ DNS-over-HTTPS with IP:
                                     }
                                 }
                             }
+                        } elseif ($bothWsAllowed) {
+                            unset($c['proxies'][$index]['flow']);
+                            unset($c['proxies'][$index]['reality-opts']);
+                            $c['proxies'][$index]["network"]          = "ws";
+                            $c['proxies'][$index]["ws-opts"]['path']  = "/ws$hash";
+                            $c['proxies'][$index]["skip-cert-verify"] = false;
+                            $c['proxies'][$index]['servername']       = '~domain~';
+                            $this->removeClashProxiesByNames($c, ['BelieSpiski']);
+                        } elseif ($bothRealityAllowed) {
+                            unset($c['proxies'][$index]['ws-opts']);
+                            unset($c['proxies'][$index]['skip-cert-verify']);
+                            $c['proxies'][$index]['server']       = '~reality_server_host~';
+                            $c['proxies'][$index]['port']         = '~reality_server_port~';
+                            $c['proxies'][$index]["network"]      = "tcp";
+                            $c['proxies'][$index]['flow']         = 'xtls-rprx-vision';
+                            $c['proxies'][$index]['servername']   = '~server_name~';
+                            $c['proxies'][$index]['reality-opts'] = [
+                                'public-key' => '~public_key~',
+                                'short-id'   => '~short_id~',
+                            ];
+                            $this->removeClashProxiesByNames($c, ['BelieSpiski']);
                         }
                         break;
 
@@ -10661,7 +11196,13 @@ DNS-over-HTTPS with IP:
 
     public function getXray()
     {
-        return json_decode(file_get_contents('/config/xray.json'), true);
+        $c = json_decode(file_get_contents('/config/xray.json'), true);
+        if (!is_array($c)) {
+            return [];
+        }
+        $this->expandXrayRegistryClients($c);
+
+        return $c;
     }
 
     public function setUpstreamDomain($domain)

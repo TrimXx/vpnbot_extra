@@ -429,6 +429,18 @@ $i = [
         'en' => '(all clients on server)',
         'ru' => '(все клиенты на сервере)',
     ],
+    'hwid runtime parent retired'  => [
+        'en' => 'HWID runtime: parent UUID retired (all devices migrated)',
+        'ru' => 'HWID runtime: родительский UUID завершён (все устройства мигрированы)',
+    ],
+    'both ws enabled'  => [
+        'en' => 'Both WS',
+        'ru' => 'Both WS',
+    ],
+    'both reality enabled'  => [
+        'en' => 'Both Reality',
+        'ru' => 'Both Reality',
+    ],
 ];
 
 if (file_exists(__DIR__ . '/i18n.override.php')) {
