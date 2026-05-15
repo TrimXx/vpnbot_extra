@@ -38,6 +38,9 @@ foreach ($connectedDevices as $deviceHwid => $deviceInfo) {
     ];
 }
 $appsConfigUrl = (string) ($pacConfig['subscription_apps_config_url'] ?? 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json');
+$trafficLimitBytes = isset($trafficLimitBytes) ? (int) $trafficLimitBytes : 0;
+$trafficLimitHuman = $trafficLimitHuman ?? '0';
+$inboundServerStats = isset($inboundServerStats) && is_array($inboundServerStats) ? $inboundServerStats : [];
 // Переменные для страницы подписки vpnbot
 /*
     $suburl - ссылка на страницу подписки пользователя
@@ -97,7 +100,10 @@ function generate_panelData(
     ?int $expire = null, // Может быть null или timestamp
     array $connectedDevices = [],
     int $connectedDevicesMax = 0,
-    bool $hasDeviceDeletePassword = false
+    bool $hasDeviceDeletePassword = false,
+    string $trafficLimitHuman = '0',
+    string $trafficLimitBytesStr = '0',
+    array $inboundServerStats = []
 ): string {
     $happ_cryptolink = 'happ://add/' . $subscription_url;
 
@@ -129,7 +135,8 @@ function generate_panelData(
                 'shortUuid' => (string)$uid,
                 'daysLeft' => $daysLeft,
                 'trafficUsed' => (string)$download,
-                'trafficLimit' => '0',
+                'trafficLimit' => ($trafficLimitHuman !== '0' && $trafficLimitHuman !== '') ? $trafficLimitHuman : '0',
+                'trafficLimitBytes' => $trafficLimitBytesStr,
                 'username' => (string)$email,
                 'expiresAt' => $expiresAt,
                 'isActive' => true,
@@ -138,6 +145,7 @@ function generate_panelData(
                 'connectedDevices' => $connectedDevices,
                 'connectedDevicesMax' => $connectedDevicesMax,
                 'hasDeviceDeletePassword' => $hasDeviceDeletePassword,
+                'inboundServerStats' => $inboundServerStats,
             ],
             'links' => $links,
             'ssConfLinks' => new stdClass(),
@@ -203,7 +211,7 @@ function send_profile_headers(string $email, string $subscription_url, string $s
     header('flclashx-view: type:list; sort:none; layout:standard; icon:standard; card:min');
 }
 
-$panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $wgconf ?? '', $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword));
+$panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $wgconf ?? '', $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword), $trafficLimitHuman, (string) $trafficLimitBytes, $inboundServerStats);
 $panelDataB64 = $panelData; // Already base64 encoded
 
 switch (true) {
@@ -306,6 +314,127 @@ switch (true) {
     --text-muted: #94a3b8;
     --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
     --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+}
+
+/* Подключённые устройства: узкий экран — одна колонка; от 640px — одна строка (устройство | ключ | трафик | удалить) */
+.connected-device-card {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.connected-device-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+.connected-device-title {
+    font-weight: 600;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.connected-device-os {
+    font-size: 13px;
+    color: var(--text-secondary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.connected-device-hwid {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+    font-size: 13px;
+    word-break: break-all;
+}
+.connected-device-ua {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.connected-device-traffic {
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+.connected-device-time {
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+.connected-device-col--actions {
+    display: flex;
+    justify-content: flex-start;
+}
+@media (max-width: 639px) {
+    .connected-device-os,
+    .connected-device-time {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+    }
+}
+@media (min-width: 640px) {
+    .connected-device-card {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: flex-start;
+        gap: 16px;
+    }
+    .connected-device-col--device {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+    .connected-device-col--network {
+        flex: 1.15 1 0;
+        min-width: 0;
+    }
+    .connected-device-col--stats {
+        flex: 0 0 auto;
+        text-align: right;
+        align-items: flex-end;
+    }
+    .connected-device-col--actions {
+        flex: 0 0 auto;
+        margin-left: auto;
+        align-self: center;
+        justify-content: flex-end;
+    }
+    .connected-device-hwid {
+        white-space: nowrap;
+        word-break: normal;
+    }
+}
+
+.inbound-stats-card .inbound-stat-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+}
+.inbound-stats-card .inbound-stat-row:last-child {
+    border-bottom: none;
+}
+@media (min-width: 640px) {
+    .inbound-stats-card .inbound-stat-row {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+    }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1729,6 +1858,12 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                 uz: 'Avto', hi: 'ऑटो', de: 'Auto', tr: 'Otomatik', az: 'Avto',
                 vi: 'Tự động', es: 'Auto', ja: '自動', be: 'Аўта', pt: 'Auto',
                 uk: 'Авто', pl: 'Auto', id: 'Otomatis', tk: 'Awto', th: 'อัตโนมัติ'
+            },
+            inboundServerTitle: {
+                en: 'Inbound traffic (whole server)', ru: 'Трафик по входам (весь сервер)',
+            },
+            inboundServerHint: {
+                en: 'Counters include all users on this inbound.', ru: 'Учитываются все клиенты на этом входе.',
             }
         };
 
@@ -1940,6 +2075,7 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                 html += renderSubscriptionInfo(infoBlockType);
             }
             html += renderConnectedDevicesSection();
+            html += renderInboundServerStatsSection();
 
             // Render installation section
             html += renderInstallationSection();
@@ -2004,29 +2140,21 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                 const trafficUpload = formatBytes(device.traffic_upload || 0);
 
                 return `
-                    <div class="link-item" style="align-items: stretch; gap: 8px; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;">
-                        <div style="display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) minmax(150px, 1fr); gap: 10px; align-items: center;">
-                            <div style="font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${model}">
-                                📱 ${model}
-                            </div>
-                            <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary);" title="${hwid}">
-                                🔑 ${hwid}
-                            </div>
-                            <div style="text-align: right; white-space: nowrap; display: flex; align-items: center; justify-content: flex-end; gap: 10px;">
-                                <span>⬇ ${trafficDownload} · ⬆ ${trafficUpload}</span>
-                                <button class="btn btn-sm" style="padding: 4px 8px; border-color: var(--error); color: var(--error);" onclick="deleteDeviceByHwid('${escapeForAttribute(device.hwid || '')}')">🗑️</button>
-                            </div>
+                    <div class="link-item connected-device-card">
+                        <div class="connected-device-col connected-device-col--device">
+                            <div class="connected-device-title" title="${model}">📱 ${model}</div>
+                            <div class="connected-device-os">💻 ${os}${osVersion ? ' ' + osVersion : ''}</div>
                         </div>
-                        <div style="display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1.4fr) minmax(180px, 1fr); gap: 10px; align-items: center; color: var(--text-secondary);">
-                            <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                💻 ${os}${osVersion ? ' ' + osVersion : ''}
-                            </div>
-                            <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${userAgent}">
-                                🌐 ${userAgent}
-                            </div>
-                            <div style="text-align: right; white-space: nowrap;">
-                                🕒 ${lastSeen}
-                            </div>
+                        <div class="connected-device-col connected-device-col--network">
+                            <div class="connected-device-hwid" title="${hwid}">🔑 ${hwid}</div>
+                            <div class="connected-device-ua" title="${userAgent}">🌐 ${userAgent}</div>
+                        </div>
+                        <div class="connected-device-col connected-device-col--stats">
+                            <div class="connected-device-traffic">⬇ ${trafficDownload} · ⬆ ${trafficUpload}</div>
+                            <div class="connected-device-time">🕒 ${lastSeen}</div>
+                        </div>
+                        <div class="connected-device-col connected-device-col--actions">
+                            <button type="button" class="btn btn-sm" style="padding: 6px 12px; border-color: var(--error); color: var(--error);" onclick="deleteDeviceByHwid('${escapeForAttribute(device.hwid || '')}')">🗑️</button>
                         </div>
                     </div>
                 `;
@@ -2044,6 +2172,30 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                         </div>
                     </div>
                     <div class="card-content" style="display: none;">
+                        ${rows}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderInboundServerStatsSection() {
+            const stats = panelData?.response?.user?.inboundServerStats;
+            if (!Array.isArray(stats) || stats.length === 0) {
+                return '';
+            }
+            const title = getHardcodedText('inboundServerTitle');
+            const hint = getHardcodedText('inboundServerHint');
+            const rows = stats.map(s => {
+                const tag = escapeHtml(s.tag || '');
+                const d = formatBytes(Number(s.download) || 0);
+                const u = formatBytes(Number(s.upload) || 0);
+                return `<div class="inbound-stat-row"><span><strong>${tag}</strong></span><span>⬇ ${d} · ⬆ ${u}</span></div>`;
+            }).join('');
+            return `
+                <div class="card user-info inbound-stats-card" style="margin-bottom: 20px;">
+                    <div class="card-header"><span>${title}</span></div>
+                    <div class="card-content">
+                        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">${hint}</p>
                         ${rows}
                     </div>
                 </div>

@@ -401,6 +401,34 @@ $i = [
         'en' => 'restart',
         'ru' => 'перезагрузка',
     ],
+    'traffic limit'  => [
+        'en' => 'traffic limit',
+        'ru' => 'лимит трафика',
+    ],
+    'traffic limit line'  => [
+        'en' => 'traffic limit',
+        'ru' => 'лимит трафика',
+    ],
+    'traffic limit prompt'  => [
+        'en' => 'traffic limit: enter GB (0=off). Both mode pool: TLS|Reality e.g. 100|50 (total cap = sum)',
+        'ru' => 'лимит трафика: введите ГБ (0=снять). Режим Both пул: TLS|Reality, напр. 100|50 (общий потолок = сумма)',
+    ],
+    'traffic limit prompt short'  => [
+        'en' => 'GB or tlsGB|realityGB',
+        'ru' => 'ГБ или tlsГБ|realityГБ',
+    ],
+    'traffic limit split only both'  => [
+        'en' => 'split limit only for transport Both',
+        'ru' => 'раздельный ввод TLS|Reality только при transport Both',
+    ],
+    'traffic limit pool note'  => [
+        'en' => 'Pool cap (TLS+Reality)',
+        'ru' => 'Пул (TLS+Reality)',
+    ],
+    'inbound stats server note'  => [
+        'en' => '(all clients on server)',
+        'ru' => '(все клиенты на сервере)',
+    ],
 ];
 
 if (file_exists(__DIR__ . '/i18n.override.php')) {

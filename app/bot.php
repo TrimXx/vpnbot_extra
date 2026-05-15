@@ -528,6 +528,9 @@ class Bot
             case preg_match('~^/timerXr (\d+)$~', $this->input['callback'], $m):
                 $this->timerXr($m[1]);
                 break;
+            case preg_match('~^/trafficLimitXr (\d+)$~', $this->input['callback'], $m):
+                $this->trafficLimitXr($m[1]);
+                break;
             case preg_match('~^/switchXr (\d+)$~', $this->input['callback'], $m):
                 $this->switchXr($m[1]);
                 break;
@@ -932,6 +935,15 @@ class Bot
             $p['users_by_id'][$id]['session']['download'] = 0;
             $p['users_by_id'][$id]['global']['upload'] = (int) ($v['global']['upload'] ?? 0) + (int) ($v['session']['upload'] ?? 0);
             $p['users_by_id'][$id]['session']['upload'] = 0;
+        }
+        foreach (($p['inbounds'] ?? []) as $tag => $v) {
+            if (!is_array($v)) {
+                continue;
+            }
+            $p['inbounds'][$tag]['global']['download'] = (int) ($v['global']['download'] ?? 0) + (int) ($v['session']['download'] ?? 0);
+            $p['inbounds'][$tag]['session']['download'] = 0;
+            $p['inbounds'][$tag]['global']['upload'] = (int) ($v['global']['upload'] ?? 0) + (int) ($v['session']['upload'] ?? 0);
+            $p['inbounds'][$tag]['session']['upload'] = 0;
         }
         $this->setXrayStats($p);
     }
@@ -1553,6 +1565,7 @@ class Bot
         while (true) {
             $this->shutdownClient();
             $this->shutdownClientXr();
+            $this->checkTrafficLimitXr();
             $this->checkVersion();
             $this->checkBackup();
             $this->checkLogs();
@@ -1570,10 +1583,8 @@ class Bot
             $this->time_xray_stats = time();
             try {
                 $x  = $this->getXray();
-                $downResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "inbound>>>vless_tls>>>traffic>>>downlink" 2>&1', 'xr'), true);
-                $td = is_array($downResp) ? (int)($downResp['stat']['value'] ?? 0) : 0;
-                $upResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "inbound>>>vless_tls>>>traffic>>>uplink" 2>&1', 'xr'), true);
-                $tu = is_array($upResp) ? (int)($upResp['stat']['value'] ?? 0) : 0;
+                $td = $this->queryXrayStatCounter('inbound>>>vless_tls>>>traffic>>>downlink');
+                $tu = $this->queryXrayStatCounter('inbound>>>vless_tls>>>traffic>>>uplink');
                 $p  = $this->getXrayStats();
                 $p['session'] = [
                     'download' => $td,
@@ -1583,10 +1594,8 @@ class Bot
                     $tmp = [];
                     $tmpById = [];
                     foreach ($users as $k => $v) {
-                        $userDownResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "user>>>' . $v['email'] . '>>>traffic>>>downlink" 2>&1', 'xr'), true);
-                        $d = is_array($userDownResp) ? (int)($userDownResp['stat']['value'] ?? 0) : 0;
-                        $userUpResp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "user>>>' . $v['email'] . '>>>traffic>>>uplink" 2>&1', 'xr'), true);
-                        $u = is_array($userUpResp) ? (int)($userUpResp['stat']['value'] ?? 0) : 0;
+                        $d = $this->queryXrayStatCounter('user>>>' . $v['email'] . '>>>traffic>>>downlink');
+                        $u = $this->queryXrayStatCounter('user>>>' . $v['email'] . '>>>traffic>>>uplink');
                         $prevUserRaw = $p['users'][$k] ?? [];
                         $prevUser = is_array($prevUserRaw) ? $prevUserRaw : [];
                         $prevGlobal = is_array($prevUser['global'] ?? null) ? $prevUser['global'] : [];
@@ -1615,6 +1624,35 @@ class Bot
                     }
                     $p['users'] = $tmp;
                     $p['users_by_id'] = $tmpById;
+                }
+                $inboundTags = [];
+                foreach ($x['inbounds'] ?? [] as $ib) {
+                    $tag = (string) ($ib['tag'] ?? '');
+                    if ($tag === '' || $tag === 'api') {
+                        continue;
+                    }
+                    $inboundTags[$tag] = true;
+                }
+                $tmpIn = [];
+                foreach (array_keys($inboundTags) as $tag) {
+                    $d = $this->queryXrayStatCounter("inbound>>>{$tag}>>>traffic>>>downlink");
+                    $u = $this->queryXrayStatCounter("inbound>>>{$tag}>>>traffic>>>uplink");
+                    $prevRaw = $p['inbounds'][$tag] ?? [];
+                    $prev = is_array($prevRaw) ? $prevRaw : [];
+                    $prevG = is_array($prev['global'] ?? null) ? $prev['global'] : [];
+                    $tmpIn[$tag] = [
+                        'session' => [
+                            'download' => $d,
+                            'upload'   => $u,
+                        ],
+                        'global' => [
+                            'download' => (int) ($prevG['download'] ?? 0),
+                            'upload'   => (int) ($prevG['upload'] ?? 0),
+                        ],
+                    ];
+                }
+                if (!empty($tmpIn)) {
+                    $p['inbounds'] = $tmpIn;
                 }
                 $this->setXrayStats($p);
             } catch (\Throwable $th) {
@@ -2969,6 +3007,73 @@ class Bot
             'callback'      => 'setTimerXr',
             'args'          => [$k],
         ];
+    }
+
+    public function trafficLimitXr($k)
+    {
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} " . $this->i18n('traffic limit prompt'),
+            $this->input['message_id'],
+            reply: $this->i18n('traffic limit prompt short'),
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'setTrafficLimitXr',
+            'args'          => [$k],
+        ];
+    }
+
+    public function setTrafficLimitXr($text, $i)
+    {
+        $c   = $this->getXray();
+        $pac = $this->getPacConf();
+        if (!isset($c['inbounds'][0]['settings']['clients'][$i])) {
+            return;
+        }
+        $text = trim((string) $text);
+        if ($text === '' || $text === '0') {
+            unset(
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_gb'],
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_bytes'],
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_tls_gb'],
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_reality_gb'],
+            );
+            $this->restartXray($c, 1);
+            $this->userXr($i);
+
+            return;
+        }
+        if (preg_match('~^([\d.,]+)\s*\|\s*([\d.,]+)$~', $text, $m)) {
+            if (($pac['transport'] ?? '') !== 'Both') {
+                $this->send($this->input['chat'], $this->i18n('traffic limit split only both'), $this->input['message_id']);
+
+                return;
+            }
+            $tls = (float) str_replace(',', '.', $m[1]);
+            $rel = (float) str_replace(',', '.', $m[2]);
+            unset($c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_gb'], $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_bytes']);
+            if ($tls <= 0 && $rel <= 0) {
+                unset($c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_tls_gb'], $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_reality_gb']);
+            } else {
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_tls_gb']      = $tls;
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_reality_gb'] = $rel;
+            }
+        } else {
+            $gb = (float) str_replace(',', '.', $text);
+            unset(
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_tls_gb'],
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_reality_gb'],
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_bytes'],
+            );
+            if ($gb <= 0) {
+                unset($c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_gb']);
+            } else {
+                $c['inbounds'][0]['settings']['clients'][$i]['traffic_limit_gb'] = $gb;
+            }
+        }
+        $this->restartXray($c, 1);
+        $this->userXr($i);
     }
 
     public function setAdKey($key)
@@ -6413,6 +6518,23 @@ DNS-over-HTTPS with IP:
         return null;
     }
 
+    /**
+     * Строка host:port для runtime AWG/WG в подписке (Mihomo и т.д.).
+     * Должна совпадать с логикой createConfig(): сначала ## endpoint_custom / Peer.Endpoint, иначе домен или IP из настроек PAC.
+     */
+    protected function resolveRuntimeDeviceWgEndpointString(array $iface, array $peer): string
+    {
+        $endpoint = trim((string) ($iface['## endpoint_custom'] ?? $peer['Endpoint'] ?? ''));
+        if ($endpoint !== '') {
+            return $endpoint;
+        }
+        $pac  = $this->getPacConf();
+        $host = !empty($pac[$this->getInstanceWG(1) . 'endpoint']) ? $this->ip : $this->getDomain();
+        $port = getenv($this->getInstanceWG(1) ? 'WG1PORT' : 'WGPORT');
+
+        return $host !== '' && $port !== false && $port !== '' ? $host . ':' . $port : '';
+    }
+
     protected function buildRuntimeWgClashProxy(array $ownerClient, string $hwid = '', string $deviceUuid = ''): ?array
     {
         if (!$this->isRuntimeDeviceWgEnabled($ownerClient)) {
@@ -6440,7 +6562,7 @@ DNS-over-HTTPS with IP:
             return null;
         }
 
-        $endpoint = (string) ($iface['## endpoint_custom'] ?? $peer['Endpoint'] ?? '');
+        $endpoint = $this->resolveRuntimeDeviceWgEndpointString($iface, $peer);
         [$server, $port] = $this->splitEndpointHostPort($endpoint);
         if ($server === '' || $port <= 0) {
             return null;
@@ -7929,6 +8051,9 @@ DNS-over-HTTPS with IP:
         if (!isset($stats['users_by_id']) || !is_array($stats['users_by_id'])) {
             $stats['users_by_id'] = [];
         }
+        if (!isset($stats['inbounds']) || !is_array($stats['inbounds'])) {
+            $stats['inbounds'] = [];
+        }
         return $stats;
     }
 
@@ -7948,6 +8073,65 @@ DNS-over-HTTPS with IP:
             return ['download' => $download, 'upload' => $upload];
         }
         return ['download' => 0, 'upload' => 0];
+    }
+
+    /**
+     * Эффективный лимит (↓+↑) в байтах: общий traffic_limit_gb или сумма tls|reality (пул) в режиме Both.
+     */
+    protected function getClientTrafficLimitBytes(array $client, array $pac): int
+    {
+        $gb = (float) ($client['traffic_limit_gb'] ?? 0);
+        if ($gb > 0) {
+            return (int) round($gb * 1024 * 1024 * 1024);
+        }
+        $direct = (int) ($client['traffic_limit_bytes'] ?? 0);
+        if ($direct > 0) {
+            return $direct;
+        }
+        if (($pac['transport'] ?? '') === 'Both') {
+            $tlsGb  = (float) ($client['traffic_limit_tls_gb'] ?? 0);
+            $relGb  = (float) ($client['traffic_limit_reality_gb'] ?? 0);
+            $poolGb = $tlsGb + $relGb;
+            if ($poolGb > 0) {
+                return (int) round($poolGb * 1024 * 1024 * 1024);
+            }
+        }
+        return 0;
+    }
+
+    protected function queryXrayStatCounter(string $name): int
+    {
+        try {
+            $resp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "' . str_replace(['"', '\\'], '', $name) . '" 2>&1', 'xr'), true);
+
+            return is_array($resp) ? (int) ($resp['stat']['value'] ?? 0) : 0;
+        } catch (\Throwable $e) {
+            return 0;
+        }
+    }
+
+    public function checkTrafficLimitXr(): void
+    {
+        try {
+            $pac = $this->getPacConf();
+            $c   = $this->getXray();
+            $st  = $this->getXrayStats();
+            foreach ($c['inbounds'][0]['settings']['clients'] ?? [] as $k => $v) {
+                if (!is_array($v) || !empty($v['off'])) {
+                    continue;
+                }
+                $limit = $this->getClientTrafficLimitBytes($v, $pac);
+                if ($limit <= 0) {
+                    continue;
+                }
+                $traffic = $this->getClientTrafficStats($st, $v, (int) $k);
+                $total   = (int) $traffic['download'] + (int) $traffic['upload'];
+                if ($total >= $limit) {
+                    $this->switchXr((int) $k, 1);
+                }
+            }
+        } catch (\Throwable $e) {
+        }
     }
 
     public function setXrayStats($x)
@@ -8870,10 +9054,39 @@ DNS-over-HTTPS with IP:
         $download = $this->getBytes($traffic['download']);
         $upload   = $this->getBytes($traffic['upload']);
         $text[] = "traffic: D:$download U:$upload";
+        $limBytes = $this->getClientTrafficLimitBytes($c, $pac);
+        if ($limBytes > 0) {
+            $text[] = $this->i18n('traffic limit line') . ': ' . $this->getBytes($limBytes) . ' (↓+↑)';
+            if (($pac['transport'] ?? '') === 'Both'
+                && (float) ($c['traffic_limit_gb'] ?? 0) <= 0
+                && (int) ($c['traffic_limit_bytes'] ?? 0) <= 0
+                && (((float) ($c['traffic_limit_tls_gb'] ?? 0) + (float) ($c['traffic_limit_reality_gb'] ?? 0)) > 0)) {
+                $tls = (float) ($c['traffic_limit_tls_gb'] ?? 0);
+                $rel = (float) ($c['traffic_limit_reality_gb'] ?? 0);
+                $text[] = $this->i18n('traffic limit pool note') . " TLS {$tls} + Reality {$rel} GB → " . $this->getBytes($limBytes);
+            }
+        } else {
+            $text[] = $this->i18n('traffic limit line') . ': ' . $this->i18n('off');
+        }
+        foreach ($st['inbounds'] ?? [] as $tag => $ent) {
+            if (!is_array($ent)) {
+                continue;
+            }
+            $tdl = (int) (($ent['global']['download'] ?? 0) + ($ent['session']['download'] ?? 0));
+            $tul = (int) (($ent['global']['upload'] ?? 0) + ($ent['session']['upload'] ?? 0));
+            $text[] = 'inbound ' . htmlspecialchars((string) $tag, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                . ': D:' . $this->getBytes($tdl) . ' U:' . $this->getBytes($tul) . ' ' . $this->i18n('inbound stats server note');
+        }
         $data[]   = [
             [
                 'text'          => $this->i18n('reset stats') . ": D:$download U:$upload",
                 'callback_data' => "/resetXrUser $i",
+            ],
+        ];
+        $data[] = [
+            [
+                'text'          => $this->i18n('traffic limit') . ($limBytes > 0 ? ' ✓' : ''),
+                'callback_data' => "/trafficLimitXr $i",
             ],
         ];
         $data[] = [
@@ -9453,6 +9666,19 @@ DNS-over-HTTPS with IP:
         $traffic = $this->getClientTrafficStats($st, $client, $k);
         $download = $this->getBytes($traffic['download']);
         $upload   = $this->getBytes($traffic['upload']);
+        $trafficLimitBytes = $this->getClientTrafficLimitBytes($client, $pac);
+        $trafficLimitHuman = $trafficLimitBytes > 0 ? $this->getBytes($trafficLimitBytes) : '0';
+        $inboundServerStats = [];
+        foreach (($st['inbounds'] ?? []) as $tag => $ent) {
+            if (!is_array($ent)) {
+                continue;
+            }
+            $inboundServerStats[] = [
+                'tag' => (string) $tag,
+                'download' => (int) (($ent['global']['download'] ?? 0) + ($ent['session']['download'] ?? 0)),
+                'upload' => (int) (($ent['global']['upload'] ?? 0) + ($ent['session']['upload'] ?? 0)),
+            ];
+        }
         $deviceTrafficMap = $this->getHwidDeviceTraffic($uid);
         $hasDeviceDeletePassword = $this->getSubscriptionDevicePasswordHash($client) !== '';
         $singbox  = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
