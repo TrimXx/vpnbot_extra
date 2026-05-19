@@ -6,6 +6,8 @@
 
 Telegram-бот для управления VPN-сервером из Telegram.
 
+**Руководство пользователя (RU):** [docs/USER_GUIDE_RU.md](docs/USER_GUIDE_RU.md) — как выдавать доступ, HWID, подписки, WG/AWG и типовые сценарии без технических деталей.
+
 ### Что поддерживается
 
 - VLESS (`Reality` / `Websocket` / `Both`)
