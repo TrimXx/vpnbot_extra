@@ -16,6 +16,8 @@ class Bot
     public $pool;
     public $hwid;
     public $last = '';
+    protected $wgServerConfigSnapshot = null;
+    protected $nginxCertTypeSnapshot = null;
 
     public function __construct($key, $i18n)
     {
@@ -76,6 +78,9 @@ class Bot
             'new_member_status' => $input['my_chat_member']['new_chat_member']['status'] ?? false,
         ];
         $this->auth();
+        if (!empty($this->input['callback_id'])) {
+            $this->answer($this->input['callback_id']);
+        }
         $this->session();
         $this->action();
         $this->callbackCheck();
@@ -102,9 +107,9 @@ class Bot
 
     public function callbackCheck()
     {
+        // answer() is sent early in input() for callbacks; keep hook for non-callback edge cases.
         if (empty($this->callback) && !empty($this->input['callback_id'])) {
-            $debug = $GLOBALS['debug'] ?? false;
-            $this->answer($this->input['callback_id'], $debug ? $this->input['callback'] : false);
+            $this->answer($this->input['callback_id']);
         }
     }
 
@@ -5095,7 +5100,7 @@ DNS-over-HTTPS with IP:
         $cacheFile = '/tmp/vpnbot_menu_status.json';
         if (is_readable($cacheFile)) {
             $age = time() - (int) filemtime($cacheFile);
-            if ($age >= 0 && $age < 30) {
+            if ($age >= 0 && $age < 60) {
                 $cached = json_decode((string) file_get_contents($cacheFile), true);
                 if (is_array($cached)) {
                     return $cached;
@@ -5103,13 +5108,24 @@ DNS-over-HTTPS with IP:
             }
         }
         $conf = $this->getPacConf();
+        $ver = getenv('VER') ?: '';
+        $wg1Amnezia = !empty($conf['wg1_amnezia']) ? '1' : '0';
+        $raw = trim((string) $this->ssh(
+            "VER='{$ver}' WG1_AWG='{$wg1Amnezia}' sh /scripts/menu_status.sh",
+            'service'
+        ));
+        $batch = json_decode($raw, true);
+        if (!is_array($batch)) {
+            $batch = [];
+        }
         $status = [
-            'wg1'  => (bool) $this->ssh($conf['wg1_amnezia'] ? 'awg' : 'wg', 'wg1'),
-            'xr'   => (bool) $this->ssh('pgrep xray', 'xr'),
-            'hy'   => (bool) $this->ssh('pgrep hysteria', 'hy'),
-            'tg'   => (bool) $this->ssh('pgrep mtproto-proxy', 'tg'),
+            'wg1'  => !empty($batch['wg1']),
+            'xr'   => !empty($batch['xr']),
+            'hy'   => !empty($batch['hy']),
+            'tg'   => !empty($batch['tg']),
+            'cron' => !empty($batch['cron']),
             'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
-            'warp' => $this->warpStatus(),
+            'warp' => trim((string) ($batch['warp'] ?? 'off')) ?: 'off',
         ];
         @file_put_contents($cacheFile, json_encode($status));
         return $status;
@@ -5209,7 +5225,8 @@ DNS-over-HTTPS with IP:
                     $backup = "{$conf['backup']} - wrong format";
                 }
             }
-            $cron   = !empty($this->dontshowcron) ? '' : $this->i18n($this->ssh('pgrep -f cron.php', 'service') ? 'on' : 'off') . ' cron';
+            $menuStatus = $this->getMenuServiceStatus();
+            $cron   = !empty($this->dontshowcron) ? '' : $this->i18n(!empty($menuStatus['cron']) ? 'on' : 'off') . ' cron';
             $f      = '/docker/compose';
             $c      = yaml_parse_file($f)['services'];
             $main[] = 'v' . getenv('VER');
@@ -5238,7 +5255,6 @@ DNS-over-HTTPS with IP:
 
             $ports   = yaml_parse_file('/docker/compose')['services'];
             $hy_port = explode(':', $c['hy']['ports'][0])[0];
-            $menuStatus = $this->getMenuServiceStatus();
             $main[]  = '';
 
             $main[] = '<code>';
@@ -5776,19 +5792,21 @@ DNS-over-HTTPS with IP:
         if ($deviceUuid === '') {
             return '';
         }
-        return $this->runInRuntimeWgContext(function () use ($deviceUuid) {
-            $conf = $this->readConfig();
-            foreach (($conf['peers'] ?? []) as $peer) {
-                if (!is_array($peer)) {
-                    continue;
-                }
-                if ((string) ($peer['## device_uuid'] ?? '') === $deviceUuid) {
-                    return (string) ($peer['PublicKey'] ?? '');
-                }
+        if ($this->wgServerConfigSnapshot === null) {
+            $this->wgServerConfigSnapshot = $this->runInRuntimeWgContext(function () {
+                return $this->readConfig();
+            }) ?? [];
+        }
+        foreach (($this->wgServerConfigSnapshot['peers'] ?? []) as $peer) {
+            if (!is_array($peer)) {
+                continue;
             }
+            if ((string) ($peer['## device_uuid'] ?? '') === $deviceUuid) {
+                return (string) ($peer['PublicKey'] ?? '');
+            }
+        }
 
-            return '';
-        }) ?? '';
+        return '';
     }
 
     /**
@@ -9046,12 +9064,8 @@ DNS-over-HTTPS with IP:
 
     public function warpStatus()
     {
-        if (!empty($this->ssh('pgrep warp-svc', 'wp'))) {
-            $st = $this->ssh('curl -m 1 -x socks5://127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace', 'wp');
-            preg_match('~warp=(\w+)~', $st, $m);
-            return trim($m[1]) ?: 'off';
-        }
-        return 'off';
+        $menuStatus = $this->getMenuServiceStatus();
+        return (string) ($menuStatus['warp'] ?? 'off');
     }
 
     public function analyzeXray()
@@ -11806,6 +11820,9 @@ DNS-over-HTTPS with IP:
 
     public function readConfig()
     {
+        if ($this->wgServerConfigSnapshot !== null) {
+            return $this->wgServerConfigSnapshot;
+        }
         $r = $this->ssh('cat /etc/wireguard/wg0.conf', $this->getInstanceWG());
         $r = explode(PHP_EOL, $r);
         $r = array_filter($r);
@@ -11832,14 +11849,19 @@ DNS-over-HTTPS with IP:
                 $d['peers'][] = $v;
             }
         }
+        $this->wgServerConfigSnapshot = $d;
         return $d;
     }
 
     public function nginxGetTypeCert()
     {
+        if ($this->nginxCertTypeSnapshot !== null) {
+            return $this->nginxCertTypeSnapshot;
+        }
         $conf = $this->ssh('cat /etc/nginx/nginx.conf', 'ng');
         preg_match("/#~([^\s]+)/", $conf, $m);
-        return $m[1];
+        $this->nginxCertTypeSnapshot = $m[1] ?? '';
+        return $this->nginxCertTypeSnapshot;
     }
 
     public function readStatus()
@@ -12183,7 +12205,7 @@ DNS-over-HTTPS with IP:
             ssh2_disconnect($c);
         } catch (Exception | Error $e) {
             if (!empty($GLOBALS['debug'])) {
-                $this->send($this->input['chat'], $e->getMessage(), $this->input['message_id']);
+                error_log("ssh fail [$service]: " . $e->getMessage());
             }
             if ($rethrow) {
                 throw $e;

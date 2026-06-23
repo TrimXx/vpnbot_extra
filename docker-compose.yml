@@ -171,6 +171,7 @@ services:
             - ./update:/update
             - ./.git:/.git
             - ./scripts/start_service.sh:/start_service.sh
+            - ./scripts/menu_status.sh:/scripts/menu_status.sh:ro
             - ./docker-compose.override.yml:/docker/compose
             - /var/run/docker.sock:/var/run/docker.sock:ro
         environment:
