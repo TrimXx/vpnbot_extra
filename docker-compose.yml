@@ -115,6 +115,7 @@ services:
             - ./config/.profile:/root/.ashrc:ro
             - ./config/php.ini:/etc/php81/php.ini
             - ./config/:/config/
+            - ./config-templates:/config-templates:ro
             - ./certs/:/certs/
             - ./ssh:/ssh
             - ./app:/app
@@ -161,6 +162,7 @@ services:
             - ./config/.profile:/root/.ashrc:ro
             - ./config/php.ini:/etc/php81/php.ini
             - ./config/:/config/
+            - ./config-templates:/config-templates:ro
             - ./certs/:/certs/
             - ./ssh:/ssh
             - ./app:/app

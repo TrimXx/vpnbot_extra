@@ -3267,7 +3267,13 @@ class Bot
     {
         $out[] = 'Restart Adguard Home';
         $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-        exec('git -C / checkout config/AdGuardHome.yaml');
+        $template = '/config-templates/AdGuardHome.yaml';
+        if (is_readable($template)) {
+            copy($template, $this->adguard);
+        } else {
+            $this->send($this->input['chat'], 'AdGuard template missing: ' . $template, $this->input['message_id']);
+            return;
+        }
         $this->adguardSync();
         $this->cloakNginx();
         sleep(3);

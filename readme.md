@@ -46,6 +46,13 @@ UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra
 
 - `make u` и `update/update.sh` обновлены для безопасного сценария: подтягиваются целевые кодовые пути (`app`, `update`, `makefile`, `version`) без wipe конфигов.
 
+### Конфигурация (важно)
+
+- **`config/`** — только на сервере, **не в git** (живые данные, секреты).
+- **`config-templates/`** — шаблоны в репозитории; при `make u` / `init.sh` скрипт `bootstrap_config.sh` создаёт недостающие файлы в `config/` без перезаписи существующих.
+- Локально можно держать полный слепок бота в `config/` — git его не видит.
+- Не используйте `git add -A` без проверки; `make c` для config удалён.
+
 ### Перезапуск
 
 ```shell

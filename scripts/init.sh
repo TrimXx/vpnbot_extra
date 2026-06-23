@@ -92,6 +92,9 @@ if [ ! -f "./app/config.php" ]; then
 EOF
 fi
 
+echo "[vpnbot] Bootstrap config..."
+bash "$APP_DIR/scripts/bootstrap_config.sh"
+
 echo "[vpnbot] Starting/Updating containers..."
 make u
 echo "[vpnbot] Done."

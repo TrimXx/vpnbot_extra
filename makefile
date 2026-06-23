@@ -9,6 +9,7 @@ u: # запуск контейнеров
 		git checkout origin/$$branch -- app update makefile version || true; \
 	fi
 	bash ./update/update.sh &
+	bash ./scripts/bootstrap_config.sh
 	touch ./override.env ./docker-compose.override.yml ./config/location.conf ./config/override.conf
 	IP=$(IP) VER=$(VER) docker compose --env-file ./.env --env-file ./override.env up -d --force-recreate
 d: # остановка контейнеров
@@ -62,10 +63,6 @@ push:
 	docker compose push
 s:
 	git status -su
-c:
-	git add config/
-	git checkout .
-	git reset
 webhook:
 	docker compose exec php php checkwebhook.php
 reset:
