@@ -9,6 +9,20 @@ TEMPLATES="$ROOT/config-templates"
 
 mkdir -p "$CONFIG"
 
+if [ ! -f "$ROOT/.env" ]; then
+    if [ -f "$ROOT/env.defaults" ]; then
+        cp "$ROOT/env.defaults" "$ROOT/.env"
+        echo "[bootstrap] created .env from env.defaults"
+    else
+        echo "[bootstrap] WARNING: env.defaults missing, create .env manually" >&2
+    fi
+fi
+
+if [ ! -f "$ROOT/override.env" ]; then
+    : > "$ROOT/override.env"
+    echo "[bootstrap] created override.env"
+fi
+
 copy_if_missing() {
     src="$1"
     dst="$2"

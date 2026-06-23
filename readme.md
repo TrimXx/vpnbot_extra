@@ -23,16 +23,18 @@ Telegram-бот для управления VPN-сервером из Telegram.
 - Ubuntu `22.04/24.04`
 - Debian `11/12`
 
-### Установка
+### Установка (ветка v2)
 
 ```shell
-wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s YOUR_TELEGRAM_BOT_KEY master
+wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/v2/scripts/init.sh | sh -s YOUR_TELEGRAM_BOT_KEY v2
 ```
+
+При первом запуске создаются `.env` (из `env.defaults`), `config/` (из `config-templates/`) и `override.env`.
 
 ### Обновление (без токена бота)
 
 ```shell
-wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
+wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/v2/scripts/init.sh | sh -s -- v2
 ```
 
 ### Важное по обновлениям
@@ -41,7 +43,7 @@ wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/in
 - Для полного обновления репозитория используйте:
 
 ```shell
-UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
+UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/v2/scripts/init.sh | sh -s -- v2
 ```
 
 - `make u` и `update/update.sh` обновлены для безопасного сценария: подтягиваются целевые кодовые пути (`app`, `update`, `makefile`, `version`) без wipe конфигов.
@@ -50,6 +52,7 @@ UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra
 
 - **`config/`** — только на сервере, **не в git** (живые данные, секреты).
 - **`config-templates/`** — шаблоны в репозитории; при `make u` / `init.sh` скрипт `bootstrap_config.sh` создаёт недостающие файлы в `config/` без перезаписи существующих.
+- **`.env`** — не в git; при первом deploy копируется из `env.defaults` (порты WG1, MTProto, IMAGE и т.д.).
 - Локально можно держать полный слепок бота в `config/` — git его не видит.
 - Не используйте `git add -A` без проверки; `make c` для config удалён.
 
@@ -146,7 +149,7 @@ wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/in
 - Full-repo upgrade is still available:
 
 ```shell
-UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/init.sh | sh -s -- master
+UPGRADE_SCOPE=all wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/v2/scripts/init.sh | sh -s -- v2
 ```
 
 - `make u` and `update/update.sh` are adjusted for safer upgrades: target code paths (`app`, `update`, `makefile`, `version`) are refreshed without wiping user configs.
