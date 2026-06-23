@@ -1,3 +1,10 @@
+10.03.2026 v3.0.0-trimx
+- урезанное меню: только VLESS, AWG/WG1, AdGuard, MTProto, Hysteria, PAC, config
+- подписки только Mihomo/Clash (?t=cl) + runtime AWG (?t=wg)
+- шаблоны подписки только clash; режим subscription_template_mode=template
+- AWG 2.0 ключи (H1-H4 диапазоны, S3/S4)
+- кэш статуса сервисов в меню (30s)
+- удалены Naive, OpenConnect, Shadowsocks, DNSTT, mirror, wg0, v2ray/sing-box подписки
 10.03.2026 v2.29
 - amnezia 2.0
 16.12.2025 v2.28.1

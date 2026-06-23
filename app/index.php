@@ -55,23 +55,28 @@ switch (true) {
         $address = !empty($_GET['a'] ?? '') ? $_GET['a'] : '127.0.0.1';
         $port    = !empty($_GET['p'] ?? '') ? $_GET['p'] : '1080';
         switch ($type) {
-            case 's':
-            case 'si':
             case 'cl':
+            case 'wg':
                 $bot->subscription();
                 exit;
 
             case 'te':
+                if (($_GET['ty'] ?? '') !== 'clash') {
+                    http_response_code(404);
+                    header('Content-Type: text/plain; charset=utf-8');
+                    echo 'Template editor supports clash only';
+                    exit;
+                }
                 if (!empty($_GET['te'])) {
-                    $t = $bot->getPacConf()["{$_GET['ty']}templates"][$_GET['te']];
+                    $t = $bot->getPacConf()['classtemplates'][$_GET['te']];
                 } else {
-                    $t = json_decode(file_get_contents("/config/{$_GET['ty']}.json"), true);
+                    $t = json_decode(file_get_contents('/config/clash.json'), true);
                 }
                 if ($t) {
                     header('Content-Type: text/html');
                     $t = json_encode($t, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                     $name = $_GET['te'] ?: 'origin';
-                    $type = $_GET['ty'];
+                    $type = 'clash';
                     echo <<<HTML
                         <!DOCTYPE HTML>
                         <html lang="en" style="height:100%">

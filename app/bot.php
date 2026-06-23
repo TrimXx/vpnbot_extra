@@ -147,17 +147,17 @@ class Bot
             case preg_match('~^/menu (?P<type>addpeer) (?P<arg>(?:-)?\d+)$~', $this->input['callback'], $m):
             case preg_match('~^/menu (?P<type>wg) (?P<arg>(?:-)?\d+)$~', $this->input['callback'], $m):
             case preg_match('~^/menu (?P<type>client) (?P<arg>\d+(?:_(?:-)?\d+)?)$~', $this->input['callback'], $m):
-            case preg_match('~^/menu (?P<type>pac|adguard|config|ss|lang|oc|naive|mirror|update|hy)$~', $this->input['callback'], $m):
+            case preg_match('~^/menu (?P<type>pac|adguard|config|lang|hy)$~', $this->input['callback'], $m):
                 $this->menu(type: $m['type'] ?? false, arg: $m['arg'] ?? false);
                 break;
             case preg_match('~^/changeWG (\d+)$~', $this->input['callback'], $m):
                 $this->changeWG($m[1]);
                 break;
+            case preg_match('~^/toggleWg1ShowRuntime (-?\d+)$~', $this->input['callback'], $m):
+                $this->toggleWg1ShowRuntime((int) $m[1]);
+                break;
             case preg_match('~^/changeTransport(?: (\w+))?$~', $this->input['callback'], $m):
                 $this->changeTransport($m[1] ?? false);
-                break;
-            case preg_match('~^/mirror$~', $this->input['message'], $m):
-                $this->menu('mirror');
                 break;
             case preg_match('~^/mainOutbound$~', $this->input['callback'], $m):
                 $this->mainOutbound();
@@ -321,9 +321,6 @@ class Bot
             case preg_match('~^/pacMenu (\d+)$~', $this->input['callback'], $m):
                 $this->pacMenu($m[1]);
                 break;
-            case preg_match('~^/applyupdatebot$~', $this->input['callback'], $m):
-                $this->applyupdatebot();
-                break;
             case preg_match('~^/restart$~', $this->input['callback'], $m):
                 $this->restart();
                 break;
@@ -333,32 +330,8 @@ class Bot
             case preg_match('~^/changeBranch (\d+)$~', $this->input['callback'], $m):
                 $this->changeBranch($m[1]);
                 break;
-            case preg_match('~^/getMirror$~', $this->input['callback'], $m):
-                $this->getMirror();
-                break;
             case preg_match('~^/logs$~', $this->input['callback'], $m):
                 $this->logs();
-                break;
-            case preg_match('~^/dnstt$~', $this->input['callback'] ?: $this->input['message'], $m):
-                $this->dnstt(!empty($this->input['callback']));
-                break;
-            case preg_match('~^/showdnstt$~', $this->input['callback'], $m):
-                $this->showdnstt();
-                break;
-            case preg_match('~^/dnsttDownload$~', $this->input['callback'], $m):
-                $this->dnsttDownload();
-                break;
-            case preg_match('~^/dnsttDomain$~', $this->input['callback'], $m):
-                $this->dnsttDomain();
-                break;
-            case preg_match('~^/dnsttPassword$~', $this->input['callback'], $m):
-                $this->dnsttPassword();
-                break;
-            case preg_match('~^/setdnsttDomain (\w+)$~', $this->input['callback'], $m):
-                $this->setdnsttDomain($m[1]);
-                break;
-            case preg_match('~^/setdnsttPassword (\w+)$~', $this->input['callback'], $m):
-                $this->setdnsttPassword($m[1]);
                 break;
             case preg_match('~^/getLog (?P<arg>\d+(?:_(?:-)?\d+)?)$~', $this->input['callback'], $m):
                 $this->getLog(...explode('_', $m['arg']));
@@ -807,7 +780,7 @@ class Bot
     {
         $c['inbounds'][0]['settings']['clients'] = array_values($c['inbounds'][0]['settings']['clients']);
         $this->ensureUniqueXrayClientEmails($c);
-        $c['log']['access'] = '/logs/xray';
+        $this->applyXrayLogConfig($c);
         foreach ($c['inbounds'] as $v) {
             if ($v['tag'] == 'api') {
                 $inbound = true;
@@ -1389,33 +1362,7 @@ class Bot
 
     public function v2ray()
     {
-        $this->ssh('pkill sslocal', 'proxy');
-        $this->ssh('pkill ssserver', 'ss');
-        $ssl = $this->nginxGetTypeCert();
-        $c = $this->getSSConfig();
-        $l = $this->getSSLocalConfig();
-        $domain = $this->getPacConf()['domain'] ?: $this->ip;
-        if ($c['plugin']) {
-            unset($c['plugin']);
-            unset($c['plugin_opts']);
-            unset($l['plugin']);
-            unset($l['plugin_opts']);
-            $l['server']      = 'ss';
-            $l['server_port'] = (int) getenv('SSPORT');
-            $c['server_port'] = (int) getenv('SSPORT');
-        } else {
-            $c['plugin']      = 'v2ray-plugin';
-            $c['plugin_opts'] = 'server;loglevel=none';
-            $l['server']      = 'upstream';
-            $l['server_port'] = $ssl ? 443 : 80;
-            $l['plugin']      = 'v2ray-plugin';
-            $l['plugin_opts'] = ($ssl ? 'tls;' : '') . "fast-open;path=/v2ray;host=$domain";
-        }
-        file_put_contents('/config/ssserver.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        file_put_contents('/config/sslocal.json', json_encode($l, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        $this->ssh('ssserver -v -d -c /config.json', 'ss');
-        $this->ssh('sslocal -v -d -c /config.json', 'proxy');
-        $this->menu('ss');
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function rename(int $client, $page)
@@ -1827,18 +1774,7 @@ class Bot
                     if (!empty($diff)) {
                         exec('git -C / fetch');
                         foreach ($c['admin'] as $k => $v) {
-                            $this->send($v, implode("\n", $diff), 0, [
-                                [
-                                    [
-                                        'text'    => 'changelog',
-                                        'web_app' => ['url' => "https://raw.githubusercontent.com/mercurykd/vpnbot/$b/version"],
-                                    ],
-                                    [
-                                        'text'          => $this->i18n('update bot'),
-                                        'callback_data' => "/applyupdatebot",
-                                    ],
-                                ]
-                            ]);
+                            $this->send($v, implode("\n", $diff), 0);
                         }
                         if ($this->getPacConf()['autoupdate']) {
                             $this->input['chat'] = $this->input['from'] = $c['admin'][0];
@@ -1964,18 +1900,12 @@ class Bot
 
     public function export()
     {
-        $this->wg = 0;
-        $wg = [
-            'server'  => $this->readConfig(),
-            'clients' => json_decode(file_get_contents($this->clients), true) ?: [],
-        ];
         $this->wg = 1;
         $wg1 = [
             'server'  => $this->readConfig(),
             'clients' => json_decode(file_get_contents($this->clients1), true) ?: [],
         ];
         $conf = [
-            'wg'  => $wg,
             'wg1' => $wg1,
             'ad'  => yaml_parse_file($this->adguard),
             'pac' => $this->getPacConf(),
@@ -1984,18 +1914,10 @@ class Bot
                 'private' => file_get_contents('/certs/cert_private'),
                 'public'  => file_get_contents('/certs/cert_public'),
             ] : false,
-            'dnstt' => file_exists('/config/dnstt/server.key') ? [
-                'private' => file_get_contents('/config/dnstt/server.key'),
-                'public'  => file_get_contents('/config/dnstt/server.pub'),
-            ] : false,
             'mtproto'       => file_get_contents('/config/mtprotosecret'),
             'mtprotodomain' => file_get_contents('/config/mtprotodomain'),
             'xray'          => $this->getXray(),
             'hy'            => yaml_parse_file('/config/hysteria.yaml'),
-            'oc'            => file_get_contents('/config/ocserv.conf'),
-            'ocu'           => file_get_contents('/config/ocserv.passwd'),
-            'ss'            => $this->getSSConfig(),
-            'sl'            => $this->getSSLocalConfig(),
             'xraystats'     => $this->getXrayStats(),
         ];
         return json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -2049,19 +1971,7 @@ class Bot
                     $switch_wg1amnezia = 1;
                 }
                 $this->setPacConf($importPac);
-                $out[] = 'update naiveproxy';
-                $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $this->restartNaive();
                 $this->pacUpdate('1');
-            }
-            // wg
-            if (!empty($json['wg'])) {
-                $out[] = 'update wireguard';
-                $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $this->wg = 0;
-                $this->saveClients($json['wg']['clients']);
-                $this->restartWG($this->createConfig($json['wg']['server']), $switch_amnezia);
-                $this->iptablesWG();
             }
             // wg1
             if (!empty($json['wg1'])) {
@@ -2080,24 +1990,8 @@ class Bot
                 yaml_emit_file($this->adguard, $json['ad']);
                 $this->startAd();
             }
-            // ss
-            if (!empty($json['ss'])) {
-                $out[] = 'update shadowsocks server';
-                $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $this->ssh('pkill ssserver', 'ss');
-                file_put_contents('/config/ssserver.json', json_encode($json['ss'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-                $this->ssh('ssserver -v -d -c /config.json', 'ss');
-            }
-            // sl
-            if (!empty($json['sl'])) {
-                $out[] = 'update shadowsocks proxy';
-                $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                $this->ssh('pkill sslocal', 'proxy');
-                file_put_contents('/config/sslocal.json', json_encode($json['sl'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-                $this->ssh('sslocal -v -d -c /config.json', 'proxy');
-            }
-            // mtproto
-            if (!empty($json['mtproto'])) {
+            // ad
+            if (!empty($json['ad'])) {
                 $out[] = 'update mtproto';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
                 file_put_contents('/config/mtprotosecret', $json['mtproto']);
@@ -2118,9 +2012,7 @@ class Bot
                 $this->restartXray($json['xray']);
                 $this->adguardXrayClients();
                 $pacForRestore = is_array($importPac) ? $importPac : $this->getPacConf();
-                $realityDomain = (string) ($pacForRestore['reality']['domain'] ?? '');
-                $fallbackServerName = (string) ($json['xray']['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] ?? '');
-                $this->setUpstreamDomain(($pacForRestore['transport'] ?? '') != 'Reality' ? 't' : ($realityDomain ?: $fallbackServerName));
+                $this->setUpstreamDomain($this->getUpstreamRealityDomain($pacForRestore, $json['xray'] ?? null));
             }
             // xraystats
             if (!empty($json['xraystats'])) {
@@ -2128,30 +2020,12 @@ class Bot
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
                 $this->setXrayStats($json['xraystats']);
             }
-            // ocserv
-            if (!empty($json['oc'])) {
-                $out[] = 'update ocserv';
-                $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                file_put_contents('/config/ocserv.passwd', $json['ocu']);
-                $this->restartOcserv($json['oc']);
-            }
             // hysteria
             if (!empty($json['hy'])) {
                 $out[] = 'update hysteria';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
                 yaml_emit_file('/config/hysteria.yaml', $json['hy']);
                 $this->restartHysteria();
-            }
-            if (!empty(($importPac['domain'] ?? $json['pac']['domain'] ?? ''))) {
-                $this->setUpstreamDomainOcserv($this->getAllConfiguredDomains($this->getPacConf()));
-                $this->setUpstreamDomainNaive($this->getAllConfiguredDomains($this->getPacConf()));
-            }
-            // dnstt
-            if (!empty($json['dnstt'])) {
-                $out[] = 'update dnstt certificates';
-                $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
-                file_put_contents('/config/dnstt/server.key', $json['dnstt']['private']);
-                file_put_contents('/config/dnstt/server.pub', $json['dnstt']['public']);
             }
             // nginx
             $out[] = 'reset nginx';
@@ -2775,6 +2649,9 @@ class Bot
             ],
             'wg' => 0,
             'wg1' => 0,
+            'wg_instance' => 1,
+            'wg1_show_runtime_clients' => 0,
+            'subscription_template_mode' => 'template',
             'amnezia' => 0,
             'wg1_amnezia' => 0,
             'xray' => '',
@@ -2800,11 +2677,7 @@ class Bot
             'processlist' => [],
             'packagelist' => [],
             'subnetlist' => [],
-            'defaultv2raytemplate' => '',
-            'defaultsingtemplate' => '',
             'defaultclashtemplate' => '',
-            'v2raytemplates' => [],
-            'singtemplates' => [],
             'classtemplates' => [],
             'subscription_meta_title' => 'VPN Subscription',
             'subscription_announce' => 'Welcome',
@@ -4081,6 +3954,13 @@ DNS-over-HTTPS with IP:
             }
         }
         $text = "Menu -> " . $this->getTitleWG() . "\n\n<code>" . implode(PHP_EOL, $text ?: []) . '</code>';
+        $showRuntime = !empty($c['wg1_show_runtime_clients']);
+        $data[] = [
+            [
+                'text'          => $this->i18n($showRuntime ? 'on' : 'off') . ' runtime clients',
+                'callback_data' => "/toggleWg1ShowRuntime $page",
+            ],
+        ];
         $data[] = [
             [
                 'text'          =>  $this->i18n('update status'),
@@ -4347,7 +4227,7 @@ DNS-over-HTTPS with IP:
         $data[] = [
             [
                 'text'          => $this->i18n('back'),
-                'callback_data' => $openconnect ? '/menu oc' : "/menu wg $wgpage",
+                'callback_data' => "/menu wg $wgpage",
             ],
         ];
         $this->update(
@@ -4565,6 +4445,10 @@ DNS-over-HTTPS with IP:
     {
         $count   = $this->limit;
         $clients = $this->readClients();
+        $pac     = $this->getPacConf();
+        if (empty($pac['wg1_show_runtime_clients'])) {
+            $clients = array_filter($clients, fn($v) => empty($v['interface']['## device_uuid'] ?? ''), ARRAY_FILTER_USE_BOTH);
+        }
         if (!empty($clients)) {
             $all     = (int) ceil(count($clients) / $count);
             $page    = min($page, $all - 1);
@@ -5167,51 +5051,9 @@ DNS-over-HTTPS with IP:
 
     public function menuSS()
     {
-        $hash    = $this->getHashBot();
-        $domain  = $this->getDomain();
-        $ss      = $this->getSSConfig();
-        $v2ray   = !empty($ss['plugin']) ? 'ON' : 'OFF';
-        $port    = !empty($ss['plugin']) ? 443 : getenv('SSPORT');
-        $options = !empty($ss['plugin']) ? "tls;fast-open;path=/v2ray$hash;host=$domain" : "path=/v2ray$hash;host=$domain";
-
-        $text = "Menu -> ShadowSocks";
-        $data[] = [
-            [
-                'text'          => $this->i18n('change password'),
-                'callback_data' => "/sspswd",
-            ],
-        ];
-        $ss_link = preg_replace('~==~', '', 'ss://' . base64_encode("{$ss['method']}:{$ss['password']}")) . "@$domain:$port" . (!empty($ss['plugin']) ? '?plugin=' . urlencode("v2ray-plugin;path=/v2ray$hash;host=$domain;tls") : '');
-        $text .= "\n\n<code>$ss_link</code>\n";
-        $text .= "\n\npassword: <span class='tg-spoiler'>{$ss['password']}</span>";
-        $text .= "\n\nserver: <code>$domain:$port</code>";
-        $text .= "\n\nmethod: <code>{$ss['method']}</code>";
-        $text .= "\n\nnameserver: <code>10.10.0.5</code>";
-        if ($ss['plugin']) {
-            $text .= "\n\nplugin: <code>v2ray-plugin</code>";
-            $text .= "\n\nv2ray options: <code>$options</code>";
-        }
-        $data[] = [
-            [
-                'text'          => "v2ray: $v2ray",
-                'callback_data' => "/v2ray",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('show QR'),
-                'callback_data' => "/qrSS",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
         return [
-            'text' => $text,
-            'data' => $data,
+            'text' => 'removed',
+            'data' => [[['text' => $this->i18n('back'), 'callback_data' => '/menu']]],
         ];
     }
 
@@ -5223,9 +5065,48 @@ DNS-over-HTTPS with IP:
     public function changeWG($i)
     {
         $c = $this->getPacConf();
-        $c['wg_instance'] = $i;
+        $c['wg_instance'] = 1;
         $this->setPacConf($c);
+        $this->wg = 1;
         $this->menu('wg', 0);
+    }
+
+    public function toggleWg1ShowRuntime(int $page = 0)
+    {
+        $c = $this->getPacConf();
+        $c['wg1_show_runtime_clients'] = empty($c['wg1_show_runtime_clients']) ? 1 : 0;
+        $this->setPacConf($c);
+        $this->answer(
+            $this->input['callback_id'],
+            'runtime clients: ' . ($c['wg1_show_runtime_clients'] ? 'show' : 'hide'),
+            true
+        );
+        $this->menu('wg', $page);
+    }
+
+    public function getMenuServiceStatus(): array
+    {
+        $cacheFile = '/tmp/vpnbot_menu_status.json';
+        if (is_readable($cacheFile)) {
+            $age = time() - (int) filemtime($cacheFile);
+            if ($age >= 0 && $age < 30) {
+                $cached = json_decode((string) file_get_contents($cacheFile), true);
+                if (is_array($cached)) {
+                    return $cached;
+                }
+            }
+        }
+        $conf = $this->getPacConf();
+        $status = [
+            'wg1'  => (bool) $this->ssh($conf['wg1_amnezia'] ? 'awg' : 'wg', 'wg1'),
+            'xr'   => (bool) $this->ssh('pgrep xray', 'xr'),
+            'hy'   => (bool) $this->ssh('pgrep hysteria', 'hy'),
+            'tg'   => (bool) $this->ssh('pgrep mtproto-proxy', 'tg'),
+            'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
+            'warp' => $this->warpStatus(),
+        ];
+        @file_put_contents($cacheFile, json_encode($status));
+        return $status;
     }
 
     public function alignColumns(array $columns): string
@@ -5267,157 +5148,53 @@ DNS-over-HTTPS with IP:
 
     public function dnsttDomain()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter domain",
-            $this->input['message_id'],
-            reply: 'enter domain',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message' => $this->input['message_id'],
-            'callback'      => 'setdnsttDomain',
-            'args'          => [],
-        ];
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function dnsttPassword()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter password",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message' => $this->input['message_id'],
-            'callback'      => 'setdnsttPassword',
-            'args'          => [],
-        ];
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function setdnsttPassword($text)
     {
-        $c = $this->getPacConf();
-        if ($text) {
-            $c['dnsttPassword'] = $text;
-        } else {
-            unset($c['dnsttPassword']);
-        }
-        $this->setPacConf($c);
-        $this->dnsttStart();
-        $this->dnstt();
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function setdnsttDomain($text)
     {
-        $c = $this->getPacConf();
-        if ($text) {
-            $c['dnsttDomain'] = $text;
-        } else {
-            unset($c['dnsttDomain']);
-        }
-        $this->setPacConf($c);
-        $this->dnsttStart();
-        $this->dnstt();
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function dnsttStart()
     {
-        $c = $this->getPacConf();
-        $this->ssh('pkill dnstt', 'dnstt');
-        if (!empty($c['dnsttDomain']) && !empty($c['dnsttPassword'])) {
-            $this->ssh("adduser -D -s /bin/sh vpnbot", 'dnstt');
-            $this->ssh("echo 'vpnbot:{$c['dnsttPassword']}' | chpasswd", 'dnstt');
-            if (!file_exists('/config/dnstt/server.key')) {
-                $this->ssh("dnstt-server -gen-key -privkey-file /dnstt/server.key -pubkey-file /dnstt/server.pub", 'dnstt');
-            }
-            $this->ssh("dnstt-server -udp :53 -privkey-file /dnstt/server.key {$c['dnsttDomain']} 127.0.0.1:22", 'dnstt' , false, '/logs/dnstt');
-        }
     }
 
     public function dnsttDownload()
     {
-        $this->sendFile($this->input['from'], curl_file_create('/config/dnstt/server.pub'));
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function showdnstt()
     {
-        $c = $this->getPacConf();
-        $c['showdnstt'] = empty($c['showdnstt']);
-        $this->setPacConf($c);
-        $this->dnstt(1);
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function dnstt($update = false)
     {
-        $c      = $this->getPacConf();
-        $pubkey = file_get_contents('/config/dnstt/server.pub');
-        $text[] = "dnstt";
-        $data[] = [
-            [
-                'text'          => $this->i18n('show in menu ') . $this->i18n($c['showdnstt'] ? 'on' : 'off'),
-                'callback_data' => "/showdnstt",
-            ],
-        ];
-        if (!empty($c['dnsttDomain']) && !empty($c['dnsttPassword'])) {
-            $text[] = "<pre>set the NS record for {$c['dnsttDomain']}: tns.{$c['domain']}\nset A record for tns.{$c['domain']}: {$this->ip}</pre>";
-            $text[] = "account: <code>vpnbot:{$c['dnsttPassword']}</code>";
-            $text[] = "server name: <code>{$c['dnsttDomain']}</code>";
-            $text[] = "public key: <code>$pubkey</code>";
-            $data[] = [
-                [
-                    'text'          => $this->i18n('download pubkey'),
-                    'callback_data' => "/dnsttDownload",
-                ],
-            ];
-        } else {
-            $text[] = "set subdomain and password";
-        }
-
-        $data[] = [
-            [
-                'text'          => $this->i18n('set subdomain'),
-                'callback_data' => "/dnsttDomain",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('set password'),
-                'callback_data' => "/dnsttPassword",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
-        if ($update) {
-            $this->update(
-                $this->input['chat'],
-                $this->input['message_id'],
-                implode("\n", $text),
-                $data ?: false,
-            );
-        } else {
-            $this->send(
-                $this->input['chat'],
-                implode("\n", $text),
-                $this->input['message_id'],
-                $data ?: false,
-            );
-        }
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function menu($type = false, $arg = false, $return = false)
     {
+        if ($type === 'wg') {
+            $this->wg = 1;
+        }
         $conf   = $this->getPacConf();
         $main   = [];
         $domain = $conf['domain'] ?: $this->ip;
         $hash   = $this->getHashBot();
         if ($type == false) {
-            $update = exec('git -C / rev-list --count HEAD..@{u}');
-            $branch = exec('git -C / rev-parse --abbrev-ref HEAD');
             $backup = array_filter(explode('/', $conf['backup']));
             if (!empty($backup)) {
                 if (!empty(strtotime($backup[0])) && !empty(strtotime($backup[1]))) {
@@ -5429,12 +5206,10 @@ DNS-over-HTTPS with IP:
             $cron   = !empty($this->dontshowcron) ? '' : $this->i18n($this->ssh('pgrep -f cron.php', 'service') ? 'on' : 'off') . ' cron';
             $f      = '/docker/compose';
             $c      = yaml_parse_file($f)['services'];
-            $main[] = 'v' . getenv('VER') . " $branch" . ($update ? ' (have updates)' : '');
+            $main[] = 'v' . getenv('VER');
 
             if (!empty($conf['domain'])) {
                 $main[] = '';
-                $oc     = $this->getHashSubdomain('oc');
-                $np     = $this->getHashSubdomain('np');
                 if (!empty($conf['domain'])) {
                     $ssl_expiry = $this->expireCert();
                     $certs      = $this->domainsCert() ?: [];
@@ -5442,12 +5217,6 @@ DNS-over-HTTPS with IP:
                     $main[] = "<blockquote>";
                     $main[] = "Domains:";
                     $main[] = $conf['domain'] . (in_array($conf['domain'], $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-                    if (!empty($np)) {
-                        $main[] = 'naive ' . "$np.{$conf['domain']}" . (in_array("$np.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-                    }
-                    if (!empty($oc)) {
-                        $main[] = 'openconnect ' . "$oc.{$conf['domain']}" . (in_array("$oc.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-                    }
                     if (!empty($conf['adguardkey'])) {
                         foreach ($this->getDnsDomainsForOutput($conf) as $dnsDomain) {
                             $dotDomain = "{$conf['adguardkey']}.{$dnsDomain}";
@@ -5463,34 +5232,25 @@ DNS-over-HTTPS with IP:
 
             $ports   = yaml_parse_file('/docker/compose')['services'];
             $hy_port = explode(':', $c['hy']['ports'][0])[0];
+            $menuStatus = $this->getMenuServiceStatus();
             $main[]  = '';
 
             $main[] = '<code>';
             $main[] = $this->alignColumns([
                 [
-                    $this->i18n($this->ssh($this->getPacConf()['amnezia'] ? 'awg' : 'wg', 'wg') ? 'on' : 'off') . ' ' . $this->i18n($this->getPacConf()['amnezia'] ? 'amnezia' : 'wg_title'),
-                    $this->i18n($this->ssh($this->getPacConf()['wg1_amnezia'] ? 'awg' : 'wg', 'wg1') ? 'on' : 'off') . ' ' . $this->i18n($this->getPacConf()['wg1_amnezia'] ? 'amnezia' : 'wg_title'),
-                    $this->i18n($this->ssh('pgrep xray', 'xr') ? 'on' : 'off') . ' ' . $this->i18n('xray'),
-                    $this->i18n($this->ssh('pgrep caddy', 'np') ? 'on' : 'off') . ' ' . $this->i18n('naive'),
-                    $this->i18n($this->ssh('pgrep ocserv', 'oc') ? 'on' : 'off') . ' ' . $this->i18n('ocserv'),
-                    $this->i18n($this->ssh('pgrep hysteria', 'hy') ? 'on' : 'off') . ' ' . $this->i18n('hysteria'),
-                    $this->i18n($this->ssh('pgrep mtproto-proxy', 'tg') ? 'on' : 'off') . ' ' . $this->i18n('mtproto'),
-                    $this->i18n(exec("JSON=1 timeout 2 dnslookup google.com ad") ? 'on' : 'off') . ' ' . $this->i18n('ad_title'),
-                    $this->i18n($this->ssh('pgrep ssserver', 'ss') ? 'on' : 'off') . ' ' . $this->i18n('sh_title'),
-                    $this->i18n($this->ssh('pgrep dnstt', 'dnstt') ? 'on' : 'off') . ' ' . $this->i18n('dnstt'),
-                    $this->i18n($this->warpStatus()) . ' ' . $this->i18n('warp'),
+                    $this->i18n(!empty($menuStatus['wg1']) ? 'on' : 'off') . ' ' . $this->i18n($conf['wg1_amnezia'] ? 'amnezia' : 'wg_title'),
+                    $this->i18n(!empty($menuStatus['xr']) ? 'on' : 'off') . ' ' . $this->i18n('xray'),
+                    $this->i18n(!empty($menuStatus['hy']) ? 'on' : 'off') . ' ' . $this->i18n('hysteria'),
+                    $this->i18n(!empty($menuStatus['tg']) ? 'on' : 'off') . ' ' . $this->i18n('mtproto'),
+                    $this->i18n(!empty($menuStatus['ad']) ? 'on' : 'off') . ' ' . $this->i18n('ad_title'),
+                    $this->i18n($menuStatus['warp'] ?? 'off') . ' ' . $this->i18n('warp'),
                 ],
                 [
-                    $this->i18n($c['wg'] ? 'on' : 'off') . ' ' . getenv('WGPORT'),
                     $this->i18n($c['wg1'] ? 'on' : 'off') . ' ' . getenv('WG1PORT'),
-                    $this->i18n('on') . ' 443',
-                    $this->i18n('on') . ' 443',
                     $this->i18n('on') . ' 443',
                     $this->i18n($hy_port ? 'on' : 'off') . ($hy_port ? " $hy_port" : 'port unavailable'),
                     $this->i18n($c['tg'] ? 'on' : 'off') . ' ' . getenv('TGPORT'),
                     $this->i18n($c['ad'] ? 'on' : 'off') . ' 853',
-                    $this->i18n($c['ss'] ? 'on' : 'off') . ' ' . getenv('SSPORT'),
-                    $this->i18n($c['dnstt'] ? 'on' : 'off') . ' 53',
                     '',
                 ],
             ]);
@@ -5517,48 +5277,28 @@ DNS-over-HTTPS with IP:
                     [
                         [
                             [
-                                'text'          => $this->i18n($this->getPacConf()['amnezia'] ? 'amnezia' : 'wg_title'),
-                                'callback_data' => "/changeWG 0",
-                            ],
-                            [
                                 'text'          => $this->i18n($this->getPacConf()['wg1_amnezia'] ? 'amnezia' : 'wg_title'),
                                 'callback_data' => "/changeWG 1",
                             ],
-                        ],
-                        [
                             [
                                 'text'          => $this->i18n('xray'),
                                 'callback_data' => "/xray",
                             ],
-                            [
-                                'text'          => $this->i18n('naive'),
-                                'callback_data' => "/menu naive",
-                            ],
                         ],
                         [
-                            [
-                                'text'          => $this->i18n('ocserv'),
-                                'callback_data' => "/menu oc",
-                            ],
                             [
                                 'text'          => $this->i18n('mtproto'),
                                 'callback_data' => "/mtproto",
                             ],
-                        ],
-                        [
                             [
                                 'text'          => $this->i18n('ad_title'),
                                 'callback_data' => "/menu adguard",
                             ],
-                            [
-                                'text'          => $this->i18n('warp'),
-                                'callback_data' => "/warp",
-                            ],
                         ],
                         [
                             [
-                                'text'          => $this->i18n('sh_title'),
-                                'callback_data' => "/menu ss",
+                                'text'          => $this->i18n('warp'),
+                                'callback_data' => "/warp",
                             ],
                             [
                                 'text'          => $this->i18n('pac'),
@@ -5573,30 +5313,12 @@ DNS-over-HTTPS with IP:
                                 'callback_data' => "/menu hy",
                             ],
                         ],
-                        $conf['showdnstt'] ? [
-                            [
-                                'text'          => $this->i18n('DNSTT'),
-                                'callback_data' => "/dnstt",
-                            ],
-                        ] : [],
                     )],
                     [
                         [
                             [
                                 'text'          => $this->i18n('config'),
                                 'callback_data' => "/menu config",
-                            ],
-                        ],
-                        [
-                            [
-                                'text' => $this->i18n('chat'),
-                                'url'  => base64_decode('aHR0cHM6Ly90Lm1lLys0RzMtUTRkX3ZGRXhPRGN5'),
-                            ],
-                            [
-                                'text' => $this->i18n('donate'),
-                                'web_app' => [
-                                    'url'  => "https://$domain/webapp$hash/donate.html",
-                                ]
                             ],
                         ],
                     ],
@@ -5608,31 +5330,12 @@ DNS-over-HTTPS with IP:
             'pac'          => $type == 'pac'     ? $this->pacMenu((int) $arg)              : false,
             'adguard'      => $type == 'adguard' ? $this->adguardMenu()                    : false,
             'config'       => $type == 'config'  ? $this->configMenu()                     : false,
-            'ss'           => $type == 'ss'      ? $this->menuSS()                         : false,
             'lang'         => $type == 'lang'    ? $this->menuLang()                       : false,
-            'oc'           => $type == 'oc'      ? $this->ocMenu()                         : false,
-            'naive'        => $type == 'naive'   ? $this->naiveMenu()                      : false,
             'hy'           => $type == 'hy'      ? $this->hysteriaMenu()                   : false,
-            'mirror'       => $type == 'mirror'  ? $this->mirrorMenu()                     : false,
-            'update'       => $type == 'update'  ? $this->updatebot()                      : false,
         ];
 
         $text = $menu[$type ?: 'main' ]['text'];
         $data = $menu[$type ?: 'main' ]['data'];
-
-        if (empty($type) && $update) {
-            $b = exec('git -C / rev-parse --abbrev-ref HEAD');
-            array_unshift($data, [
-                [
-                    'text'    => 'changelog',
-                    'web_app' => ['url' => "https://raw.githubusercontent.com/mercurykd/vpnbot/$b/version"],
-                ],
-                [
-                    'text'          => $this->i18n('update bot'),
-                    'callback_data' => "/applyupdatebot",
-                ],
-            ]);
-        }
 
         if ($return) {
             return [$text, $data];
@@ -6661,6 +6364,15 @@ DNS-over-HTTPS with IP:
         }
     }
 
+    protected function applyXrayLogConfig(array &$c): void
+    {
+        $c['log'] = [
+            'access'   => 'none',
+            'error'    => '/logs/xray_error',
+            'loglevel' => 'error',
+        ];
+    }
+
     protected function writeXrayConfig(array $c): void
     {
         $this->applyBothTransportInboundClients($c);
@@ -6680,6 +6392,207 @@ DNS-over-HTTPS with IP:
             $endpoint .= ':' . getenv($this->getInstanceWG(1) ? 'WG1PORT' : 'WGPORT');
         }
         return $endpoint;
+    }
+
+    protected function getAwgClientMtu(): int
+    {
+        return 1280;
+    }
+
+    protected function wgShellQuote(string $value): string
+    {
+        return "'" . str_replace("'", "'\\''", $value) . "'";
+    }
+
+    protected function wgPublicKeyFromPrivate(string $privateKey): string
+    {
+        $privateKey = trim($privateKey);
+        if ($privateKey === '') {
+            return '';
+        }
+        $quoted = $this->wgShellQuote($privateKey);
+        return trim($this->ssh("printf '%s' {$quoted} | {$this->getWGType()} pubkey", $this->getInstanceWG()));
+    }
+
+    protected function isAwgClientConfig(array $data): bool
+    {
+        $iface = $data['interface'] ?? [];
+        if (!is_array($iface)) {
+            return false;
+        }
+        if (!empty($iface['Jc'])) {
+            return true;
+        }
+
+        return !empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia']) && empty($iface['ListenPort']);
+    }
+
+    protected function parseWgIpLong(string $addressOrCidr): ?int
+    {
+        $addressOrCidr = trim($addressOrCidr);
+        if ($addressOrCidr === '') {
+            return null;
+        }
+        $ip = ip2long(explode('/', $addressOrCidr)[0] ?? '');
+        return $ip === false ? null : $ip;
+    }
+
+    protected function collectWgUsedIpLongs(array $server, array $clients, ?int $exceptClientIdx = null): array
+    {
+        $ips = [];
+        $serverIp = $this->parseWgIpLong((string) ($server['interface']['Address'] ?? ''));
+        if ($serverIp !== null) {
+            $ips[] = $serverIp;
+        }
+        foreach (($server['peers'] ?? []) as $peer) {
+            $peerIp = $this->parseWgIpLong((string) ($peer['AllowedIPs'] ?? $peer['# AllowedIPs'] ?? ''));
+            if ($peerIp !== null) {
+                $ips[] = $peerIp;
+            }
+        }
+        foreach ($clients as $idx => $client) {
+            if ($exceptClientIdx !== null && $idx === $exceptClientIdx) {
+                continue;
+            }
+            if (!is_array($client)) {
+                continue;
+            }
+            $clientIp = $this->parseWgIpLong((string) ($client['interface']['Address'] ?? ''));
+            if ($clientIp !== null) {
+                $ips[] = $clientIp;
+            }
+        }
+
+        return array_values(array_unique($ips));
+    }
+
+    protected function allocateWgClientIp(array $server, array $clients, ?int $exceptClientIdx = null): ?string
+    {
+        $ipnet     = explode('/', (string) ($server['interface']['Address'] ?? ''));
+        $server_ip = ip2long($ipnet[0] ?? '');
+        $bitmask   = (int) ($ipnet[1] ?? 24);
+        if ($server_ip === false || $bitmask <= 0 || $bitmask > 32) {
+            return null;
+        }
+
+        $ips = $this->collectWgUsedIpLongs($server, $clients, $exceptClientIdx);
+        $ip_count = (1 << (32 - $bitmask)) - count($ips) - 1;
+        for ($i = 1; $i < $ip_count; $i++) {
+            $ip = $i + $server_ip;
+            if (!in_array($ip, $ips, true)) {
+                return long2ip($ip);
+            }
+        }
+
+        return null;
+    }
+
+    protected function isWgClientIpConflict(array $clients, string $clientIp, string $deviceUuid, ?int $exceptClientIdx = null): bool
+    {
+        $clientIpLong = $this->parseWgIpLong($clientIp);
+        if ($clientIpLong === null) {
+            return true;
+        }
+        foreach ($clients as $idx => $client) {
+            if ($exceptClientIdx !== null && $idx === $exceptClientIdx) {
+                continue;
+            }
+            if (!is_array($client)) {
+                continue;
+            }
+            $iface = $client['interface'] ?? [];
+            if (!is_array($iface)) {
+                continue;
+            }
+            if ($this->parseWgIpLong((string) ($iface['Address'] ?? '')) !== $clientIpLong) {
+                continue;
+            }
+            $otherUuid = (string) ($iface['## device_uuid'] ?? '');
+            if ($otherUuid !== '' && $otherUuid !== $deviceUuid) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function findDeviceWgPeerIndex(array $peers, string $deviceUuid, string $publicPeerKey = ''): ?int
+    {
+        foreach ($peers as $idx => $peer) {
+            if (!is_array($peer)) {
+                continue;
+            }
+            if ($deviceUuid !== '' && ($peer['## device_uuid'] ?? '') === $deviceUuid) {
+                return $idx;
+            }
+            if ($publicPeerKey !== '' && ($peer['PublicKey'] ?? '') === $publicPeerKey) {
+                return $idx;
+            }
+        }
+
+        return null;
+    }
+
+    protected function syncDeviceWgPeerOnServer(array &$server, array $clientConf, string $ownerSubId, string $hwid, string $deviceUuid, string $clientIp): bool
+    {
+        if (!isset($server['peers']) || !is_array($server['peers'])) {
+            $server['peers'] = [];
+        }
+
+        $privatePeerKey = trim((string) ($clientConf['interface']['PrivateKey'] ?? ''));
+        if ($privatePeerKey === '') {
+            return false;
+        }
+        $publicPeerKey = $this->wgPublicKeyFromPrivate($privatePeerKey);
+        if ($publicPeerKey === '') {
+            error_log("syncDeviceWgPeerOnServer: empty pubkey for device $deviceUuid");
+            return false;
+        }
+
+        $peerIdx = $this->findDeviceWgPeerIndex($server['peers'], $deviceUuid, $publicPeerKey);
+        $expectedAllowed = "$clientIp/32";
+        $name = (string) ($clientConf['interface']['## name'] ?? ('dev-' . substr(hash('sha1', $ownerSubId), 0, 6) . '-' . substr(hash('sha1', $hwid), 0, 8)));
+        if ($peerIdx === null) {
+            $serverPeer = [
+                '## name'         => $name,
+                '## owner_sub_id' => $ownerSubId,
+                '## device_uuid'  => $deviceUuid,
+                'PublicKey'       => $publicPeerKey,
+                'AllowedIPs'      => $expectedAllowed,
+            ];
+            if (!empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia'])) {
+                $psk = (string) ($clientConf['peers'][0]['PresharedKey'] ?? '');
+                if ($psk === '') {
+                    $psk = $this->presharedKey();
+                }
+                $serverPeer['PresharedKey'] = $psk;
+            }
+            $server['peers'][] = $serverPeer;
+
+            return true;
+        }
+
+        $changed = false;
+        foreach ([
+            'AllowedIPs'      => $expectedAllowed,
+            '## name'         => $name,
+            '## owner_sub_id' => $ownerSubId,
+            '## device_uuid'  => $deviceUuid,
+        ] as $field => $value) {
+            if (($server['peers'][$peerIdx][$field] ?? '') !== $value) {
+                $server['peers'][$peerIdx][$field] = $value;
+                $changed = true;
+            }
+        }
+        if (!empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia'])) {
+            $psk = (string) ($clientConf['peers'][0]['PresharedKey'] ?? '');
+            if ($psk !== '' && ($server['peers'][$peerIdx]['PresharedKey'] ?? '') !== $psk) {
+                $server['peers'][$peerIdx]['PresharedKey'] = $psk;
+                $changed = true;
+            }
+        }
+
+        return $changed;
     }
 
     protected function ensureDeviceWgProfile(string $ownerSubId, string $hwid, string $deviceUuid, string $allowedIps = '0.0.0.0/0'): ?array
@@ -6726,39 +6639,36 @@ DNS-over-HTTPS with IP:
                 $clients[$idx]['peers'][0]['AllowedIPs'] = $allowedIps;
                 $changedClients = true;
             }
+            if (!empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia'])) {
+                $awgMtu = (string) $this->getAwgClientMtu();
+                if ((string) ($clients[$idx]['interface']['MTU'] ?? '') !== $awgMtu) {
+                    $clients[$idx]['interface']['MTU'] = $awgMtu;
+                    $changedClients = true;
+                }
+            }
+            $clientIp = explode('/', (string) ($clients[$idx]['interface']['Address'] ?? ''))[0];
+            if ($clientIp === '' || $this->isWgClientIpConflict($clients, $clientIp, $deviceUuid, $idx)) {
+                $newIp = $this->allocateWgClientIp($server, $clients, $idx);
+                if ($newIp === null) {
+                    return null;
+                }
+                $clients[$idx]['interface']['Address'] = "$newIp/32";
+                $clientIp = $newIp;
+                $changedClients = true;
+            }
             $clientConf = $clients[$idx];
+            if ($this->syncDeviceWgPeerOnServer($server, $clientConf, $ownerSubId, $hwid, $deviceUuid, $clientIp)) {
+                $changedServer = true;
+            }
         } else {
-            $ipnet     = explode('/', $server['interface']['Address']);
-            $server_ip = ip2long($ipnet[0] ?? '');
-            $bitmask   = (int) ($ipnet[1] ?? 24);
-            if ($server_ip === false || $bitmask <= 0 || $bitmask > 32) {
-                return null;
-            }
-
-            $ips = [$server_ip];
-            foreach (($server['peers'] ?? []) as $peer) {
-                $peerAllowed = $peer['AllowedIPs'] ?? $peer['# AllowedIPs'] ?? '';
-                $peerIp = ip2long(explode('/', $peerAllowed)[0] ?? '');
-                if ($peerIp !== false) {
-                    $ips[] = $peerIp;
-                }
-            }
-            $ip_count = (1 << (32 - $bitmask)) - count($ips) - 1;
-            $client_ip = null;
-            for ($i = 1; $i < $ip_count; $i++) {
-                $ip = $i + $server_ip;
-                if (!in_array($ip, $ips, true)) {
-                    $client_ip = long2ip($ip);
-                    break;
-                }
-            }
+            $client_ip = $this->allocateWgClientIp($server, $clients);
             if ($client_ip === null) {
                 return null;
             }
 
-            $publicServerKey = trim($this->ssh("echo {$server['interface']['PrivateKey']} | {$this->getWGType()} pubkey", $this->getInstanceWG()));
+            $publicServerKey = trim($this->ssh("printf '%s' {$this->wgShellQuote($server['interface']['PrivateKey'])} | {$this->getWGType()} pubkey", $this->getInstanceWG()));
             $privatePeerKey  = trim($this->ssh("{$this->getWGType()} genkey", $this->getInstanceWG()));
-            $publicPeerKey   = trim($this->ssh("echo $privatePeerKey | {$this->getWGType()} pubkey", $this->getInstanceWG()));
+            $publicPeerKey   = $this->wgPublicKeyFromPrivate($privatePeerKey);
             if ($privatePeerKey === '' || $publicPeerKey === '' || $publicServerKey === '') {
                 return null;
             }
@@ -6782,16 +6692,23 @@ DNS-over-HTTPS with IP:
                 $clientPeer['PresharedKey'] = $psk;
             }
             $server['peers'][] = $serverPeer;
+            $interface = [
+                '## name'         => $name,
+                '## owner_sub_id' => $ownerSubId,
+                '## device_uuid'  => $deviceUuid,
+                '## device_hwid'  => $hwid,
+                '## endpoint_custom' => $endpointCustom,
+                'PrivateKey'      => $privatePeerKey,
+                'Address'         => "$client_ip/32",
+            ];
+            if (!empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia'])) {
+                $interface['MTU'] = (string) $this->getAwgClientMtu();
+            }
             $clientConf = [
-                'interface' => array_merge([
-                    '## name'         => $name,
-                    '## owner_sub_id' => $ownerSubId,
-                    '## device_uuid'  => $deviceUuid,
-                    '## device_hwid'  => $hwid,
-                    '## endpoint_custom' => $endpointCustom,
-                    'PrivateKey'      => $privatePeerKey,
-                    'Address'         => "$client_ip/32",
-                ], !empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia']) ? $this->amneziaKeys() : []),
+                'interface' => array_merge(
+                    $interface,
+                    !empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia']) ? $this->amneziaKeys() : []
+                ),
                 'peers' => [$clientPeer],
             ];
             $clients[] = $clientConf;
@@ -6802,8 +6719,8 @@ DNS-over-HTTPS with IP:
         if ($changedClients) {
             $this->saveClients($clients);
         }
-        if ($changedServer) {
-            $this->restartWG($this->createConfig($server));
+        if ($changedServer && !$this->restartWG($this->createConfig($server))) {
+            error_log("ensureDeviceWgProfile: restartWG failed for device $deviceUuid");
         }
 
         return $clientConf ?? null;
@@ -6856,19 +6773,13 @@ DNS-over-HTTPS with IP:
         if ($deviceUuid === '') {
             return null;
         }
-        $sources = [
-            $this->readClients(),
-            $this->readClientsRaw($this->clients),
-            $this->readClientsRaw($this->clients1),
-        ];
-        foreach ($sources as $clients) {
-            foreach ($clients as $client) {
-                if (!is_array($client) || !is_array($client['interface'] ?? null)) {
-                    continue;
-                }
-                if (($client['interface']['## device_uuid'] ?? '') === $deviceUuid) {
-                    return $client;
-                }
+        // Runtime device AWG/WG profiles are stored only in WG1 (clients1.json).
+        foreach ($this->readClientsRaw($this->clients1) as $client) {
+            if (!is_array($client) || !is_array($client['interface'] ?? null)) {
+                continue;
+            }
+            if (($client['interface']['## device_uuid'] ?? '') === $deviceUuid) {
+                return $client;
             }
         }
         return null;
@@ -6902,6 +6813,15 @@ DNS-over-HTTPS with IP:
             return null;
         }
 
+        $proxy = $this->runInRuntimeWgContext(function () use ($deviceUuid) {
+            return $this->buildRuntimeWgClashProxyInWg1Context($deviceUuid);
+        });
+
+        return is_array($proxy) ? $proxy : null;
+    }
+
+    protected function buildRuntimeWgClashProxyInWg1Context(string $deviceUuid): ?array
+    {
         $wgClient = $this->getRuntimeDeviceWgClientByRefs($deviceUuid);
         if (!is_array($wgClient)) {
             return null;
@@ -6970,6 +6890,8 @@ DNS-over-HTTPS with IP:
         }
         if (!empty($iface['MTU'])) {
             $proxy['mtu'] = (int) $iface['MTU'];
+        } elseif (!empty($this->getPacConf()[$this->getInstanceWG(1) . 'amnezia'])) {
+            $proxy['mtu'] = $this->getAwgClientMtu();
         }
 
         $amneziaMap = [
@@ -6989,10 +6911,6 @@ DNS-over-HTTPS with IP:
             'I3' => 'i3',
             'I4' => 'i4',
             'I5' => 'i5',
-            'J1' => 'j1',
-            'J2' => 'j2',
-            'J3' => 'j3',
-            'Itime' => 'itime',
         ];
         $amneziaOption = [];
         foreach ($amneziaMap as $src => $dst) {
@@ -7026,7 +6944,7 @@ DNS-over-HTTPS with IP:
             return;
         }
         $private = (string) ($client['interface']['PrivateKey'] ?? '');
-        $pub = $private !== '' ? trim($this->ssh("echo $private | {$this->getWGType()} pubkey", $this->getInstanceWG())) : '';
+        $pub = $private !== '' ? $this->wgPublicKeyFromPrivate($private) : '';
 
         unset($clients[$idx]);
         $this->saveClients(array_values($clients));
@@ -7233,7 +7151,7 @@ DNS-over-HTTPS with IP:
             return true;
         }
 
-        $limit = (int) ($client['hwid_limit'] ?: ($pac['hwid_device_count'] ?: 0));
+        $limit = (int) ($client['hwid_limit'] ?? $pac['hwid_device_count'] ?? 0);
         if ($limit <= 0) {
             header('x-hwid-active: true');
             header('x-hwid-not-supported: false');
@@ -7246,12 +7164,12 @@ DNS-over-HTTPS with IP:
         $devices   = $this->getHwidDevicesByUser($ownerSubId);
         $hwid      = trim($_SERVER['HTTP_X_HWID'] ?? '');
         $isBrowser = $this->isBrowserRequest();
-        $path      = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        $segments  = explode('/', trim($path, '/'));
+	$path      = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+	$segments  = explode('/', trim($path, '/'));
         $token     = end($segments);
-        $paramsRaw = base64_decode($token, true);
-        $params    = @unserialize($paramsRaw);
-        $isRuleRequest = is_array($params) && !empty($params['r']);
+	$paramsRaw = base64_decode($token, true);
+	$params    = @unserialize($paramsRaw);
+	$isRuleRequest = is_array($params) && !empty($params['r']);
 
         $hwidNotSupported = !$isRuleRequest && !$isBrowser && $hwid === '';
         $hwidMaxReached = count($devices) >= $limit;
@@ -7261,9 +7179,9 @@ DNS-over-HTTPS with IP:
         header('x-hwid-limit: ' . ($hwidMaxReached ? 'true' : 'false'));
 
         if (!$isRuleRequest && $hwid === '') {
-            if ($isBrowser) {
-                return true;
-            }
+    		if ($isBrowser) {
+        		return true;
+    		}
 
             $message = 'HWID device limit exceeded';
             header('announce: base64:' . base64_encode($message));
@@ -7272,9 +7190,9 @@ DNS-over-HTTPS with IP:
 
             return false;
         }
-        if ($isRuleRequest) {
-            return true;
-        }
+	if ($isRuleRequest) {
+  return true;
+}
         $isNew = !isset($devices[$hwid]);
 
         if ($isNew && count($devices) >= $limit) {
@@ -7952,23 +7870,8 @@ DNS-over-HTTPS with IP:
         $domain = $this->getDomain($pac['transport'] != 'Reality');
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
-        $si     = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
-            'h' => $hash,
-            't' => 'si',
-            's' => $c['inbounds'][0]['settings']['clients'][$i]['id'],
-        ]));
-        $v2     = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
-            'h' => $hash,
-            't' => 's',
-            's' => $c['inbounds'][0]['settings']['clients'][$i]['id'],
-        ]));
 
         switch ($s) {
-            case 1:
-                return "v2rayng://install-config?url=$v2#{$c['inbounds'][0]['settings']['clients'][$i]['id']}";
-            case 2:
-                return "sing-box://import-remote-profile/?url={$si}#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
-
             default:
                 switch ($pac['transport']) {
                     case 'Reality':
@@ -8102,36 +8005,9 @@ DNS-over-HTTPS with IP:
 
     public function naiveMenu()
     {
-        $pac    = $this->getPacConf();
-        $domain = $this->getDomain();
-        $text[] = "Menu -> NaiveProxy";
-        $np     = $this->getHashSubdomain('np');
-        $text[] = "<code>https://{$pac['naive']['user']}:{$pac['naive']['pass']}@$np.$domain</code>";
-        $data[] = [
-            [
-                'text'          => $this->i18n('change subdomain'),
-                'callback_data' => "/changeNaiveSubdomain",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('change login'),
-                'callback_data' => "/changeNaiveUser",
-            ],
-            [
-                'text'          => $this->i18n('change password'),
-                'callback_data' => "/changeNaivePass",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
         return [
-            'text' => implode("\n", $text),
-            'data' => $data,
+            'text' => 'removed',
+            'data' => [[['text' => $this->i18n('back'), 'callback_data' => '/menu']]],
         ];
     }
 
@@ -8165,129 +8041,22 @@ DNS-over-HTTPS with IP:
 
     public function mirrorMenu()
     {
-        $ip     = $this->getPacConf()['domain'] ?: $this->ip;
-        $text[] = "Menu -> Mirror";
-        $text[] = <<<PNG
-                    <pre>client -> intermediate VPS -> vpnbot
-                                         ^           |
-                                         |  install  |
-                                         |  mirror   |
-                                          -----------
-                    </pre>
-                    PNG;
-        $data[] = [
-            [
-                'text'          => $this->i18n('download'),
-                'callback_data' => "/getMirror",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
         return [
-            'text' => implode("\n", $text),
-            'data' => $data,
+            'text' => 'removed',
+            'data' => [[['text' => $this->i18n('back'), 'callback_data' => '/menu']]],
         ];
     }
 
     public function getMirror()
     {
-        $s = file_get_contents('/mirror/start_socat.sh');
-        $t = str_replace([
-            '~ip~',
-            '~tg~',
-            '~ss~',
-            '~wg1~',
-            '~wg2~',
-        ], [
-            getenv('IP'),
-            getenv('TGPORT'),
-            getenv('SSPORT'),
-            getenv('WGPORT'),
-            getenv('WG1PORT'),
-        ], $s);
-        $this->sendFile($this->input['from'], new CURLStringFile($t, 'socat.sh', 'application/x-sh'));
+        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
     public function ocMenu()
     {
-        $pac    = $this->getPacConf();
-        $domain = $this->getDomain();
-        $ocserv = file_get_contents('/config/ocserv.conf');
-        preg_match('~^camouflage_secret[^\n]+?"([^"]+)*"~sm', $ocserv, $m);
-        $cs = $m[1];
-        preg_match('~^dns = ([^\n]+)~sm', $ocserv, $m);
-        $dns = $m[1];
-        preg_match('~^expose-iroutes = (true)~sm', $ocserv, $m);
-        $expose = $m[1];
-        $pass   = htmlspecialchars($pac['ocserv']);
-        $text[] = "Menu -> OpenConnect";
-        if (!empty($cs)) {
-            $oc = $this->getHashSubdomain('oc');
-            $text[] = "<code>https://$oc.$domain/?$cs</code>";
-        }
-        $text[] = "password: <span class='tg-spoiler'>$pass</span>";
-        $data[] = [
-            [
-                'text'          => $this->i18n('change subdomain'),
-                'callback_data' => "/changeOcDomain",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('change secret'),
-                'callback_data' => "/changeCamouflage",
-            ],
-            [
-                'text'          => $this->i18n('change password'),
-                'callback_data' => "/changeOcPass",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('dns') . ": $dns",
-                'callback_data' => "/changeOcDns",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          =>  $this->i18n('listSubnet'),
-                'callback_data' => "/subnet 0_0_1",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('expose-iroutes') . ' ' . $this->i18n($expose ? 'on' : 'off'),
-                'callback_data' => "/changeOcExpose",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('add peer'),
-                'callback_data' => "/addOcUser",
-            ],
-        ];
-        $clients = $this->getClientsOc();
-        foreach ($clients as $k => $v) {
-            $data[] = [
-                [
-                    'text'          => $this->i18n('delete') . " $v",
-                    'callback_data' => "/deloc $k",
-                ],
-            ];
-        }
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
         return [
-            'text' => implode("\n", $text),
-            'data' => $data,
+            'text' => 'removed',
+            'data' => [[['text' => $this->i18n('back'), 'callback_data' => '/menu']]],
         ];
     }
 
@@ -8319,9 +8088,14 @@ DNS-over-HTTPS with IP:
         foreach ($r['inbounds'][0]['settings']['clients'] as $k => $v) {
             if ($i == $k) {
                 $ownerSubId = $this->getClientSubscriptionId($r['inbounds'][0]['settings']['clients'][$k]);
+                $deviceUuids = [];
                 $this->deleteHwidUser($ownerSubId);
                 foreach ($r['inbounds'][0]['settings']['clients'] as $childIndex => $child) {
                     if (($child['device_parent_id'] ?? '') === $ownerSubId) {
+                        $deviceUuid = (string) ($child['id'] ?? '');
+                        if ($deviceUuid !== '') {
+                            $deviceUuids[] = $deviceUuid;
+                        }
                         unset($r['inbounds'][0]['settings']['clients'][$childIndex]);
                     }
                 }
@@ -8333,6 +8107,13 @@ DNS-over-HTTPS with IP:
                 $this->setXrayStats($st);
                 $this->restartXray($r);
                 $this->adguardXrayClients();
+                if ($deviceUuids !== []) {
+                    $this->runInRuntimeWgContext(function () use ($deviceUuids) {
+                        foreach ($deviceUuids as $deviceUuid) {
+                            $this->deleteDeviceWgProfileByUuid($deviceUuid);
+                        }
+                    });
+                }
                 break;
             }
         }
@@ -8636,14 +8417,24 @@ DNS-over-HTTPS with IP:
 
     public function addTemplate($n, $type)
     {
+        if ($type !== 'clash') {
+            $this->send($this->input['chat'], 'removed');
+            return;
+        }
         if (empty($this->input['caption'])) {
             $this->send($this->input['chat'], 'empty name');
             return;
         }
         $r    = $this->request('getFile', ['file_id' => $this->input['file_id']]);
         $json = json_decode(file_get_contents($this->file . $r['result']['file_path']), true);
-        if ($json === false) {
+        if ($json === false || !is_array($json)) {
             $this->send($this->input['chat'], 'wrong format');
+            return;
+        }
+        require_once __DIR__ . '/ClashTemplateValidator.php';
+        $validation = ClashTemplateValidator::validateClashTemplate($json);
+        if (!$validation['ok']) {
+            $this->send($this->input['chat'], implode("\n", $validation['errors']));
             return;
         }
         $pac = $this->getPacConf();
@@ -8654,20 +8445,35 @@ DNS-over-HTTPS with IP:
 
     public function saveTemplate($name, $type, $json)
     {
-        if (json_decode($json, true) === false) {
+        if ($type !== 'clash') {
+            return [
+                'status'  => false,
+                'message' => 'removed',
+            ];
+        }
+        $decoded = json_decode($json, true);
+        if ($decoded === false || !is_array($decoded)) {
             return [
                 'status'  => false,
                 'message' => 'wrong format',
             ];
         }
+        require_once __DIR__ . '/ClashTemplateValidator.php';
+        $validation = ClashTemplateValidator::validateClashTemplate($decoded);
+        if (!$validation['ok']) {
+            return [
+                'status'  => false,
+                'message' => implode('; ', $validation['errors']),
+            ];
+        }
         $pac = $this->getPacConf();
         switch ($name) {
             case 'origin':
-                file_put_contents("/config/$type.json", json_encode(json_decode($json, true), JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                file_put_contents('/config/clash.json', json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
                 break;
 
             default:
-                $pac["{$type}templates"][$name] = json_decode($json, true);
+                $pac["{$type}templates"][$name] = $decoded;
                 break;
         }
         $this->setPacConf($pac);
@@ -8686,8 +8492,19 @@ DNS-over-HTTPS with IP:
 
     public function copyTemplate($name, $type)
     {
+        if ($type !== 'clash') {
+            $this->send($this->input['chat'], 'removed', $this->input['message_id']);
+            return;
+        }
+        $origin = json_decode(file_get_contents('/config/clash.json'), true);
+        require_once __DIR__ . '/ClashTemplateValidator.php';
+        $validation = ClashTemplateValidator::validateClashTemplate($origin);
+        if (!$validation['ok']) {
+            $this->send($this->input['chat'], 'Template invalid: ' . implode('; ', $validation['errors']), $this->input['message_id']);
+            return;
+        }
         $pac  = $this->getPacConf();
-        $pac["{$type}templates"][$name] = json_decode(file_get_contents("/config/$type.json"), true);
+        $pac["{$type}templates"][$name] = $origin;
         $this->setPacConf($pac);
         $this->templates($type);
     }
@@ -8719,6 +8536,11 @@ DNS-over-HTTPS with IP:
 
     public function templates($type)
     {
+        if ($type !== 'clash') {
+            $this->send($this->input['chat'], 'removed', $this->input['message_id']);
+            return;
+        }
+        $type   = 'clash';
         $pac    = $this->getPacConf();
         $domain = $this->getDomain();
         $hash   = $this->getHashBot();
@@ -8922,8 +8744,8 @@ DNS-over-HTTPS with IP:
             ];
         }
         if ($page != -1 && $all > 1) {
-            $data[] = [
-                [
+        $data[] = [
+            [
                     'text'          => '<<',
                     'callback_data' => "/xray " . ($page - 1 >= 0 ? $page - 1 : $all - 1),
                 ],
@@ -9007,8 +8829,8 @@ DNS-over-HTTPS with IP:
             'text' => $p['linkdomain'] ?: $this->i18n('cdn'),
             'callback_data' => '/addLinkDomain',
         ]];
-        $data[] = [
-            [
+            $data[] = [
+                [
                 'text'          => $this->i18n('Reality') . ' ' . ($p['transport'] == 'Reality' ? $this->i18n('on') : $this->i18n('off')),
                 'callback_data' => "/changeTransport Reality",
             ],
@@ -9091,8 +8913,8 @@ DNS-over-HTTPS with IP:
             'text' => 'HWID runtime mode: ' . $this->i18n($runtimeGlobal ? 'on' : 'off'),
             'callback_data' => '/toggleHwidRuntimeMode xray',
         ]];
-        $data[] = [
-            [
+            $data[] = [
+                [
                 'text'          => 'runtime WG/AWG profile: ' . $this->i18n($runtimeWgEnabled ? 'on' : 'off'),
                 'callback_data' => '/toggleRuntimeWgProfile',
             ],
@@ -9117,14 +8939,6 @@ DNS-over-HTTPS with IP:
     {
         $text[] = "Menu -> " . $this->i18n('xray') . " -> templates & branding";
         $data[] = [
-            [
-                'text'          => $this->i18n('v2ray templates'),
-                'callback_data' => "/templates v2ray",
-            ],
-            [
-                'text'          => $this->i18n('sing-box templates'),
-                'callback_data' => "/templates sing",
-            ],
             [
                 'text'          => $this->i18n('mihomo templates'),
                 'callback_data' => "/templates clash",
@@ -9388,6 +9202,11 @@ DNS-over-HTTPS with IP:
 
     public function templateUser($type, $i)
     {
+        if ($type !== 'clash') {
+            $this->send($this->input['chat'], 'removed', $this->input['message_id']);
+            return;
+        }
+        $type      = 'clash';
         $c         = $this->getXray();
         $pac       = $this->getPacConf();
         $text[]    = "Menu -> " . $this->i18n('xray') . " -> {$c['inbounds'][0]['settings']['clients'][$i]['email']}\n";
@@ -9444,7 +9263,7 @@ DNS-over-HTTPS with IP:
         $runtimeModeText .= $this->getRuntimeParentRetiredEmoji($c);
         $bothRealityEnabled = $this->isBothRealityEnabledForOwner($c);
         $defaultHwid  = max(1, (int) ($pac['hwid_device_count'] ?: 1));
-        $hwidLimit    = $c['hwid_limit'] ? (int) $c['hwid_limit'] : $defaultHwid;
+        $hwidLimit    = (int) ($c['hwid_limit'] ?? $defaultHwid);
 
         $text[] = "Menu -> " . $this->i18n('xray') . " -> {$c['email']}\n";
         if (file_exists(__DIR__ . '/subscription.php')) {
@@ -9585,39 +9404,18 @@ DNS-over-HTTPS with IP:
         $ownerSubId = $this->getClientSubscriptionId($c);
 
         $text[] = "Menu -> " . $this->i18n('xray') . " -> {$c['email']} -> imports & files";
-        $text[] = "<a href='$scheme://{$domain}/pac$hash?t=s&r=v&s={$ownerSubId}#{$c['email']}'>import://v2rayng</a>";
-        $text[] = "<a href='$scheme://{$domain}/pac$hash?t=si&r=si&s={$ownerSubId}#{$c['email']}'>import://sing-box</a>";
-        $text[] = "<a href='$scheme://{$domain}/pac$hash?t=s&r=st&s={$ownerSubId}#{$c['email']}'>import://streisand</a>";
-        $text[] = "<a href='$scheme://{$domain}/pac$hash?t=si&r=h&s={$ownerSubId}#{$c['email']}'>import://hiddify</a>";
-        $text[] = "<a href='$scheme://{$domain}/pac$hash?t=si&r=k&s={$ownerSubId}#{$c['email']}'>import://karing</a>";
-        $text[] = "<a href='$scheme://{$domain}/pac$hash?t=si&r=c&s={$ownerSubId}#{$c['email']}'>import://mihomo</a>";
+        $text[] = "<a href='$scheme://{$domain}/pac$hash?t=cl&r=c&s={$ownerSubId}#{$c['email']}'>import://mihomo</a>";
         if ($this->isRuntimeDeviceWgEnabled($c)) {
             $text[] = "<a href='$scheme://{$domain}/pac$hash?t=wg&r=awg&s={$ownerSubId}#{$c['email']}'>import://amnezia wg device</a>";
         }
 
         $data[] = [
             [
-                'text'    => $this->i18n('v2ray'),
-                'web_app' => ['url' => "https://{$domain}/pac$hash?t=s&s={$ownerSubId}"]
-            ],
-            [
-                'text'    => $this->i18n('singbox'),
-                'web_app' => ['url' => "https://{$domain}/pac$hash?t=si&s={$ownerSubId}"]
-            ],
-            [
                 'text'    => $this->i18n('mihomo'),
                 'web_app' => ['url' => "https://{$domain}/pac$hash?t=cl&s={$ownerSubId}"]
             ],
         ];
         $data[] = [
-            [
-                'text'          => $this->i18n('v2ray') . ' file',
-                'callback_data' => "/dw {$i} s",
-            ],
-            [
-                'text'          => $this->i18n('singbox') . ' file',
-                'callback_data' => "/dw {$i} si",
-            ],
             [
                 'text'          => $this->i18n('mihomo') . ' file',
                 'callback_data' => "/dw {$i} cl",
@@ -9642,20 +9440,10 @@ DNS-over-HTTPS with IP:
         $xray   = $this->getXray();
         $c      = $xray['inbounds'][0]['settings']['clients'][$i];
         $pac    = $this->getPacConf();
-        $singtemplate  = $c['singtemplate'] ? base64_decode($c['singtemplate']) : 'default(' . ($pac['defaultsingtemplate'] && !empty($pac['singtemplates'][base64_decode($pac['defaultsingtemplate'])]) ? base64_decode($pac['defaultsingtemplate']) : 'origin') . ')';
-        $v2raytemplate = $c['v2raytemplate'] ? base64_decode($c['v2raytemplate']) : 'default(' . ($pac['defaultv2raytemplate'] && !empty($pac['v2raytemplates'][base64_decode($pac['defaultv2raytemplate'])]) ? base64_decode($pac['defaultv2raytemplate']) : 'origin') . ')';
         $clashtemplate = $c['clashtemplate'] ? base64_decode($c['clashtemplate']) : 'default(' . ($pac['defaultclashtemplate'] && !empty($pac['clashtemplates'][base64_decode($pac['defaultclashtemplate'])]) ? base64_decode($pac['defaultclashtemplate']) : 'origin') . ')';
 
         $text[] = "Menu -> " . $this->i18n('xray') . " -> {$c['email']} -> templates & qr";
         $data[] = [
-            [
-                'text'          => $this->i18n('v2ray') . ": $v2raytemplate",
-                'callback_data' => "/templateUser v2ray $i",
-            ],
-            [
-                'text'          => $this->i18n('singbox') . ": $singtemplate",
-                'callback_data' => "/templateUser sing $i",
-            ],
             [
                 'text'          => $this->i18n('mihomo') . ": $clashtemplate",
                 'callback_data' => "/templateUser clash $i",
@@ -9665,14 +9453,6 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => $this->i18n('qr short'),
                 'callback_data' => "/qrXray $i",
-            ],
-            [
-                'text'          => $this->i18n('qr v2ray'),
-                'callback_data' => "/qrXray {$i}_1",
-            ],
-            [
-                'text'          => $this->i18n('qr singbox'),
-                'callback_data' => "/qrXray {$i}_2",
             ],
         ];
         $data[] = [
@@ -10133,70 +9913,37 @@ DNS-over-HTTPS with IP:
         $upload   = $this->getBytes($traffic['upload']);
         $trafficLimitBytes = $this->getClientTrafficLimitBytes($client, $pac);
         $trafficLimitHuman = $trafficLimitBytes > 0 ? $this->getBytes($trafficLimitBytes) : '0';
-        $inboundServerStats = [];
-        foreach (($st['inbounds'] ?? []) as $tag => $ent) {
-            if (!is_array($ent)) {
-                continue;
-            }
-            $inboundServerStats[] = [
-                'tag' => (string) $tag,
-                'download' => (int) (($ent['global']['download'] ?? 0) + ($ent['session']['download'] ?? 0)),
-                'upload' => (int) (($ent['global']['upload'] ?? 0) + ($ent['session']['upload'] ?? 0)),
-            ];
-        }
         $deviceTrafficMap = $this->getHwidDeviceTraffic($uid);
         $hasDeviceDeletePassword = $this->getSubscriptionDevicePasswordHash($client) !== '';
-        $singbox  = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
-            'h' => $hash,
-            't' => 'si',
-            's' => $uid,
-        ]));
-        $xray = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
-            'h' => $hash,
-            't' => 's',
-            's' => $uid,
-        ]));
         $clash = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
             'h' => $hash,
             't' => 'cl',
             's' => $uid,
         ]));
         $vless   = $this->linkXray($k);
-        $windows = "$scheme://{$domain}/pac$hash?t=si&r=w&s=$uid";
+        $singbox = '';
+        $xray    = '';
+        $windows = '';
         $wgconf = '';
         if ($this->isRuntimeDeviceWgEnabled($client)) {
-            // Keep AWG link visible in subscription even before a concrete device UUID
-            // is resolved; device-specific profile selection still happens on t=wg request.
             $wgconf = "$scheme://{$domain}/pac$hash?t=wg&r=awg&s=$uid";
         }
         $_GET['s'] = $uid;
-        foreach ([
-          'xray'    => 's',
-          'singbox' => 'si',
-          'clash'   => 'cl'
-        ] as $k     => $v) {
-            $_GET['t'] = $v;
-            $configs[$k] = $this->subscription(1);
-        }
+        $_GET['t'] = 'cl';
+        $configs['clash'] = $this->subscription(1);
         require __DIR__ . '/subscription.php';
     }
 
     public function subscription($return = false)
     {
-        switch ($_GET['t']) {
-            case 's':
-                $type = 'v2ray';
-                break;
-            case 'si':
-                $type = 'sing';
-                break;
-            case 'cl':
-                $type = 'clash';
-                break;
-            case 'wg':
-                $type = 'wg';
-                break;
+        $requestType = (string) ($_GET['t'] ?? '');
+        if (!in_array($requestType, ['cl', 'wg'], true)) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Subscription type is not supported';
+            exit;
         }
+        $type = $requestType === 'cl' ? 'clash' : 'wg';
         $pac    = $this->getPacConf();
         $useCdnDomain = !in_array(($pac['transport'] ?? ''), ['Reality', 'Both'], true);
         $domain = !empty($_GET['cdn'] ?? '') ? $_GET['cdn'] : ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
@@ -10240,56 +9987,16 @@ DNS-over-HTTPS with IP:
             $uid = (string) $_SERVER['VPNBOT_DEVICE_UUID'];
         }
         $subscriptionId = $subscriptionId ?? $this->getClientSubscriptionId($client);
-        $ownerForFlags = $this->resolveOwnerClientForBothFlags($xr, $client, $subscriptionId);
-        $bothRealityAllowed = $this->isBothRealityEnabledForOwner($ownerForFlags);
-        $bothWsAllowed = $this->isBothWsEnabledForOwner($ownerForFlags);
 
         if (!empty($_GET['r'])) {
-            $si = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
-                'h' => $hash,
-                't' => 'si',
-                's' => $subscriptionId,
-            ]));
-            $v2 = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
-                'h' => $hash,
-                't' => 's',
-                's' => $subscriptionId,
-            ]));
             $cl = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
                 'h' => $hash,
                 't' => 'cl',
                 's' => $subscriptionId,
             ]));
             switch ($_GET['r']) {
-                case 'si':
-                    header("Location: sing-box://import-remote-profile/?url=$si");
-                    exit;
-                case 'st':
-                    header("Location: streisand://import/$v2");
-                    exit;
-                case 'v':
-                    header("Location: v2rayng://install-config?url=$v2");
-                    exit;
-                case 'k':
-                    header("Location: karing://install-config?url=$si");
-                    exit;
-                case 'h':
-                    header("Location: hiddify://install-config/?url=$si");
-                    exit;
                 case 'c':
                     header("Location: clash://install-config/?url=$cl&overwrite=no&name=$email");
-                    exit;
-                case 'w':
-                    $link = htmlspecialchars($si, ENT_XML1, 'UTF-8');
-                    $n    = "singbox_$uid.zip";
-                    copy('/singbox/singbox.zip', $n);
-                    $zip = new ZipArchive();
-                    $zip->open($n, ZipArchive::CREATE);
-                    $zip->addFromString('winsw3.xml', preg_replace('#~url~#', $link, file_get_contents('/singbox/winsw3.xml')));
-                    $zip->close();
-                    header('Content-Disposition: attachment; filename="singbox.zip"');
-                    echo file_get_contents($n);
-                    unlink($n);
                     exit;
                 case 'awg':
                     $wgSub = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
@@ -10300,6 +10007,10 @@ DNS-over-HTTPS with IP:
                     header("Location: amnezia://import/$wgSub");
                     exit;
             }
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Redirect is not supported';
+            exit;
         }
         if (($_GET['t'] ?? '') === 'wg') {
             if (!$this->isRuntimeDeviceWgEnabled($client)) {
@@ -10342,7 +10053,7 @@ DNS-over-HTTPS with IP:
             case empty($template) && empty($pac["default{$type}template"]):
             case empty($template) && empty($pac["{$type}templates"][base64_decode($pac["default{$type}template"])]):
             case !empty($template) && empty($pac["{$type}templates"][$template]):
-                $c = json_decode(file_get_contents("/config/{$type}.json"), true);
+                $c = json_decode(file_get_contents('/config/clash.json'), true);
                 break;
             case !empty($template):
                 $c = $pac["{$type}templates"][$template];
@@ -10371,414 +10082,25 @@ DNS-over-HTTPS with IP:
         }
 
         $index = null;
-        if (($_GET['t'] ?? '') === 'cl') {
-            foreach ($proxies as $k => $v) {
-                if (($v['name'] ?? '') == $outbound) {
-                    $index = $k;
-                    break;
-                }
+        foreach ($proxies as $k => $v) {
+            if (($v['name'] ?? '') == $outbound) {
+                $index = $k;
+                break;
             }
-            if ($index === null && !empty($proxies)) {
-                $index = 0;
-            }
-            if ($index === null || !isset($c['proxies'][$index])) {
-                http_response_code(500);
-                header('Content-Type: text/plain; charset=utf-8');
-                echo "Configuration template is invalid: proxy index missing.";
-                exit;
-            }
-        } else {
-            foreach ($outbounds as $k => $v) {
-                if (($v['tag'] ?? '') == $outbound) {
-                    $index = $k;
-                    break;
-                }
-            }
-            if ($index === null && !empty($outbounds)) {
-                $index = 0;
-            }
-            if ($index === null || !isset($c['outbounds'][$index])) {
-                http_response_code(500);
-                header('Content-Type: text/plain; charset=utf-8');
-                echo "Configuration template is invalid: outbound index missing.";
-                exit;
-            }
+        }
+        if ($index === null && !empty($proxies)) {
+            $index = 0;
+        }
+        if ($index === null || !isset($c['proxies'][$index])) {
+            http_response_code(500);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "Configuration template is invalid: proxy index missing.";
+            exit;
         }
 
         switch ($_GET['t']) {
-            case 's':
-                $c['outbounds'][$index]['settings']['vnext'][0]['address']  = '~domain~';
-                $c['outbounds'][$index]['settings']['vnext'][0]['users'][0] = [
-                    'id'         => '~uid~',
-                    'encryption' => 'none',
-                ];
-                $fingerprint = $c['outbounds'][$index]['streamSettings']['realitySettings']['fingerprint'] ?? $c['outbounds'][$index]['streamSettings']['tlsSettings']['fingerprint'] ?? 'chrome';
-                switch ($pac['transport']) {
-                    case 'Reality':
-                        $c['outbounds'][$index]['settings']['vnext'][0]['address'] = '~reality_server_host~';
-                        $c['outbounds'][$index]['settings']['vnext'][0]['port'] = '~reality_server_port~';
-                        $c['outbounds'][$index]['settings']['vnext'][0]['users'][0]["flow"] = "xtls-rprx-vision";
-                        $c['outbounds'][$index]['streamSettings']                           = [
-                            "network"         => "tcp",
-                            "security"        => "reality",
-                            "realitySettings" => [
-                                "serverName"  => '~server_name~',
-                                "fingerprint" => $fingerprint,
-                                "publicKey"   => '~public_key~',
-                                "shortId"     => '~short_id~',
-                            ]
-                        ];
-                        $c['outbounds'][$index]['mux'] = [
-                            "enabled"     => false,
-                            "concurrency" => -1
-                        ];
-                        break;
-                    case 'xhttp':
-                        $c['outbounds'][$index]['streamSettings'] = [
-                            "network"  => "xhttp",
-                            "security" => "tls",
-
-                            "xhttpSettings" => [
-                                "host" => "~domain~",
-                                "mode" => "packet-up",
-                                "path" => "/ws$hash",
-
-                                "extra" => [
-                                    "scMaxEachPostBytes"    => 1000000,
-                                    "scMinPostsIntervalMs"  => 30,
-                                    "scStreamUpServerSecs"  => "20-80",
-                                    "xmux" => [
-                                        "cMaxReuseTimes"    => 0,
-                                        "hKeepAlivePeriod"  => 0,
-                                        "hMaxRequestTimes"  => "600-900",
-                                        "hMaxReusableSecs"  => "1800-3000",
-                                        "maxConcurrency"    => "16-32",
-                                        "maxConnections"    => 0,
-                                    ],
-                                    "xPaddingBytes" => "100-1000",
-                                    "noGRPCHeader"  => false
-                                ]
-                            ],
-
-                            "tlsSettings" => [
-                                "allowInsecure" => false,
-                                "alpn"          => ["h2", "http/1.1"],
-                                "fingerprint"   => "chrome",
-                                "serverName"    => "~domain~",
-                                "show"          => false
-                            ]
-                        ];
-                        unset($c['outbounds'][$index]['mux']);
-                        break;
-                    case 'Both':
-                        if ($bothWsAllowed && $bothRealityAllowed) {
-                            $c['outbounds'][$index]['streamSettings'] = [
-                                "network"    => "ws",
-                                "security"   => "tls",
-                                "wsSettings" => [
-                                    "path" => "/ws$hash?ed=2560"
-                                ],
-                                "tlsSettings" => [
-                                    "allowInsecure" => false,
-                                    "serverName"    => '~domain~',
-                                    "fingerprint"   => $fingerprint
-                                ]
-                            ];
-                            unset($c['outbounds'][$index]['mux']);
-                            $realityOutbound = $c['outbounds'][$index];
-                            $realityOutbound['tag'] = ($realityOutbound['tag'] ?? 'proxy') . '_reality';
-                            $realityOutbound['settings']['vnext'][0]['address'] = '~reality_server_host~';
-                            $realityOutbound['settings']['vnext'][0]['port'] = '~reality_server_port~';
-                            $realityOutbound['settings']['vnext'][0]['users'][0]["flow"] = "xtls-rprx-vision";
-                            $realityOutbound['streamSettings'] = [
-                                "network"         => "tcp",
-                                "security"        => "reality",
-                                "realitySettings" => [
-                                    "serverName"  => '~server_name~',
-                                    "fingerprint" => $fingerprint,
-                                    "publicKey"   => '~public_key~',
-                                    "shortId"     => '~short_id~',
-                                ]
-                            ];
-                            $realityOutbound['mux'] = [
-                                "enabled"     => false,
-                                "concurrency" => -1
-                            ];
-                            $c['outbounds'][] = $realityOutbound;
-                        } elseif ($bothWsAllowed) {
-                            $c['outbounds'][$index]['streamSettings'] = [
-                                "network"    => "ws",
-                                "security"   => "tls",
-                                "wsSettings" => [
-                                    "path" => "/ws$hash?ed=2560"
-                                ],
-                                "tlsSettings" => [
-                                    "allowInsecure" => false,
-                                    "serverName"    => '~domain~',
-                                    "fingerprint"   => $fingerprint
-                                ]
-                            ];
-                            unset($c['outbounds'][$index]['mux']);
-                        } elseif ($bothRealityAllowed) {
-                            $c['outbounds'][$index]['settings']['vnext'][0]['address'] = '~reality_server_host~';
-                            $c['outbounds'][$index]['settings']['vnext'][0]['port'] = '~reality_server_port~';
-                            $c['outbounds'][$index]['settings']['vnext'][0]['users'][0]["flow"] = "xtls-rprx-vision";
-                            $c['outbounds'][$index]['streamSettings'] = [
-                                "network"         => "tcp",
-                                "security"        => "reality",
-                                "realitySettings" => [
-                                    "serverName"  => '~server_name~',
-                                    "fingerprint" => $fingerprint,
-                                    "publicKey"   => '~public_key~',
-                                    "shortId"     => '~short_id~',
-                                ]
-                            ];
-                            $c['outbounds'][$index]['mux'] = [
-                                "enabled"     => false,
-                                "concurrency" => -1
-                            ];
-                        }
-                        break;
-
-                    default:
-                        $c['outbounds'][$index]['streamSettings'] = [
-                            "network"    => "ws",
-                            "security"   => "tls",
-                            "wsSettings" => [
-                                "path" => "/ws$hash?ed=2560"
-                            ],
-                            "tlsSettings" => [
-                                "allowInsecure" => false,
-                                "serverName"    => '~domain~',
-                                "fingerprint"   => $fingerprint
-                            ]
-                        ];
-                        unset($c['outbounds'][$index]['mux']);
-                        break;
-                }
-
-                break;
-            case 'si':
-                $c['outbounds'][$index]['uuid']   = '~uid~';
-                switch ($pac['transport']) {
-                    case 'Reality':
-                        unset($c['outbounds'][$index]["transport"]);
-                        $c['outbounds'][$index]['server']                       = '~reality_server_host~';
-                        $c['outbounds'][$index]['server_port']                  = '~reality_server_port~';
-                        $c['outbounds'][$index]['flow']                         = 'xtls-rprx-vision';
-                        $c['outbounds'][$index]['tls']['reality']['public_key'] = '~public_key~';
-                        $c['outbounds'][$index]['tls']['server_name']           = '~server_name~';
-                        $c['outbounds'][$index]['tls']['reality']['short_id']   = '~short_id~';
-                        break;
-                    case 'xhttp':
-                        unset($c['outbounds'][$index]['flow']);
-                        unset($c['outbounds'][$index]['tls']['reality']);
-
-                        $c['outbounds'][$index]["transport"] = [
-                            "type" => "xhttp",
-                            "host" => "~domain~",
-                            "mode" => "packet-up",
-                            "path" => "/ws$hash",  // ? ???? WS + hash
-                            "xmux" => [
-                                "max_concurrency"   => "16-32",
-                                "max_connections"   => "0-1",
-                                "c_max_reuse_times" => "0-1",
-                                "h_max_request_times" => "600-900",
-                                "h_max_reusable_secs" => "1800-3000",
-                                "h_keep_alive_period" => 60
-                            ]
-                        ];
-
-                        $c['outbounds'][$index]['tls'] = [
-                            "enabled"     => true,
-                            "insecure"    => false,
-                            "server_name" => "~domain~",
-                            "alpn"        => ["h2"]
-                        ];
-                        break;
-                    case 'Both':
-                        if ($bothWsAllowed && $bothRealityAllowed) {
-                            unset($c['outbounds'][$index]['tls']['reality']);
-                            unset($c['outbounds'][$index]['flow']);
-                            $c['outbounds'][$index]["transport"] = [
-                                "type" => "ws",
-                                "path" => "/ws$hash"
-                            ];
-                            $c['outbounds'][$index]['tls']['server_name'] = '~domain~';
-                            $realityOutbound = $c['outbounds'][$index];
-                            $realityOutbound['tag'] = ($realityOutbound['tag'] ?? 'proxy') . '_reality';
-                            unset($realityOutbound["transport"]);
-                            $realityOutbound['server'] = '~reality_server_host~';
-                            $realityOutbound['server_port'] = '~reality_server_port~';
-                            $realityOutbound['flow'] = 'xtls-rprx-vision';
-                            $realityOutbound['tls']['reality']['public_key'] = '~public_key~';
-                            $realityOutbound['tls']['server_name'] = '~server_name~';
-                            $realityOutbound['tls']['reality']['short_id'] = '~short_id~';
-                            $c['outbounds'][] = $realityOutbound;
-                        } elseif ($bothWsAllowed) {
-                            unset($c['outbounds'][$index]['tls']['reality']);
-                            unset($c['outbounds'][$index]['flow']);
-                            $c['outbounds'][$index]["transport"] = [
-                                "type" => "ws",
-                                "path" => "/ws$hash"
-                            ];
-                            $c['outbounds'][$index]['tls']['server_name'] = '~domain~';
-                        } elseif ($bothRealityAllowed) {
-                            unset($c['outbounds'][$index]["transport"]);
-                            $c['outbounds'][$index]['server'] = '~reality_server_host~';
-                            $c['outbounds'][$index]['server_port'] = '~reality_server_port~';
-                            $c['outbounds'][$index]['flow'] = 'xtls-rprx-vision';
-                            $c['outbounds'][$index]['tls']['reality']['public_key'] = '~public_key~';
-                            $c['outbounds'][$index]['tls']['server_name'] = '~server_name~';
-                            $c['outbounds'][$index]['tls']['reality']['short_id'] = '~short_id~';
-                        }
-                        break;
-
-                    default:
-                        unset($c['outbounds'][$index]['tls']['reality']);
-                        unset($c['outbounds'][$index]['flow']);
-                        $c['outbounds'][$index]["transport"] = [
-                            "type" => "ws",
-                            "path" => "/ws$hash"
-                        ];
-                        $c['outbounds'][$index]['tls']['server_name'] = '~domain~';
-                        break;
-                }
-                break;
             case 'cl':
-                $c['proxies'][$index]['server'] = '~domain~';
-                $c['proxies'][$index]['uuid']   = '~uid~';
                 $baseProxyName = (string) ($c['proxies'][$index]['name'] ?? '');
-                switch ($pac['transport']) {
-                    case 'Reality':
-                        unset($c['proxies'][$index]["ws-opts"]);
-                        unset($c['proxies'][$index]["skip-cert-verify"]);
-                        $c['proxies'][$index]['server']      = '~reality_server_host~';
-                        $c['proxies'][$index]['port']        = '~reality_server_port~';
-                        $c['proxies'][$index]["network"]      = "tcp";
-                        $c['proxies'][$index]['flow']         = 'xtls-rprx-vision';
-                        $c['proxies'][$index]['servername']  = '~server_name~';
-                        $c['proxies'][$index]['reality-opts'] = [
-                            'public-key' => '~public_key~',
-                            'short-id'   => '~short_id~',
-                        ];
-                        break;
-                    case 'xhttp':
-                        unset($c['proxies'][$index]['ws-opts']);
-                        unset($c['proxies'][$index]['flow']);
-                        unset($c['proxies'][$index]['reality-opts']);
-
-                        $c['proxies'][$index]['network']            = 'xhttp';
-                        $c['proxies'][$index]['client-fingerprint'] = 'chrome';
-                        $c['proxies'][$index]['tls']                = true;
-                        $c['proxies'][$index]['alpn']               = ['h2'];
-                        $c['proxies'][$index]['servername']         = '~domain~';
-                        $c['proxies'][$index]['skip-cert-verify']   = false;
-
-                        $c['proxies'][$index]['xhttp-opts'] = [
-                            'host'          => '~domain~',
-                            'path'          => "/ws$hash",   // ???? ??? ? ws + hash
-                            'mode'          => 'packet-up',
-                            'http-version'  => '2',
-                            'x-padding-bytes' => [
-                                'from' => 100,
-                                'to'   => 1000,
-                            ],
-                            'sc-max-each-post-bytes' => [
-                                'from' => 1000000,
-                                'to'   => 1000000,
-                            ],
-                            'sc-min-posts-interval-ms' => [
-                                'from' => 30,
-                                'to'   => 30,
-                            ],
-                            'sc-stream-up-server-secs' => [
-                                'from' => 25,
-                                'to'   => 60,
-                            ],
-                            'xmux' => [
-                                'max-concurrency' => [
-                                    'from' => 8,
-                                    'to'   => 16,
-                                ],
-                                'max-connections'     => 0,
-                                'h-keep-alive-period' => 15,
-                                'h-max-request-times' => [
-                                    'from' => 100,
-                                    'to'   => 200,
-                                ],
-                                'h-max-reusable-secs' => [
-                                    'from' => 1800,
-                                    'to'   => 3000,
-                                ],
-                            ],
-                        ];
-                        break;
-                    case 'Both':
-                        if ($bothWsAllowed && $bothRealityAllowed) {
-                            unset($c['proxies'][$index]['flow']);
-                            unset($c['proxies'][$index]['reality-opts']);
-                            $c['proxies'][$index]["network"]          = "ws";
-                            $c['proxies'][$index]["ws-opts"]['path']  = "/ws$hash";
-                            $c['proxies'][$index]["skip-cert-verify"] = false;
-                            $c['proxies'][$index]['servername']       = '~domain~';
-                            $realityProxy = $c['proxies'][$index];
-                            $realityProxy['name'] = 'BelieSpiski';
-                            unset($realityProxy["ws-opts"]);
-                            unset($realityProxy["skip-cert-verify"]);
-                            $realityProxy['server']       = '~reality_server_host~';
-                            $realityProxy['port']         = '~reality_server_port~';
-                            $realityProxy["network"]      = "tcp";
-                            $realityProxy['flow']         = 'xtls-rprx-vision';
-                            $realityProxy['servername']   = '~server_name~';
-                            $realityProxy['reality-opts'] = [
-                                'public-key' => '~public_key~',
-                                'short-id'   => '~short_id~',
-                            ];
-                            $c['proxies'][] = $realityProxy;
-                            if (!empty($c['proxy-groups']) && is_array($c['proxy-groups'])) {
-                                foreach ($c['proxy-groups'] as $gk => $group) {
-                                    if (empty($group['proxies']) || !is_array($group['proxies'])) {
-                                        continue;
-                                    }
-                                    if ($baseProxyName !== '' && in_array($baseProxyName, $group['proxies'], true)) {
-                                        $c['proxy-groups'][$gk]['proxies'][] = $realityProxy['name'];
-                                    }
-                                }
-                            }
-                        } elseif ($bothWsAllowed) {
-                            unset($c['proxies'][$index]['flow']);
-                            unset($c['proxies'][$index]['reality-opts']);
-                            $c['proxies'][$index]["network"]          = "ws";
-                            $c['proxies'][$index]["ws-opts"]['path']  = "/ws$hash";
-                            $c['proxies'][$index]["skip-cert-verify"] = false;
-                            $c['proxies'][$index]['servername']       = '~domain~';
-                            $this->removeClashProxiesByNames($c, ['BelieSpiski']);
-                        } elseif ($bothRealityAllowed) {
-                            unset($c['proxies'][$index]['ws-opts']);
-                            unset($c['proxies'][$index]['skip-cert-verify']);
-                            $c['proxies'][$index]['server']       = '~reality_server_host~';
-                            $c['proxies'][$index]['port']         = '~reality_server_port~';
-                            $c['proxies'][$index]["network"]      = "tcp";
-                            $c['proxies'][$index]['flow']         = 'xtls-rprx-vision';
-                            $c['proxies'][$index]['servername']   = '~server_name~';
-                            $c['proxies'][$index]['reality-opts'] = [
-                                'public-key' => '~public_key~',
-                                'short-id'   => '~short_id~',
-                            ];
-                            $this->removeClashProxiesByNames($c, ['BelieSpiski']);
-                        }
-                        break;
-
-                    default:
-                        unset($c['proxies'][$index]['flow']);
-                        unset($c['proxies'][$index]['reality-opts']);
-                        $c['proxies'][$index]["network"]          = "ws";
-                        $c['proxies'][$index]["ws-opts"]['path']  = "/ws$hash";
-                        $c['proxies'][$index]["skip-cert-verify"] = false;
-                        $c['proxies'][$index]['servername']       = '~domain~';
-                        break;
-                }
                 $runtimeWgProxy = $this->buildRuntimeWgClashProxy(
                     $client,
                     trim((string) ($_SERVER['HTTP_X_HWID'] ?? '')),
@@ -10786,13 +10108,24 @@ DNS-over-HTTPS with IP:
                 );
                 if (is_array($runtimeWgProxy)) {
                     $c['proxies'][] = $runtimeWgProxy;
-                    if (!empty($c['proxy-groups']) && is_array($c['proxy-groups'])) {
+                    $awgName = (string) ($runtimeWgProxy['name'] ?? '');
+                    if ($awgName !== '' && !empty($c['proxy-groups']) && is_array($c['proxy-groups'])) {
+                        $linked = false;
                         foreach ($c['proxy-groups'] as $gk => $group) {
                             if (empty($group['proxies']) || !is_array($group['proxies'])) {
                                 continue;
                             }
                             if ($baseProxyName !== '' && in_array($baseProxyName, $group['proxies'], true)) {
-                                $c['proxy-groups'][$gk]['proxies'][] = $runtimeWgProxy['name'];
+                                $c['proxy-groups'][$gk]['proxies'][] = $awgName;
+                                $linked = true;
+                            }
+                        }
+                        if (!$linked) {
+                            foreach ($c['proxy-groups'] as $gk => $group) {
+                                if (($group['name'] ?? '') === 'PROXY') {
+                                    $c['proxy-groups'][$gk]['proxies'][] = $awgName;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -10848,69 +10181,6 @@ DNS-over-HTTPS with IP:
         ]), true);
 
         switch ($_GET['t']) {
-            case 's':
-                if (!empty($c['routing']['rules'])) {
-                    $ips = $domains = [];
-                    foreach ($c['routing']['rules'] as $k => $v) {
-                        if (array_key_exists('domain', $v) && !empty($v['domain'])) {
-                            foreach ($v['domain'] as $j) {
-                                if (!preg_match('~^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/\d{1,2})?$~', $j)) {
-                                    $domains[$v['outboundTag']][] = $j;
-                                } else {
-                                    $ips[$v['outboundTag']][] = $j;
-                                }
-                            }
-                        }
-                        if (array_key_exists('ip', $v) && !empty($v['ip'])) {
-                            foreach ($v['ip'] as $j) {
-                                if (!preg_match('~^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/\d{1,2})?$~', $j)) {
-                                    $domains[$v['outboundTag']][] = $j;
-                                } else {
-                                    $ips[$v['outboundTag']][] = $j;
-                                }
-                            }
-                        }
-                    }
-                    $c['routing']['rules'] = [];
-
-                    if (!empty($domains)) {
-                        foreach ($domains as $k => $v) {
-                            $c['routing']['rules'][] = [
-                                "type"        => "field",
-                                "outboundTag" => $k,
-                                "domain"      => $v
-                            ];
-                        }
-                    }
-                    if (!empty($ips)) {
-                        foreach ($ips as $k => $v) {
-                            $c['routing']['rules'][] = [
-                                "type"        => "field",
-                                "outboundTag" => $k,
-                                "ip"          => $v
-                            ];
-                        }
-                    }
-                }
-                break;
-            case 'si':
-                $route = $c['route'] ?? [];
-                $route = $this->addRuleSet($route);
-                $route = $this->createRuleSet($route, $subscriptionId, $domain);
-                if (!empty($route['rules'])) {
-                    foreach ($route['rules'] as $k => $v) {
-                        if (count($v) == 1 && array_key_exists('outbound', $v)) {
-                            unset($route['rules'][$k]);
-                        }
-                    }
-                    $route['rules'] = array_values($route['rules']);
-                }
-                if (!empty($route)) {
-                    $c['route'] = $route;
-                } else {
-                    unset($c['route']);
-                }
-                break;
             case 'cl':
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
@@ -11205,6 +10475,41 @@ DNS-over-HTTPS with IP:
         return $c;
     }
 
+    protected function getRealityServerNameFromXray(?array $xray = null): string
+    {
+        if ($xray === null) {
+            $xray = json_decode(@file_get_contents('/config/xray.json'), true) ?: [];
+        }
+        if (!is_array($xray)) {
+            return '';
+        }
+        foreach (($xray['inbounds'] ?? []) as $inbound) {
+            if (!is_array($inbound)) {
+                continue;
+            }
+            $name = trim((string) ($inbound['streamSettings']['realitySettings']['serverNames'][0] ?? ''));
+            if ($name !== '') {
+                return $name;
+            }
+        }
+
+        return '';
+    }
+
+    public function getUpstreamRealityDomain(array $pac, ?array $xray = null): string
+    {
+        $transport = (string) ($pac['transport'] ?? '');
+        if (!in_array($transport, ['Reality', 'Both'], true)) {
+            return 't';
+        }
+        $domain = trim((string) ($pac['reality']['domain'] ?? ''));
+        if ($domain === '') {
+            $domain = $this->getRealityServerNameFromXray($xray);
+        }
+
+        return $domain !== '' ? $domain : 't';
+    }
+
     public function setUpstreamDomain($domain)
     {
         $nginx = file_get_contents('/config/upstream.conf');
@@ -11241,50 +10546,12 @@ DNS-over-HTTPS with IP:
 
     public function setUpstreamDomainOcserv($domains)
     {
-        $sub   = $this->getHashSubdomain('oc');
-        $nginx = file_get_contents('/config/upstream.conf');
-        if (!is_array($domains)) {
-            $domains = [$domains];
-        }
-        $rules = [];
-        foreach ($domains as $domain) {
-            $domain = $this->normalizeDomainName((string) $domain);
-            if ($domain === '' || $sub === '') {
-                continue;
-            }
-            $rules[] = "$sub.$domain ocserv;";
-        }
-        $body = empty($rules) ? "#$sub.\$domain ocserv;" : implode("\n", $rules);
-        $t     = preg_replace('~#ocserv\s*\R.*?\R\s*#ocserv~s', "#ocserv\n$body\n#ocserv", $nginx);
-        if ($t === null) {
-            $t = $nginx;
-        }
-        file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'upstream');
+        return;
     }
 
     public function setUpstreamDomainNaive($domains)
     {
-        $sub   = $this->getHashSubdomain('np');
-        $nginx = file_get_contents('/config/upstream.conf');
-        if (!is_array($domains)) {
-            $domains = [$domains];
-        }
-        $rules = [];
-        foreach ($domains as $domain) {
-            $domain = $this->normalizeDomainName((string) $domain);
-            if ($domain === '' || $sub === '') {
-                continue;
-            }
-            $rules[] = "$sub.$domain naive;";
-        }
-        $body = empty($rules) ? "#$sub.\$domain naive;" : implode("\n", $rules);
-        $t = preg_replace('~#naive\s*\R.*?\R\s*#naive~s', "#naive\n$body\n#naive", $nginx);
-        if ($t === null) {
-            $t = $nginx;
-        }
-        file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'upstream');
+        return;
     }
 
     public function getHashBot($notset = false)
@@ -11322,7 +10589,7 @@ DNS-over-HTTPS with IP:
         $s = empty($conf['adgbrowser']) ? '' : '#';
         $r = <<<CONF
         location /adguard/ {
-                access_log /logs/nginx_adguard_access;
+                access_log off;
                 if (\$cookie_c != "$h") {
                     $s rewrite .* /webapp redirect;
                 }
@@ -11652,8 +10919,6 @@ DNS-over-HTTPS with IP:
     public function configMenu()
     {
         $conf = $this->getPacConf();
-        $oc   = $this->getHashSubdomain('oc');
-        $np   = $this->getHashSubdomain('np');
         $mainDomain = $this->getMainDomainFromConfig($conf);
         $aliases = $this->getDomainAliasesFromConfig($conf);
         $allDomains = $this->getAllConfiguredDomains($conf);
@@ -11666,8 +10931,6 @@ DNS-over-HTTPS with IP:
             foreach ($allDomains as $idx => $domainName) {
                 $prefix = $idx === 0 ? 'main' : 'alias';
                 $text[] = "$prefix $domainName" . (in_array($domainName, $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-                $text[] = 'naive ' . "$np.$domainName" . (in_array("$np.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-                $text[] = 'openconnect ' . "$oc.$domainName" . (in_array("$oc.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
                 if (!empty($conf['adguardkey'])) {
                     $text[] = "{$conf['adguardkey']}.$domainName" . (in_array("{$conf['adguardkey']}.$domainName", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';
                 }
@@ -11789,10 +11052,6 @@ DNS-over-HTTPS with IP:
         ];
         $data[] = [
             [
-                'text'          => $this->i18n('branches'),
-                'callback_data' => "/menu update",
-            ],
-            [
                 'text'          => $this->i18n('restart'),
                 'callback_data' => "/restart",
             ],
@@ -11834,11 +11093,7 @@ DNS-over-HTTPS with IP:
         $pac = $this->getPacConf();
         $data   = [
             [[
-                'text'          => $this->i18n($c['wg'] ? 'on' : 'off') . ' ' . getenv('WGPORT') . ' Wireguard',
-                'callback_data' => "/hidePort wg",
-            ]],
-            [[
-                'text'          => $this->i18n($c['wg1'] ? 'on' : 'off') . ' ' . getenv('WG1PORT') . ' Wireguard',
+                'text'          => $this->i18n($c['wg1'] ? 'on' : 'off') . ' ' . getenv('WG1PORT') . ' AWG/WG1',
                 'callback_data' => "/hidePort wg1",
             ]],
             [[
@@ -11848,14 +11103,6 @@ DNS-over-HTTPS with IP:
             [[
                 'text'          => $this->i18n($c['ad'] ? 'on' : 'off') . ' 853 AdguardHome DoT',
                 'callback_data' => "/hidePort ad",
-            ]],
-            [[
-                'text'          => $this->i18n($c['ss'] ? 'on' : 'off') . ' 8388 Shadowsocks',
-                'callback_data' => "/hidePort ss",
-            ]],
-            [[
-                'text'          => $this->i18n($c['dnstt'] ? 'on' : 'off') . ' 53 dnstt',
-                'callback_data' => "/hidePort dnstt",
             ]],
             [[
                 'text'          => $this->i18n($c['hy'] ? 'on' : 'off') . ' ' . explode(':', $c['hy']['ports'][0])[0] . ' hysteria',
@@ -11887,12 +11134,9 @@ DNS-over-HTTPS with IP:
     public function hidePort($container)
     {
         $ports = [
-            'wg'    => getenv('WGPORT') . ':' . getenv('WGPORT') . '/udp',
             'wg1'   => getenv('WG1PORT') . ':' . getenv('WG1PORT') . '/udp',
             'tg'    => getenv('TGPORT') . ':' . getenv('TGPORT'),
             'ad'    => '853:853',
-            'ss'    => '8388:8388',
-            'dnstt' => '53:53/udp',
         ];
         $f = '/docker/compose';
         $content = file_exists($f) ? file_get_contents($f) : '';
@@ -12003,7 +11247,7 @@ DNS-over-HTTPS with IP:
         $data[] = [
             [
                 'text'          => $this->i18n('back'),
-                'callback_data' => "/menu update",
+                'callback_data' => "/menu config",
             ]
         ];
         $this->update($this->input['from'], $this->input['message_id'], 'branches', $data);
@@ -12018,7 +11262,7 @@ DNS-over-HTTPS with IP:
                 file_put_contents('/update/branch', trim(str_replace('origin/', '', $v)));
             }
         }
-        $this->menu('update');
+        $this->menu('config');
     }
 
     public function logs()
@@ -12266,7 +11510,7 @@ DNS-over-HTTPS with IP:
             $updated = true;
         }
         if (!$updated) {
-            $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
+        $c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0] = $domain;
             $c['inbounds'][0]['streamSettings']['realitySettings']['dest'] = $dest;
         }
         $p['reality']['domain'] = $domain;
@@ -12426,13 +11670,13 @@ DNS-over-HTTPS with IP:
                     ],
                     "sniffing" => $sniffing,
                     "streamSettings" => [
-                        "network"         => "tcp",
-                        "realitySettings" => [
+                    "network"         => "tcp",
+                    "realitySettings" => [
                             "dest"         => $p['reality']['destination'],
-                            "maxClientVer" => "",
-                            "maxTimeDiff"  => 0,
-                            "minClientVer" => "",
-                            "privateKey"   => $p['reality']['privateKey'],
+                        "maxClientVer" => "",
+                        "maxTimeDiff"  => 0,
+                        "minClientVer" => "",
+                        "privateKey"   => $p['reality']['privateKey'],
                             "serverNames"  => [$p['reality']['domain']],
                             "shortIds"     => [$p['reality']['shortId']],
                             "show"         => false,
@@ -12478,7 +11722,7 @@ DNS-over-HTTPS with IP:
                 break;
         }
 
-        $this->setUpstreamDomain(in_array($transport, ['Reality', 'Both'], true) ? ($p['reality']['domain'] ?: 't') : 't');
+        $this->setUpstreamDomain($this->getUpstreamRealityDomain($p, $x));
         $this->setUpstreamRealityPort($transport === 'Both' ? 33443 : 443);
         $this->setPacConf($p);
         $this->restartXray($x);
@@ -12545,10 +11789,13 @@ DNS-over-HTTPS with IP:
 
     public function getInstanceWG($k = false)
     {
+        $useWg1 = ($this->wg ?? null) !== null
+            ? (bool) $this->wg
+            : (bool) ($this->getPacConf()['wg_instance'] ?? 1);
         if (!empty($k)) {
-            return ($this->wg ?? $this->getPacConf()['wg_instance']) ? 'wg1_' : '';
+            return $useWg1 ? 'wg1_' : '';
         }
-        return ($this->wg ?? $this->getPacConf()['wg_instance']) ? 'wg1' : 'wg';
+        return $useWg1 ? 'wg1' : 'wg';
     }
 
     public function readConfig()
@@ -12640,7 +11887,9 @@ DNS-over-HTTPS with IP:
                 $data['interface']['DNS'] = $pac[$this->getInstanceWG(1) . 'dns'] ?: $this->dns;
             }
             if (empty($data['interface']['MTU'])) {
-                $data['interface']['MTU'] = $pac[$this->getInstanceWG(1) . 'mtu'] ?: $this->mtu;
+                $data['interface']['MTU'] = $this->isAwgClientConfig($data)
+                    ? $this->getAwgClientMtu()
+                    : ($pac[$this->getInstanceWG(1) . 'mtu'] ?: $this->mtu);
             }
         }
         foreach ($data['interface'] as $k => $v) {
@@ -12654,7 +11903,7 @@ DNS-over-HTTPS with IP:
                     if (!empty($data['interface']['## endpoint_custom'])) {
                         $peer['Endpoint'] = $data['interface']['## endpoint_custom'];
                     } else {
-                        $peer['Endpoint'] = ($pac[$this->getInstanceWG(1) . 'endpoint'] ? $this->ip : $this->getDomain()) . ":" . getenv($this->getInstanceWG(1) ? 'WG1PORT' : 'WGPORT');
+                    $peer['Endpoint'] = ($pac[$this->getInstanceWG(1) . 'endpoint'] ? $this->ip : $this->getDomain()) . ":" . getenv($this->getInstanceWG(1) ? 'WG1PORT' : 'WGPORT');
                     }
                 }
                 foreach ($peer as $k => $v) {
@@ -12679,18 +11928,22 @@ DNS-over-HTTPS with IP:
     {
         $c = $this->getPacConf();
         if (empty($c[$this->getInstanceWG(1) . 'amnezia_keys'])) {
-            // S1 and S2: 0?64 bytes; constraint: S1 + 56 ? S2
             $s1 = random_int(15, 64);
             do {
                 $s2 = random_int(15, 64);
             } while ($s1 + 56 === $s2);
+            do {
+                $s3 = random_int(0, 64);
+                $s4 = random_int(0, 32);
+            } while ($s3 + 56 === $s4);
 
-            // H1?H4: distinct 32-bit values (must not overlap)
-            $h = [];
-            while (count($h) < 4) {
-                $v = random_int(1, 4_294_967_295);
-                if (!in_array($v, $h)) {
-                    $h[] = $v;
+            $hRanges = [];
+            while (count($hRanges) < 4) {
+                $min = random_int(1, 1000);
+                $max = random_int($min + 1, 4294967295);
+                $range = "$min-$max";
+                if (!in_array($range, $hRanges, true)) {
+                    $hRanges[] = $range;
                 }
             }
 
@@ -12700,12 +11953,12 @@ DNS-over-HTTPS with IP:
                 'Jmax' => 1000,
                 'S1'   => $s1,
                 'S2'   => $s2,
-                'S3'   => random_int(0, 64),
-                'S4'   => random_int(0, 32),
-                'H1'   => $h[0],
-                'H2'   => $h[1],
-                'H3'   => $h[2],
-                'H4'   => $h[3],
+                'S3'   => $s3,
+                'S4'   => $s4,
+                'H1'   => $hRanges[0],
+                'H2'   => $hRanges[1],
+                'H3'   => $hRanges[2],
+                'H4'   => $hRanges[3],
                 'I1'   => '<b 0xc000000001><r 100>',
             ];
             $this->setPacConf($c);
@@ -12716,26 +11969,14 @@ DNS-over-HTTPS with IP:
     public function createPeer($ips_user = false, $name = false)
     {
         $conf      = $this->readConfig();
-        $ipnet     = explode('/', $conf['interface']['Address']);
-        $server_ip = ip2long($ipnet[0]);
-        $ips       = [$server_ip];
-        $bitmask   = $ipnet[1];
-        if (!empty($conf['peers'])) {
-            foreach ($conf['peers'] as $k => $v) {
-                $ips[] = ip2long(explode('/', $v['AllowedIPs'] ?: $v['# AllowedIPs'])[0]);
-            }
+        $clients   = $this->readClients();
+        $client_ip = $this->allocateWgClientIp($conf, $clients);
+        if ($client_ip === null) {
+            return;
         }
-        $ip_count = (1 << (32 - $bitmask)) - count($ips) - 1;
-        for ($i = 1; $i < $ip_count; $i++) {
-            $ip = $i + $server_ip;
-            if (!in_array($ip, $ips)) {
-                $client_ip = long2ip($ip);
-                break;
-            }
-        }
-        $public_server_key = trim($this->ssh("echo {$conf['interface']['PrivateKey']} | {$this->getWGType()} pubkey", $this->getInstanceWG()));
+        $public_server_key = trim($this->ssh("printf '%s' {$this->wgShellQuote($conf['interface']['PrivateKey'])} | {$this->getWGType()} pubkey", $this->getInstanceWG()));
         $private_peer_key  = trim($this->ssh("{$this->getWGType()} genkey", $this->getInstanceWG()));
-        $public_peer_key   = trim($this->ssh("echo $private_peer_key | {$this->getWGType()} pubkey", $this->getInstanceWG()));
+        $public_peer_key   = $this->wgPublicKeyFromPrivate($private_peer_key);
 
         $name = ($name ? "$name" : '') . time();
 
@@ -12753,7 +11994,10 @@ DNS-over-HTTPS with IP:
                     'PrivateKey' => $private_peer_key,
                     'Address'    => "$client_ip/32",
                 ],
-                $this->getPacConf()[$this->getInstanceWG(1) . 'amnezia'] ? $this->amneziaKeys() : []
+                $this->getPacConf()[$this->getInstanceWG(1) . 'amnezia'] ? array_merge(
+                    ['MTU' => (string) $this->getAwgClientMtu()],
+                    $this->amneziaKeys()
+                ) : []
             ),
             'peers' => [
                     array_merge(
@@ -12820,16 +12064,33 @@ DNS-over-HTTPS with IP:
         return ($revert ? !$wg : $wg) ? 'awg' : 'wg';
     }
 
+    protected function getWgConfigPath(): string
+    {
+        return $this->getInstanceWG(1) ? '/config/wg1.conf' : '/config/wg0.conf';
+    }
+
     public function restartWG($conf_str, $switch = false)
     {
-        $this->ssh("echo '$conf_str' > /etc/wireguard/wg0.conf", $this->getInstanceWG());
-        if (!empty($switch)) {
-            $this->ssh("{$this->getWGType(1)}-quick down wg0", $this->getInstanceWG());
-            $this->ssh("{$this->getWGType()}-quick up wg0", $this->getInstanceWG());
-        } else {
-            $this->ssh("{$this->getWGType()} syncconf wg0 <({$this->getWGType()}-quick strip wg0)", $this->getInstanceWG());
+        try {
+            $path = $this->getWgConfigPath();
+            if (file_put_contents($path, $conf_str) === false) {
+                throw new Exception("failed to write $path");
+            }
+            $wgType = $this->getWGType();
+            if (!empty($switch)) {
+                $this->ssh("{$this->getWGType(1)}-quick down wg0", $this->getInstanceWG(), true, '/dev/null', true);
+                $this->ssh("{$wgType}-quick up wg0", $this->getInstanceWG(), true, '/dev/null', true);
+            } else {
+                $this->ssh("$wgType-quick strip wg0 | $wgType syncconf wg0 /dev/stdin", $this->getInstanceWG(), true, '/dev/null', true);
+            }
+            return true;
+        } catch (Exception | Error $e) {
+            error_log('restartWG failed: ' . $e->getMessage());
+            if (!empty($GLOBALS['debug'])) {
+                $this->send($this->input['chat'], 'restartWG failed: ' . $e->getMessage(), $this->input['message_id']);
+            }
+            return false;
         }
-        return true;
     }
 
     public function autoupdate()
@@ -12845,7 +12106,7 @@ DNS-over-HTTPS with IP:
         $this->send($this->input['chat'], "disconnect: \n" . var_export($args, true) . "\n", $this->input['message_id']);
     }
 
-    public function ssh($cmd, $service = 'wg', $wait = true, $log = '/dev/null')
+    public function ssh($cmd, $service = 'wg', $wait = true, $log = '/dev/null', $rethrow = false)
     {
         try {
             $hosts = [$service];
@@ -12877,9 +12138,26 @@ DNS-over-HTTPS with IP:
             }
 
 
-            $s = ssh2_exec($c, $cmd);
+            $s = @ssh2_exec($c, $cmd);
             if (empty($s)) {
-                throw new Exception("exec fail: \n$cmd\n" . var_export($s, true));
+                ssh2_disconnect($c);
+                $c = null;
+                foreach ($hosts as $host) {
+                    $c = @ssh2_connect($host, 22);
+                    if (!empty($c)) {
+                        $service = $host;
+                        break;
+                    }
+                }
+                if (empty($c) || empty(ssh2_auth_pubkey_file($c, 'root', '/ssh/key.pub', '/ssh/key'))) {
+                    $cmdLabel = strlen($cmd) > 240 ? substr($cmd, 0, 240) . '... [truncated]' : $cmd;
+                    throw new Exception("exec fail: \n$cmdLabel\n" . var_export($s, true));
+                }
+                $s = @ssh2_exec($c, $cmd);
+                if (empty($s)) {
+                    $cmdLabel = strlen($cmd) > 240 ? substr($cmd, 0, 240) . '... [truncated]' : $cmd;
+                    throw new Exception("exec fail after retry: \n$cmdLabel\n" . var_export($s, true));
+                }
             }
 
             $data = "";
@@ -12901,8 +12179,11 @@ DNS-over-HTTPS with IP:
             if (!empty($GLOBALS['debug'])) {
                 $this->send($this->input['chat'], $e->getMessage(), $this->input['message_id']);
             }
+            if ($rethrow) {
+                throw $e;
+            }
         }
-        return $data;
+        return $data ?? '';
     }
 
     public function request($method, $data, $json_header = 0)

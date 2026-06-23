@@ -12,7 +12,10 @@
 /config/wg0.conf
 /config/wg1.conf
 /config/hwid.json
+/config/hwid_b.json
 /config/xray.json
+/config/xray_a.json
+/config/xray_b.json
 /config/xray_backup.json
 /config/xray.stats
 /config/clients.json
@@ -21,6 +24,7 @@
 /config/mtprotodomain
 /config/pac.json
 /config/AdGuardHome.yaml
+/config/hysteria.yaml
 /config/ocserv.passwd
 /config/deny
 /config/sslocal.json

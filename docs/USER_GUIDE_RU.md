@@ -30,6 +30,19 @@ wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/in
 2. Первый, кто откроет бот, станет **администратором**.
 3. В **настройки → config** можно добавить других админов.
 
+### Обновление на v3-trimx
+
+После обновления кода с v2:
+
+1. Экспорт через **config → export**
+2. `git pull` (для compose: `UPGRADE_SCOPE=all` через `init.sh`)
+3. `docker compose build wg1 php --no-cache`
+4. `docker compose up -d --remove-orphans`
+5. `bash scripts/migrate_awg2.sh`
+6. `docker compose restart php xr wg1`
+
+AWG 2.0: ручные клиенты перевыпустить QR; runtime-профили пересоздаются при обновлении подписки с HWID.
+
 ### Перезапуск сервера
 
 ```shell
@@ -50,18 +63,13 @@ wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/in
 
 | Кнопка | Назначение |
 |--------|------------|
-| **Wireguard / Amnezia** (первая) | Классический VPN: отдельные клиенты WG/AWG |
-| **Wireguard / Amnezia** (вторая) | Второй инстанс WG (WG1). Сюда же попадают **AWG-профили устройств VLESS**, если включён runtime AWG |
-| **Vless** | Основной протокол: подписки, HWID, лимиты |
-| **Naive** | NaiveProxy |
-| **OpenConnect** | Cisco AnyConnect-совместимый VPN |
+| **Amnezia / WireGuard** | AWG/WG1: ручные клиенты и runtime-профили устройств VLESS |
+| **Vless** | Основной протокол: подписки Mihomo/Clash, HWID, лимиты |
 | **MTProto** | Прокси для Telegram |
 | **AdGuard** | DNS-фильтрация на сервере |
 | **Warp** | Cloudflare WARP |
-| **Shadowsocks** | Shadowsocks-сервер |
 | **PAC** | PAC-файлы и списки маршрутизации |
 | **Hysteria** | Протокол Hysteria |
-| **DNSTT** | DNS-туннель (если включён) |
 | **настройки (config)** | Домен, SSL, бэкап, админы, перезапуск |
 
 В шапке меню — версия, домены, SSL и статус каждого сервиса (вкл/выкл, порты).
@@ -70,7 +78,7 @@ wget -O- https://raw.githubusercontent.com/TrimXx/vpnbot_extra/master/scripts/in
 
 ## 3. VLESS — основной сценарий
 
-VLESS — главный способ выдачи доступа: клиент получает **ссылку подписки**, добавляет её в приложение (v2rayNG, Hiddify, Mihomo/Clash и т.д.).
+VLESS — главный способ выдачи доступа: клиент получает **ссылку подписки**, добавляет её в приложение Mihomo/Clash (FlClash, Clash Verge и т.д.).
 
 ### 3.1. Создать пользователя
 
@@ -98,12 +106,11 @@ VLESS — главный способ выдачи доступа: клиент 
 
 **Способ 2 — прямой импорт**
 
-В карточке: **imports & files** — ссылки для v2rayNG, sing-box, Hiddify, Karing, Mihomo/Clash.  
-Если включён runtime AWG — отдельная ссылка **import://amnezia wg device**.
+В карточке: **imports & files** — ссылка Mihomo/Clash и runtime AWG (`import://amnezia wg device` при HWID).
 
 **Способ 3 — QR**
 
-**templates & qr** → QR-код для выбранного шаблона.
+**templates & qr** → QR для Mihomo/Clash-шаблона.
 
 ### 3.4. Включить / выключить пользователя
 
@@ -450,6 +457,8 @@ HWID — идентификатор устройства, который при�
 
 ## 15. Справочник всех кнопок бота
 
+> **v3-trimx:** NaiveProxy, OpenConnect, Shadowsocks, DNSTT, mirror, wg0 и подписки v2ray/sing-box удалены из UI. Ниже могут остаться устаревшие строки — ориентируйтесь на разделы 2–9.
+
 Полный перечень inline-кнопок: что нажимаете → что происходит.  
 Путь меню: **Меню → … → кнопка**.
 
@@ -461,8 +470,6 @@ HWID — идентификатор устройства, который при�
 |---------|----------|
 | `/menu`, `/start` | Главное меню |
 | `/id` | Показать ваш Telegram ID (нужен для добавления админа) |
-| `/mirror` | Меню зеркала (проброс портов на другой сервер) |
-| `/dnstt` | Меню DNSTT |
 | `/debug` | Вкл/выкл режим отладки |
 
 ---

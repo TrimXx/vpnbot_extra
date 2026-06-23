@@ -40,7 +40,6 @@ foreach ($connectedDevices as $deviceHwid => $deviceInfo) {
 $appsConfigUrl = (string) ($pacConfig['subscription_apps_config_url'] ?? 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json');
 $trafficLimitBytes = isset($trafficLimitBytes) ? (int) $trafficLimitBytes : 0;
 $trafficLimitHuman = $trafficLimitHuman ?? '0';
-$inboundServerStats = isset($inboundServerStats) && is_array($inboundServerStats) ? $inboundServerStats : [];
 // Переменные для страницы подписки vpnbot
 /*
     $suburl - ссылка на страницу подписки пользователя
@@ -97,22 +96,18 @@ function generate_panelData(
     string $windows,
     string $xray,
     string $wgconf,
-    ?int $expire = null, // Может быть null или timestamp
+    ?int $expire = null,
     array $connectedDevices = [],
     int $connectedDevicesMax = 0,
     bool $hasDeviceDeletePassword = false,
     string $trafficLimitHuman = '0',
-    string $trafficLimitBytesStr = '0',
-    array $inboundServerStats = []
+    string $trafficLimitBytesStr = '0'
 ): string {
     $happ_cryptolink = 'happ://add/' . $subscription_url;
 
     $links = [
         (string)$vless,
-        $clash   . '#mihomo conf',
-        $singbox . '#sing-box conf',
-        $windows . '#sing-box windows script',
-        $xray    . '#xray conf',
+        $clash . '#mihomo conf',
     ];
     if (!empty($wgconf)) {
         $links[] = $wgconf . '#amnezia wg conf';
@@ -145,7 +140,6 @@ function generate_panelData(
                 'connectedDevices' => $connectedDevices,
                 'connectedDevicesMax' => $connectedDevicesMax,
                 'hasDeviceDeletePassword' => $hasDeviceDeletePassword,
-                'inboundServerStats' => $inboundServerStats,
             ],
             'links' => $links,
             'ssConfLinks' => new stdClass(),
@@ -211,7 +205,7 @@ function send_profile_headers(string $email, string $subscription_url, string $s
     header('flclashx-view: type:list; sort:none; layout:standard; icon:standard; card:min');
 }
 
-$panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $wgconf ?? '', $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword), $trafficLimitHuman, (string) $trafficLimitBytes, $inboundServerStats);
+$panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $wgconf ?? '', $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword), $trafficLimitHuman, (string) $trafficLimitBytes);
 $panelDataB64 = $panelData; // Already base64 encoded
 
 switch (true) {
@@ -232,18 +226,6 @@ switch (true) {
         send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
         header('Content-type: text/yaml');
         echo $configs['clash'];
-        break;
-
-    case preg_match('~(?:SFA|SFI|SFM|SFT|[Rr]abbit[Hh]ole)/\d+\.\d+\.\d+(?:-beta\.\d+)?~', $ua):
-        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
-        header('Content-type: application/json');
-        echo $configs['singbox'];
-        break;
-
-    case preg_match('~^(?:[Ss]treisand|ktor-client|V2Box|io\.github\.saeeddev94\.xray/)~', $ua):
-        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
-        header('Content-type: application/json');
-        echo $configs['xray'];
         break;
 
     case isBrowser($ua):
@@ -380,25 +362,6 @@ switch (true) {
     .connected-device-hwid {
         white-space: nowrap;
         word-break: normal;
-    }
-}
-
-.inbound-stats-card .inbound-stat-row {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border);
-    font-size: 14px;
-}
-.inbound-stats-card .inbound-stat-row:last-child {
-    border-bottom: none;
-}
-@media (min-width: 640px) {
-    .inbound-stats-card .inbound-stat-row {
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: center;
     }
 }
 
@@ -1824,12 +1787,6 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                 vi: 'Tự động', es: 'Auto', ja: '自動', be: 'Аўта', pt: 'Auto',
                 uk: 'Авто', pl: 'Auto', id: 'Otomatis', tk: 'Awto', th: 'อัตโนมัติ'
             },
-            inboundServerTitle: {
-                en: 'Inbound traffic (whole server)', ru: 'Трафик по входам (весь сервер)',
-            },
-            inboundServerHint: {
-                en: 'Counters include all users on this inbound.', ru: 'Учитываются все клиенты на этом входе.',
-            }
         };
 
         // Language emojis for selector
@@ -2040,7 +1997,6 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                 html += renderSubscriptionInfo(infoBlockType);
             }
             html += renderConnectedDevicesSection();
-            html += renderInboundServerStatsSection();
 
             // Render installation section
             html += renderInstallationSection();
@@ -2135,30 +2091,6 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                         </div>
                     </div>
                     <div class="card-content" style="display: none;">
-                        ${rows}
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderInboundServerStatsSection() {
-            const stats = panelData?.response?.user?.inboundServerStats;
-            if (!Array.isArray(stats) || stats.length === 0) {
-                return '';
-            }
-            const title = getHardcodedText('inboundServerTitle');
-            const hint = getHardcodedText('inboundServerHint');
-            const rows = stats.map(s => {
-                const tag = escapeHtml(s.tag || '');
-                const d = formatBytes(Number(s.download) || 0);
-                const u = formatBytes(Number(s.upload) || 0);
-                return `<div class="inbound-stat-row"><span><strong>${tag}</strong></span><span>⬇ ${d} · ⬆ ${u}</span></div>`;
-            }).join('');
-            return `
-                <div class="card user-info inbound-stats-card" style="margin-bottom: 20px;">
-                    <div class="card-header"><span>${title}</span></div>
-                    <div class="card-content">
-                        <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">${hint}</p>
                         ${rows}
                     </div>
                 </div>

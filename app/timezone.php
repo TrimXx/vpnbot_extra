@@ -2,11 +2,12 @@
 
 date_default_timezone_set(getenv('TZ'));
 
-// Unified PHP logging for all entrypoints that include timezone.php.
+// Production: only fatals in log. php.ini also has error_reporting = E_ERROR.
+// E_WARNING (incl. Undefined array key in PHP 8+) floods /logs/php_error on large bot.php.
 ini_set('log_errors', '1');
 ini_set('display_errors', '0');
 ini_set('error_log', '/logs/php_error');
-error_reporting(E_ALL & ~E_DEPRECATED & ~E_STRICT);
+error_reporting(E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR);
 
 set_error_handler(static function ($severity, $message, $file, $line) {
     if (!(error_reporting() & $severity)) {

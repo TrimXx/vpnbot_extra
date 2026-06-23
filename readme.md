@@ -1,6 +1,6 @@
-# VPNBot Extra
+# VPNBot Extra v3-trimx
 
-Тест работоспособности апгрейда: `2.28.1 -> 2.29`.
+Telegram-бот для управления VPN-сервером: VLESS + Mihomo/Clash подписки, AWG (WG1), AdGuard, MTProto, Hysteria.
 
 ## Русский
 
@@ -10,12 +10,11 @@ Telegram-бот для управления VPN-сервером из Telegram.
 
 ### Что поддерживается
 
-- VLESS (`Reality` / `Websocket` / `Both`)
-- NaiveProxy
-- OpenConnect
-- WireGuard / AmneziaWG
+- VLESS (`Reality` / `Websocket` / `Both`) + Mihomo/Clash подписки
+- WireGuard / AmneziaWG (только WG1)
 - AdGuardHome
 - MTProto
+- Hysteria
 - PAC / Rule-set
 - Автоматические SSL-сертификаты
 
@@ -82,12 +81,20 @@ crontab -e
   - добавление DoH URL по алиасам в `dns.nameserver` для Clash-подписки.
 - Кнопка `change reality server ip/domain` теперь меняет только клиентский Reality `server` (bridge), не трогая `xray reality dest`.
 - Обновлен импорт бэкапа: `pac` восстанавливается merge-способом для совместимости старых/новых бэкапов и новых полей.
-- Обновлён скрипт `/mirror` (socat TCP/UDP, systemd сервисы, install/status/restart/logs/uninstall).
+### Деплой v3-trimx (runbook)
+
+1. Экспорт настроек через бот (**config → export**)
+2. `git pull` (или `UPGRADE_SCOPE=all` через `init.sh` для compose)
+3. `docker compose build wg1 php --no-cache`
+4. `docker compose up -d --remove-orphans`
+5. `bash scripts/migrate_awg2.sh` (сброс `wg1_amnezia_keys` в pac)
+6. `docker compose restart php xr wg1`
+7. Smoke: главное меню, подписка `?t=cl`, HWID + AWG Device в Mihomo, ручной AWG QR
 
 ### Заметка по бэкапу/восстановлению
 
-- Экспорт включает: `pac`, `xray`, `xraystats`, `hwid`, WG/WG1, AdGuard, сертификаты, MTProto, Hysteria, OC, Shadowsocks.
-- Импорт теперь сохраняет новые ключи `pac` при восстановлении старых бэкапов (через merge с текущими дефолтами).
+- Экспорт включает: `pac`, `xray`, `xraystats`, `hwid`, WG1, AdGuard, сертификаты, MTProto, Hysteria.
+- Импорт сохраняет новые ключи `pac` при восстановлении старых бэкапов (merge с текущими дефолтами).
 
 ### AI notice
 
@@ -101,12 +108,11 @@ Telegram bot for managing a VPN server directly from Telegram.
 
 ### Supported stack
 
-- VLESS (`Reality` / `Websocket` / `Both`)
-- NaiveProxy
-- OpenConnect
-- WireGuard / AmneziaWG
+- VLESS (`Reality` / `Websocket` / `Both`) + Mihomo/Clash subscriptions
+- WireGuard / AmneziaWG (WG1 only)
 - AdGuardHome
 - MTProto
+- Hysteria
 - PAC / Rule-set
 - Automatic SSL certificates
 

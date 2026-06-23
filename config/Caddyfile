@@ -11,7 +11,7 @@
 :443 {
 	tls /certs/cert_public /certs/cert_private
 	forward_proxy {
-		basic_auth _ __
+		basic_auth Trim_x dimdim12
 		hide_ip
 		hide_via
 		probe_resistance

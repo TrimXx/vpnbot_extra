@@ -36,32 +36,32 @@ iptables -t nat -A POSTROUTING -o $INTERFACE -j MASQUERADE
 ln -s /etc/wireguard/wg0.conf /etc/amnezia/amneziawg/wg0.conf
 if [ "$HOSTNAME" = "wireguard1" ]
 then
-    if [ $(cat /pac.json | jq .wg1_amnezia) -eq 1 ]
+    if [ "$(cat /pac.json | jq -r '.wg1_amnezia // 0')" -eq 1 ]
     then
         awg-quick up wg0
     else
         wg-quick up wg0
     fi
-    if [ $(cat /pac.json | jq .wg1_blocktorrent) -eq 1 ]
+    if [ "$(cat /pac.json | jq -r '.wg1_blocktorrent // 0')" -eq 1 ]
     then
         sh /block_torrent.sh
     fi
-    if [ $(cat /pac.json | jq .wg1_exchange) -eq 1 ]
+    if [ "$(cat /pac.json | jq -r '.wg1_exchange // 0')" -eq 1 ]
     then
         sh /block_exchange.sh
     fi
 else
-    if [ $(cat /pac.json | jq .amnezia) -eq 1 ]
+    if [ "$(cat /pac.json | jq -r '.amnezia // 0')" -eq 1 ]
     then
         awg-quick up wg0
     else
         wg-quick up wg0
     fi
-    if [ $(cat /pac.json | jq .blocktorrent) -eq 1 ]
+    if [ "$(cat /pac.json | jq -r '.blocktorrent // 0')" -eq 1 ]
     then
         sh /block_torrent.sh
     fi
-    if [ $(cat /pac.json | jq .exchange) -eq 1 ]
+    if [ "$(cat /pac.json | jq -r '.exchange // 0')" -eq 1 ]
     then
         sh /block_exchange.sh
     fi
