@@ -121,19 +121,7 @@ if [ -d "$CONFIG" ]; then
     done
 fi
 
-# v3: shadowsocks container removed — drop /v2ray proxy to ss:8388 from nginx configs.
-patch_nginx_remove_ss() {
-    file="$1"
-    if [ ! -f "$file" ] || ! grep -q 'ss:8388' "$file"; then
-        return 0
-    fi
-    tmp="${file}.patch"
-    awk '
-        /location \/v2ray/ { skip=1 }
-        skip && /^        }$/ { skip=0; next }
-        !skip { print }
-    ' "$file" > "$tmp" && mv "$tmp" "$file"
-    echo "[bootstrap] removed dead ss /v2ray upstream from $file"
-}
-patch_nginx_remove_ss "$CONFIG/nginx.conf"
-patch_nginx_remove_ss "$CONFIG/nginx_default.conf"
+# v3: shadowsocks removed — repair nginx configs (safe /v2ray removal, fix truncated files).
+if [ -x "$ROOT/scripts/repair_nginx.sh" ]; then
+    bash "$ROOT/scripts/repair_nginx.sh"
+fi
