@@ -1,4 +1,4 @@
-﻿{
+{
     "mixed-port": 2080,
     "allow-lan": true,
     "tcp-concurrent": true,

@@ -29,7 +29,21 @@ copy_if_missing() {
     if [ ! -f "$dst" ]; then
         mkdir -p "$(dirname "$dst")"
         cp "$src" "$dst"
+        strip_utf8_bom "$dst"
         echo "[bootstrap] created $dst"
+    fi
+}
+
+strip_utf8_bom() {
+    file="$1"
+    if [ ! -f "$file" ]; then
+        return 0
+    fi
+    bom=$(head -c 3 "$file" | od -An -tx1 2>/dev/null | tr -d ' \n')
+    if [ "$bom" = "efbbbf" ]; then
+        tail -c +4 "$file" > "${file}.nobom"
+        mv "${file}.nobom" "$file"
+        echo "[bootstrap] stripped UTF-8 BOM from $file"
     fi
 }
 
@@ -98,4 +112,11 @@ fi
 if [ ! -f "$CONFIG/override.conf" ]; then
     : > "$CONFIG/override.conf"
     echo "[bootstrap] created $CONFIG/override.conf"
+fi
+
+# Fix BOM in existing config files (e.g. after Windows-encoded templates).
+if [ -d "$CONFIG" ]; then
+    find "$CONFIG" -type f | while read -r f; do
+        strip_utf8_bom "$f"
+    done
 fi

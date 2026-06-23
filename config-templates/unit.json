@@ -1,4 +1,4 @@
-﻿{
+{
 	"listeners": {
 		"*:80": {
 			"pass": "applications/php"

@@ -1,4 +1,4 @@
-﻿{
+{
 	order forward_proxy before file_server
 	servers {
 		listener_wrappers {

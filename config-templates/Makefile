@@ -1,4 +1,4 @@
-﻿OBJ	=	objs
+OBJ	=	objs
 DEP	=	dep
 EXE = ${OBJ}/bin
 

@@ -1,4 +1,4 @@
-﻿listen: :443
+listen: :443
 proxy_protocol: true
 
 tls:

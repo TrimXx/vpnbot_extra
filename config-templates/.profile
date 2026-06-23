@@ -1,4 +1,4 @@
-﻿export LANG=ru_RU.utf8
+export LANG=ru_RU.utf8
 
 alias ls='ls $LS_OPTIONS'
 alias ll='ls -lah'

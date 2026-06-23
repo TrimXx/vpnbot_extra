@@ -1,4 +1,4 @@
-﻿http:
+http:
   address: 0.0.0.0:80
 users:
   - name: admin
