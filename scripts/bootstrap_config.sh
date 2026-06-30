@@ -121,7 +121,23 @@ if [ -d "$CONFIG" ]; then
     done
 fi
 
-# v3: shadowsocks removed — repair nginx configs (safe /v2ray removal, fix truncated files).
-if [ -x "$ROOT/scripts/repair_nginx.sh" ]; then
-    bash "$ROOT/scripts/repair_nginx.sh"
+# v3: keep nginx template current; reset live config if broken or still references removed ss container
+if [ -f "$TEMPLATES/nginx_default.conf" ]; then
+    cp "$TEMPLATES/nginx_default.conf" "$CONFIG/nginx_default.conf"
+    strip_utf8_bom "$CONFIG/nginx_default.conf"
+fi
+if [ -f "$TEMPLATES/nginx.conf" ]; then
+    reset=0
+    if [ ! -f "$CONFIG/nginx.conf" ]; then
+        reset=1
+    elif grep -q 'ss:8388' "$CONFIG/nginx.conf" 2>/dev/null; then
+        reset=1
+    elif ! tail -1 "$CONFIG/nginx.conf" | grep -q '^}$'; then
+        reset=1
+    fi
+    if [ "$reset" = 1 ]; then
+        cp "$TEMPLATES/nginx.conf" "$CONFIG/nginx.conf"
+        strip_utf8_bom "$CONFIG/nginx.conf"
+        echo "[bootstrap] reset nginx.conf from template (service applies domains on start)"
+    fi
 fi
