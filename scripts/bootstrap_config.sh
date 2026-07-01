@@ -132,6 +132,8 @@ if [ -f "$TEMPLATES/nginx.conf" ]; then
         reset=1
     elif grep -q 'ss:8388' "$CONFIG/nginx.conf" 2>/dev/null; then
         reset=1
+    elif ! grep -q 'location /xh' "$CONFIG/nginx.conf" 2>/dev/null; then
+        reset=1
     elif ! tail -1 "$CONFIG/nginx.conf" | grep -q '^}$'; then
         reset=1
     fi

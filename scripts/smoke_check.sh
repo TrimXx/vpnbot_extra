@@ -17,6 +17,18 @@ pass() {
 }
 
 # --- nginx template sanity ---
+xhttp_enabled=1
+if [ -f "$CONFIG/pac.json" ] && command -v python3 >/dev/null 2>&1; then
+    xhttp_enabled=$(python3 - <<'PY' "$CONFIG/pac.json" 2>/dev/null || echo 1
+import json, sys
+with open(sys.argv[1]) as f:
+    p = json.load(f)
+g = (p.get("transport_registry") or {}).get("global") or {}
+print(1 if g.get("xhttp") else 0)
+PY
+)
+fi
+
 for f in nginx_default.conf nginx.conf; do
     if [ ! -f "$CONFIG/$f" ]; then
         fail "missing $CONFIG/$f"
@@ -27,10 +39,17 @@ for f in nginx_default.conf nginx.conf; do
     else
         pass "$f has /ws location"
     fi
-    if ! grep -q 'location /xh' "$CONFIG/$f"; then
-        fail "$f: no /xh location"
-    else
-        pass "$f has /xh location"
+    require_xh=1
+    if [ "$f" = "nginx.conf" ] && [ "$xhttp_enabled" != "1" ]; then
+        require_xh=0
+        echo "[smoke] SKIP: $f /xh check (xhttp transport disabled)"
+    fi
+    if [ "$require_xh" = 1 ]; then
+        if ! grep -q 'location /xh' "$CONFIG/$f"; then
+            fail "$f: no /xh location"
+        else
+            pass "$f has /xh location"
+        fi
     fi
 done
 
