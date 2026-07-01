@@ -94,7 +94,7 @@ crontab -e
 
 ### Roadmap (v3.x)
 
-- Модульность `bot.php`: вынести HWID в отдельный trait
+- Модульность `bot.php`: HWID вынесен в `HwidTrait` (~1800 строк)
 - Полная зачистка legacy SS / OC / DNSTT / Naive в коде и compose
 - **Ускорение интерфейса бота** — кэш pac/xray/stats на запрос, docker-compose и SSL-снимок в меню
 - Подпись/ротация subscription URL поверх hashbot
@@ -203,7 +203,7 @@ Add:
 
 ### Roadmap (v3.x)
 
-- Split `bot.php`: extract HWID into a dedicated trait
+- Split `bot.php`: HWID logic moved to `HwidTrait` (~1800 lines)
 - Remove remaining legacy SS / OC / DNSTT / Naive code and compose services
 - **Bot UI performance** — per-request pac/xray/stats cache, docker-compose and SSL snapshot for menus
 - Subscription URL signing/rotation on top of hashbot

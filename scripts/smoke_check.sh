@@ -95,7 +95,7 @@ else
 fi
 
 # --- php traits ---
-for trait in SubscriptionSecurityTrait.php TransportRegistryTrait.php PacUrlTrait.php TransportRuntimeTrait.php BotCacheTrait.php; do
+for trait in SubscriptionSecurityTrait.php TransportRegistryTrait.php PacUrlTrait.php TransportRuntimeTrait.php BotCacheTrait.php HwidTrait.php; do
     if [ -f "$ROOT/app/traits/$trait" ]; then
         pass "trait $trait exists"
     else
