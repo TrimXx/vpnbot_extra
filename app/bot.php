@@ -1,7 +1,13 @@
 <?php
 
+require_once __DIR__ . '/traits/SubscriptionSecurityTrait.php';
+require_once __DIR__ . '/traits/TransportRegistryTrait.php';
+
 class Bot
 {
+    use SubscriptionSecurityTrait;
+    use TransportRegistryTrait;
+
     public $input;
     public $adguard;
     public $update;
@@ -1249,13 +1255,16 @@ class Bot
     public function restartHysteria()
     {
         $pac = $this->getPacConf();
-        $this->ssh('pkill hysteria', 'hy');
-        $c   = yaml_parse_file('/config/hysteria.yaml');
+        $pac = $this->normalizeTransportRegistry($pac);
+        $global = $this->getTransportRegistryGlobal($pac);
+        $this->ssh('pkill hysteria || true', 'hy');
+        if (empty($global['hysteria']) || empty($pac['hysteria_pass'])) {
+            return;
+        }
+        $c = yaml_parse_file('/config/hysteria.yaml');
         $c['auth']['password'] = $pac['hysteria_pass'];
         yaml_emit_file('/config/hysteria.yaml', $c);
-        if (!empty($pac['hysteria_pass'])) {
-            $this->ssh('hysteria server -c /config/hysteria.yaml', 'hy', false, '/logs/hysteria');
-        }
+        $this->ssh('hysteria server -c /config/hysteria.yaml', 'hy', false, '/logs/hysteria');
     }
 
     public function chocdns($dns)
@@ -1504,8 +1513,9 @@ class Bot
             $this->time_xray_stats = time();
             try {
                 $x  = $this->getXray();
-                $td = $this->queryXrayStatCounter('inbound>>>vless_tls>>>traffic>>>downlink');
-                $tu = $this->queryXrayStatCounter('inbound>>>vless_tls>>>traffic>>>uplink');
+                $sessionTraffic = $this->getXraySessionTrafficTotals();
+                $td = $sessionTraffic['download'];
+                $tu = $sessionTraffic['upload'];
                 $p  = $this->getXrayStats();
                 $p['session'] = [
                     'download' => $td,
@@ -2650,6 +2660,7 @@ class Bot
             'domain' => '',
             'domain_main' => '',
             'domain_aliases' => [],
+            'hwid_runtime_mode_enabled' => 1,
             'hwid_runtime_wg_profile_enabled' => 0,
             'hwid_runtime_wg_endpoint' => '',
             'transport' => 'Websocket',
@@ -2724,67 +2735,246 @@ class Bot
         return file_put_contents($this->pac, json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
-    protected function normalizeTransportRegistry(array $conf): array
+    protected function shouldExcludeParentFromXrayInbounds(array $client): bool
     {
-        $fallback = [
-            'reality' => 0,
-            'ws' => 1,
-            'xhttp' => 0,
-            'hysteria' => !empty($conf['hysteria']) ? 1 : 0,
-            'awg' => !empty($conf['wg1']) ? 1 : 0,
-        ];
-        $legacy = (string) ($conf['transport'] ?? 'Websocket');
-        if ($legacy === 'Reality') {
-            $fallback['reality'] = 1;
-            $fallback['ws'] = 0;
-            $fallback['xhttp'] = 0;
-        } elseif ($legacy === 'xhttp') {
-            $fallback['reality'] = 0;
-            $fallback['ws'] = 0;
-            $fallback['xhttp'] = 1;
-        } elseif ($legacy === 'Both') {
-            $fallback['reality'] = 1;
-            $fallback['ws'] = 1;
-            $fallback['xhttp'] = 0;
-        }
-        $registry = $conf['transport_registry'] ?? [];
-        $global = is_array($registry['global'] ?? null) ? $registry['global'] : [];
-        foreach ($fallback as $k => $v) {
-            $global[$k] = !empty($global[$k]) ? 1 : (int) $v;
-        }
-        $users = is_array($registry['users'] ?? null) ? $registry['users'] : [];
-        $conf['transport_registry'] = [
-            'global' => $global,
-            'users' => $users,
-        ];
-        return $conf;
+        return empty($client['device_parent_id']) && $this->isPermanentHwidRuntime($client);
     }
 
-    protected function getTransportRegistryGlobal(array $pac): array
+    protected function isPermanentHwidRuntime(array $client): bool
     {
-        $pac = $this->normalizeTransportRegistry($pac);
-        return $pac['transport_registry']['global'] ?? [];
+        if (!$this->isHwidRuntimeModeEnabled($client)) {
+            return false;
+        }
+        $pac = $this->getPacConf();
+        if (empty($pac['hwid_limit_enabled']) || !empty($client['hwid_disabled'])) {
+            return false;
+        }
+        $limit = (int) ($client['hwid_limit'] ?? $pac['hwid_device_count'] ?? 0);
+
+        return $limit > 0;
     }
 
-    protected function getClientTransportFlags(array $client, array $pac): array
+    protected function buildEmptyClashSubscription(): string
     {
-        $global = $this->getTransportRegistryGlobal($pac);
-        $subId = $this->getClientSubscriptionId($client);
-        $overrides = [];
-        if ($subId !== '' && is_array($pac['transport_registry']['users'][$subId] ?? null)) {
-            $overrides = $pac['transport_registry']['users'][$subId];
+        return yaml_emit([
+            'proxies' => [],
+            'proxy-groups' => [],
+            'rules' => [],
+        ]);
+    }
+
+    protected function appendClashCompanionTransportProxy(array &$c, int $index, array $client, array $pac, string $domain, string $uid): void
+    {
+        $flags = $this->getClientTransportFlags($client, $pac);
+        if (empty($flags['ws']) || empty($flags['xhttp'])) {
+            return;
         }
-        foreach ($global as $k => $v) {
-            if (array_key_exists($k, $overrides)) {
-                $global[$k] = !empty($overrides[$k]) ? 1 : 0;
+        if (!isset($c['proxies'][$index]) || !is_array($c['proxies'][$index])) {
+            return;
+        }
+        $baseName = (string) ($c['proxies'][$index]['name'] ?? 'proxy');
+        $hash = $this->getHashBot();
+        $existingNetworks = [];
+        foreach ($c['proxies'] as $proxy) {
+            if (!is_array($proxy)) {
+                continue;
+            }
+            $network = (string) ($proxy['network'] ?? '');
+            if ($network !== '') {
+                $existingNetworks[$network] = (string) ($proxy['name'] ?? '');
             }
         }
-        return $global;
+        if (!isset($existingNetworks['ws'])) {
+            $wsProxy = $this->buildClashWsTransportProxy($baseName, $domain, $uid, $hash);
+            $c['proxies'][] = $wsProxy;
+            $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($wsProxy['name'] ?? ''));
+        }
+        if (!isset($existingNetworks['xhttp'])) {
+            $xhttpProxy = $this->buildClashXhttpTransportProxy($baseName, $domain, $uid, $hash);
+            $c['proxies'][] = $xhttpProxy;
+            $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($xhttpProxy['name'] ?? ''));
+        }
     }
 
-    protected function hasEnabledXrayTransport(array $flags): bool
+    protected function patchXrayInboundTransportPaths(array &$xray, ?string $hash = null): bool
     {
-        return !empty($flags['reality']) || !empty($flags['ws']) || !empty($flags['xhttp']);
+        $hash = $hash ?? $this->getHashBot();
+        $expectedWs = $this->getWsTransportPath($hash);
+        $expectedXh = $this->getXhttpTransportPath($hash);
+        $changed = false;
+        foreach (($xray['inbounds'] ?? []) as $idx => $inbound) {
+            if (!is_array($inbound)) {
+                continue;
+            }
+            $network = (string) ($inbound['streamSettings']['network'] ?? '');
+            if ($network === 'ws') {
+                $current = (string) ($inbound['streamSettings']['wsSettings']['path'] ?? '');
+                if ($current !== $expectedWs) {
+                    $xray['inbounds'][$idx]['streamSettings']['wsSettings']['path'] = $expectedWs;
+                    $changed = true;
+                }
+            }
+            if ($network === 'xhttp') {
+                if (!isset($xray['inbounds'][$idx]['streamSettings']['xhttpSettings']) || !is_array($xray['inbounds'][$idx]['streamSettings']['xhttpSettings'])) {
+                    $xray['inbounds'][$idx]['streamSettings']['xhttpSettings'] = ['mode' => 'auto'];
+                    $changed = true;
+                }
+                $current = (string) ($inbound['streamSettings']['xhttpSettings']['path'] ?? '');
+                if ($current !== $expectedXh) {
+                    $xray['inbounds'][$idx]['streamSettings']['xhttpSettings']['path'] = $expectedXh;
+                    $changed = true;
+                }
+            }
+        }
+
+        return $changed;
+    }
+
+    protected function writeAndReloadNginx(string $template): bool
+    {
+        $livePath = '/config/nginx.conf';
+        $previous = is_file($livePath) ? (string) file_get_contents($livePath) : '';
+        file_put_contents($livePath, $template);
+        $output = trim((string) $this->ssh('nginx -t 2>&1', 'ng'));
+        $ok = stripos($output, 'syntax is ok') !== false || stripos($output, 'test is successful') !== false;
+        if (!$ok) {
+            if ($previous !== '') {
+                file_put_contents($livePath, $previous);
+            }
+
+            return false;
+        }
+        $this->ssh('nginx -s reload', 'ng');
+
+        return true;
+    }
+
+    protected function getXraySessionTrafficTotals(): array
+    {
+        $download = 0;
+        $upload = 0;
+        $x = $this->getXray();
+        foreach (($x['inbounds'] ?? []) as $inbound) {
+            if (!is_array($inbound)) {
+                continue;
+            }
+            $tag = (string) ($inbound['tag'] ?? '');
+            if ($tag === '' || $tag === 'api') {
+                continue;
+            }
+            if (($inbound['protocol'] ?? '') !== 'vless') {
+                continue;
+            }
+            $download += (int) $this->queryXrayStatCounter("inbound>>>{$tag}>>>traffic>>>downlink");
+            $upload += (int) $this->queryXrayStatCounter("inbound>>>{$tag}>>>traffic>>>uplink");
+        }
+
+        return [
+            'download' => $download,
+            'upload'   => $upload,
+        ];
+    }
+
+    protected function buildClashWsTransportProxy(string $baseName, string $domain, string $uid, string $hash): array
+    {
+        return [
+            'name' => $baseName . '-ws',
+            'type' => 'vless',
+            'server' => $domain,
+            'port' => 443,
+            'uuid' => $uid,
+            'network' => 'ws',
+            'udp' => true,
+            'tls' => true,
+            'servername' => $domain,
+            'client-fingerprint' => 'chrome',
+            'ws-opts' => [
+                'path' => $this->getWsTransportPath($hash),
+            ],
+        ];
+    }
+
+    protected function buildClashXhttpTransportProxy(string $baseName, string $domain, string $uid, string $hash): array
+    {
+        return [
+            'name' => $baseName . '-xhttp',
+            'type' => 'vless',
+            'server' => $domain,
+            'port' => 443,
+            'uuid' => $uid,
+            'network' => 'xhttp',
+            'udp' => true,
+            'tls' => true,
+            'servername' => $domain,
+            'client-fingerprint' => 'chrome',
+            'xhttp-opts' => [
+                'path' => $this->getXhttpTransportPath($hash),
+                'mode' => 'packet-up',
+            ],
+        ];
+    }
+
+    protected function linkClashTransportProxyToGroups(array &$c, string $baseName, string $proxyName): void
+    {
+        if ($proxyName === '' || empty($c['proxy-groups']) || !is_array($c['proxy-groups'])) {
+            return;
+        }
+        foreach ($c['proxy-groups'] as $gk => $group) {
+            if (empty($group['proxies']) || !is_array($group['proxies'])) {
+                continue;
+            }
+            if ($baseName !== '' && in_array($baseName, $group['proxies'], true) && !in_array($proxyName, $group['proxies'], true)) {
+                $c['proxy-groups'][$gk]['proxies'][] = $proxyName;
+            }
+        }
+    }
+
+    protected function stripNginxLocationPrefix(string $template, string $prefix): string
+    {
+        $pattern = '~\n\s*location\s+' . preg_quote($prefix, '~') . '[^\n]*\n.*?\n\s*}\s*~s';
+
+        return preg_replace($pattern, "\n", $template) ?? $template;
+    }
+
+    protected function applyTransportAwareNginxTemplate(string $template, array $pac): string
+    {
+        $global = $this->getTransportRegistryGlobal($pac);
+        $hash = $this->getHashBot();
+        $template = preg_replace(
+            '~(/webapp|/pac|/adguard|/ws|/xh|location /dns-query)~',
+            '${1}' . $hash,
+            $template
+        );
+        if (empty($global['ws'])) {
+            $template = $this->stripNginxLocationPrefix($template, '/ws' . $hash);
+        }
+        if (empty($global['xhttp'])) {
+            $template = $this->stripNginxLocationPrefix($template, '/xh' . $hash);
+        }
+
+        return $template;
+    }
+
+    protected function retireParentRuntimeUuid(array &$xray, int $ownerIndex): bool
+    {
+        if (!isset($xray['inbounds'][0]['settings']['clients'][$ownerIndex])) {
+            return false;
+        }
+        $owner = &$xray['inbounds'][0]['settings']['clients'][$ownerIndex];
+        if (!empty($owner['device_parent_id']) || !empty($owner['runtime_parent_retired'])) {
+            return false;
+        }
+        if (!$this->isPermanentHwidRuntime($owner)) {
+            return false;
+        }
+        $newId = $this->createXrayUuid();
+        while ($this->findXrayClientIndexById($xray, $newId) !== null) {
+            $newId = $this->createXrayUuid();
+        }
+        $owner['id'] = $newId;
+        $owner['runtime_parent_retired'] = 1;
+
+        return true;
     }
 
     public function domain()
@@ -5558,23 +5748,6 @@ DNS-over-HTTPS with IP:
         $pac = $this->getPacConf();
         $pac['hwid_runtime_mode_enabled'] = !empty($pac['hwid_runtime_mode_enabled']) ? 0 : 1;
         $this->setPacConf($pac);
-        if (empty($pac['hwid_runtime_mode_enabled'])) {
-            $xray = $this->getXray();
-            $changed = false;
-            foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $idx => $client) {
-                if (!empty($client['device_parent_id'])) {
-                    continue;
-                }
-                if (!array_key_exists('hwid_runtime_mode', $client) || empty($client['hwid_runtime_mode'])) {
-                    if ($this->reactivateParentUuidForClient($xray, $idx)) {
-                        $changed = true;
-                    }
-                }
-            }
-            if ($changed) {
-                $this->restartXray($xray);
-            }
-        }
         $this->answer($this->input['callback_id'], 'HWID runtime mode: ' . (!empty($pac['hwid_runtime_mode_enabled']) ? 'on' : 'off'), true);
         if ($context === 'xray') {
             $this->xray();
@@ -5781,27 +5954,21 @@ DNS-over-HTTPS with IP:
             $download += (int) ($row['download'] ?? 0);
             $upload += (int) ($row['upload'] ?? 0);
         }
-        if ($deviceMap === [] && $ownerIndex !== null) {
+        if ($deviceMap === [] && $ownerIndex !== null && !$this->isPermanentHwidRuntime($owner)) {
             $parent = $this->getClientTrafficStats($stats, $owner, $ownerIndex);
 
             return [
                 'download'            => (int) $parent['download'],
                 'upload'              => (int) $parent['upload'],
-                'include_parent'      => true,
+                'include_parent'      => false,
                 'legacy_parent_only'  => true,
             ];
-        }
-        $includeParent = $this->isHwidRuntimeModeEnabled($owner) && !$this->isRuntimeParentRetired($owner);
-        if ($includeParent && $ownerIndex !== null) {
-            $parent = $this->getClientTrafficStats($stats, $owner, $ownerIndex);
-            $download += (int) $parent['download'];
-            $upload += (int) $parent['upload'];
         }
 
         return [
             'download'           => $download,
             'upload'             => $upload,
-            'include_parent'     => $includeParent,
+            'include_parent'     => false,
             'legacy_parent_only' => false,
         ];
     }
@@ -6019,20 +6186,6 @@ DNS-over-HTTPS with IP:
         return (string) ($client['subscription_id'] ?? $client['id'] ?? '');
     }
 
-    protected function getSubscriptionDevicePasswordHash(array $client): string
-    {
-        return (string) ($client['device_delete_password_md5'] ?? '');
-    }
-
-    protected function isSubscriptionDevicePasswordValid(array $client, string $password): bool
-    {
-        $hash = $this->getSubscriptionDevicePasswordHash($client);
-        if ($hash === '' || $password === '') {
-            return false;
-        }
-        return strtolower($hash) === md5($password);
-    }
-
     protected function isSubscriptionIdMatch(array $client, string $requestedId): bool
     {
         if ($requestedId === '') {
@@ -6141,60 +6294,10 @@ DNS-over-HTTPS with IP:
         if (!in_array($owner['id'], $owner['subscription_legacy_ids'], true)) {
             $owner['subscription_legacy_ids'][] = (string) $owner['id'];
         }
-        // Parent UUID retirement is deferred until all known HWIDs
-        // (from hwid.json for this subscription) confirm runtime migration.
+        // Parent UUID is retired when the first runtime device is registered.
         if (!array_key_exists('runtime_parent_retired', $owner)) {
             $owner['runtime_parent_retired'] = 0;
         }
-        return true;
-    }
-
-    protected function canRetireParentRuntimeUuid(array $devices): bool
-    {
-        if (empty($devices) || !is_array($devices)) {
-            return false;
-        }
-        foreach ($devices as $info) {
-            if (!is_array($info)) {
-                return false;
-            }
-            if (empty($info['device_uuid'])) {
-                return false;
-            }
-            if (empty($info['runtime_confirmed'])) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    protected function reactivateParentUuidForClient(array &$xray, int $ownerIndex): bool
-    {
-        if (!isset($xray['inbounds'][0]['settings']['clients'][$ownerIndex])) {
-            return false;
-        }
-        $owner = &$xray['inbounds'][0]['settings']['clients'][$ownerIndex];
-        if (!empty($owner['device_parent_id'])) {
-            return false;
-        }
-        $subscriptionId = (string) ($owner['subscription_id'] ?? '');
-        if ($subscriptionId === '') {
-            return false;
-        }
-        $currentId = (string) ($owner['id'] ?? '');
-        if ($currentId === $subscriptionId) {
-            if (!empty($owner['runtime_parent_retired'])) {
-                $owner['runtime_parent_retired'] = 0;
-                return true;
-            }
-            return false;
-        }
-        $existing = $this->findXrayClientIndexById($xray, $subscriptionId);
-        if ($existing !== null && $existing !== $ownerIndex) {
-            return false;
-        }
-        $owner['id'] = $subscriptionId;
-        $owner['runtime_parent_retired'] = 0;
         return true;
     }
 
@@ -6406,6 +6509,9 @@ DNS-over-HTTPS with IP:
         $realityClients = [];
         foreach ($master as $client) {
             if (!is_array($client) || !empty($client['off'])) {
+                continue;
+            }
+            if ($this->shouldExcludeParentFromXrayInbounds($client)) {
                 continue;
             }
             $flags = $this->getClientTransportFlags($client, $pac);
@@ -7208,18 +7314,9 @@ DNS-over-HTTPS with IP:
             $devices[$hwid]['runtime_confirmed'] = 1;
         }
 
-        // Rotate parent UUID only when all known HWIDs have confirmed runtime migration.
-        if ($this->canRetireParentRuntimeUuid($devices)) {
-            $owner = &$xray['inbounds'][0]['settings']['clients'][$ownerIndex];
-            if (empty($owner['runtime_parent_retired'])) {
-                $newId = $this->createXrayUuid();
-                while ($this->findXrayClientIndexById($xray, $newId) !== null) {
-                    $newId = $this->createXrayUuid();
-                }
-                $owner['id'] = $newId;
-                $owner['runtime_parent_retired'] = 1;
-                $changed = true;
-            }
+        // Parent UUID is retired as soon as the first runtime device is registered.
+        if ($this->retireParentRuntimeUuid($xray, $ownerIndex)) {
+            $changed = true;
         }
 
         $storage[$ownerSubId] = $devices;
@@ -7243,13 +7340,6 @@ DNS-over-HTTPS with IP:
         $hwidLimitActive = !empty($pac['hwid_limit_enabled']) && empty($client['hwid_disabled']);
         $hwidNotSupported = false;
         $hwidMaxReached = false;
-
-        if (!$runtimeModeEnabled && $clientIndex !== null) {
-            $xray = $this->getXray();
-            if ($this->reactivateParentUuidForClient($xray, $clientIndex)) {
-                $this->restartXray($xray);
-            }
-        }
 
         if (!$hwidLimitActive) {
             header('x-hwid-active: false');
@@ -7287,14 +7377,17 @@ DNS-over-HTTPS with IP:
         header('x-hwid-limit: ' . ($hwidMaxReached ? 'true' : 'false'));
 
         if (!$isRuleRequest && $hwid === '') {
-    		if ($isBrowser) {
-        		return true;
-    		}
+            if ($isBrowser) {
+                if ($this->isPermanentHwidRuntime($client)) {
+                    $_SERVER['VPNBOT_SUBSCRIPTION_BROWSER'] = '1';
+                }
+                return true;
+            }
 
             $message = 'HWID device limit exceeded';
             header('announce: base64:' . base64_encode($message));
             header('X-HWID-Status: ' . $message);
-            header('HTTP/1.1 431 WRONG HWID', true, 431);
+            header('HTTP/1.1 403 Forbidden', true, 403);
 
             return false;
         }
@@ -7977,48 +8070,77 @@ DNS-over-HTTPS with IP:
         $pac    = $this->getPacConf();
         $globalTransports = $this->getTransportRegistryGlobal($pac);
         $domain = $this->getDomain(empty($globalTransports['reality']));
-        $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
+        $client = $c['inbounds'][0]['settings']['clients'][$i] ?? null;
+        if (!is_array($client)) {
+            return '';
+        }
+        $flags = $this->getClientTransportFlags($client, $pac);
+        $clientId = (string) ($client['id'] ?? '');
+        $email = (string) ($client['email'] ?? 'user');
 
-        switch ($s) {
+        $realityInbound = null;
+        foreach (($c['inbounds'] ?? []) as $inbound) {
+            if ($this->isXrayRealityInbound($inbound)) {
+                $realityInbound = $inbound;
+                break;
+            }
+        }
+        $realitySettings = $realityInbound['streamSettings']['realitySettings'] ?? [];
+        $realitySni = (string) ($realitySettings['serverNames'][0] ?? ($pac['reality']['domain'] ?? $domain));
+        $realitySid = (string) ($realitySettings['shortIds'][0] ?? ($pac['reality']['shortId'] ?? ''));
+
+        $transport = $s;
+        if (!$transport) {
+            if (!empty($flags['reality'])) {
+                $transport = 'reality';
+            } elseif (!empty($flags['ws'])) {
+                $transport = 'ws';
+            } elseif (!empty($flags['xhttp'])) {
+                $transport = 'xhttp';
+            } else {
+                $transport = 'ws';
+            }
+        }
+
+        switch ($transport) {
+            case 'reality':
+                return "vless://{$clientId}@$domain:443"
+                    . "?security=reality"
+                    . "&sni={$realitySni}"
+                    . "&fp=chrome&pbk={$pac['xray']}"
+                    . "&sid={$realitySid}"
+                    . "&type=tcp"
+                    . "&flow=xtls-rprx-vision"
+                    . "#{$email}";
+            case 'xhttp':
+                $xhPath = rawurlencode($this->getXhttpTransportPath($hash));
+
+                return "vless://{$clientId}@$domain:443"
+                    . "?security=tls"
+                    . "&type=xhttp"
+                    . "&headerType="
+                    . "&path={$xhPath}"
+                    . "&host=$domain"
+                    . "&flow="
+                    . "&mode=packet-up"
+                    . "&extra=%7B%22xmux%22%3A%7B%22cMaxReuseTimes%22%3A0%2C%22maxConcurrency%22%3A%2216-32%22%2C%22maxConnections%22%3A0%2C%22hKeepAlivePeriod%22%3A0%2C%22hMaxRequestTimes%22%3A%22600-900%22%2C%22hMaxReusableSecs%22%3A%221800-3000%22%7D%2C%22headers%22%3A%7B%7D%2C%22noGRPCHeader%22%3Afalse%2C%22xPaddingBytes%22%3A%22100-1000%22%2C%22scMaxEachPostBytes%22%3A1000000%2C%22scMinPostsIntervalMs%22%3A30%2C%22scStreamUpServerSecs%22%3A%2220-80%22%7D"
+                    . "&sni=$domain"
+                    . "&fp=chrome"
+                    . "&alpn=h2"
+                    . "#{$email}";
+            case 'ws':
             default:
-                $client = $c['inbounds'][0]['settings']['clients'][$i];
-                $flags = $this->getClientTransportFlags($client, $pac);
-                if (!empty($flags['reality'])) {
-                        $link = "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$domain:443"
-                                    . "?security=reality"
-                                    . "&sni={$c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]}"
-                                    . "&fp=chrome&pbk={$pac['xray']}"
-                                    . "&sid={$c['inbounds'][0]['streamSettings']['realitySettings']['shortIds'][0]}"
-                                    . "&type=tcp"
-                                    . "&flow=xtls-rprx-vision"
-                                    . "#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
-                } elseif (!empty($flags['xhttp'])) {
-                        $link = "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$domain:443"
-                                    . "?security=tls"
-                                    . "&type=xhttp"
-                                    . "&headerType="
-                                    . "&path=%2Fws$hash"
-                                    . "&host=$domain"
-                                    . "&flow="
-                                    . "&mode=packet-up"
-                                    . "&extra=%7B%22xmux%22%3A%7B%22cMaxReuseTimes%22%3A0%2C%22maxConcurrency%22%3A%2216-32%22%2C%22maxConnections%22%3A0%2C%22hKeepAlivePeriod%22%3A0%2C%22hMaxRequestTimes%22%3A%22600-900%22%2C%22hMaxReusableSecs%22%3A%221800-3000%22%7D%2C%22headers%22%3A%7B%7D%2C%22noGRPCHeader%22%3Afalse%2C%22xPaddingBytes%22%3A%22100-1000%22%2C%22scMaxEachPostBytes%22%3A1000000%2C%22scMinPostsIntervalMs%22%3A30%2C%22scStreamUpServerSecs%22%3A%2220-80%22%7D"
-                                    . "&sni=$domain"
-                                    . "&fp=chrome"
-                                    . "&alpn=h2"
-                                    . "#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
-                } else {
-                        $link =  "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$domain:443"
-                                    . "?flow="
-                                    . "&path=%2Fws$hash"
-                                    . "&security=tls"
-                                    . "&sni=$domain"
-                                    . "&fp=chrome"
-                                    . "&type=ws"
-                                    . "#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
-                }
-                return $link;
+                $wsPath = rawurlencode($this->getWsTransportPath($hash));
 
+                return "vless://{$clientId}@$domain:443"
+                    . "?flow="
+                    . "&path={$wsPath}"
+                    . "&security=tls"
+                    . "&sni=$domain"
+                    . "&fp=chrome"
+                    . "&type=ws"
+                    . "#{$email}";
         }
     }
 
@@ -9346,6 +9468,9 @@ DNS-over-HTTPS with IP:
             $text[] = "<a href='$scheme://{$domain}/pac$hash/sub?id={$ownerSubId}'>subscription</a>";
         }
         $text[] = "<pre><code>{$this->linkXray($i)}</code></pre>\n";
+        if (!empty($transportFlags['ws']) && !empty($transportFlags['xhttp']) && empty($transportFlags['reality'])) {
+            $text[] = "<pre><code>{$this->linkXray($i, 'xhttp')}</code></pre>\n";
+        }
         $st       = $this->getXrayStats();
         $deviceTrafficMap = $this->getHwidDeviceTraffic($ownerSubId);
         $xrayTotals = $this->getSubscriptionXrayTrafficTotals($st, $c, $i);
@@ -9586,7 +9711,7 @@ DNS-over-HTTPS with IP:
             $this->answer($this->input['callback_id'], 'user not found', true);
             return;
         }
-        unset($xray['inbounds'][0]['settings']['clients'][$i]['device_delete_password_md5']);
+        $this->clearSubscriptionDevicePassword($xray['inbounds'][0]['settings']['clients'][$i]);
         $this->writeXrayConfig($xray);
         $this->answer($this->input['callback_id'], 'device delete password reset', true);
         $this->userXr($i);
@@ -9763,10 +9888,6 @@ DNS-over-HTTPS with IP:
             unset($client['hwid_runtime_mode']);
         }
 
-        if (empty($client['hwid_runtime_mode'])) {
-            $this->reactivateParentUuidForClient($xray, $i);
-        }
-
         $this->writeXrayConfig($xray);
         $this->hwidUser($i);
     }
@@ -9886,10 +10007,11 @@ DNS-over-HTTPS with IP:
                 case 'device_password_status':
                     echo json_encode([
                         'ok' => true,
-                        'has_password' => $this->getSubscriptionDevicePasswordHash($client) !== '',
+                        'has_password' => $this->hasSubscriptionDevicePassword($client),
                     ]);
                     exit;
                 case 'device_password_set':
+                    $this->requireSubscriptionActionToken($ownerSubId);
                     $idx = $clientIndex;
                     if ($idx === null || !isset($xr['inbounds'][0]['settings']['clients'][$idx])) {
                         http_response_code(404);
@@ -9904,21 +10026,21 @@ DNS-over-HTTPS with IP:
                         exit;
                     }
 
-                    // Always validate against current hash stored in xray.json
-                    $currentHash = strtolower((string) ($xr['inbounds'][0]['settings']['clients'][$idx]['device_delete_password_md5'] ?? ''));
-                    if ($currentHash !== '') {
+                    $clientRef = &$xr['inbounds'][0]['settings']['clients'][$idx];
+                    if ($this->hasSubscriptionDevicePassword($clientRef)) {
                         $currentPassword = trim((string) ($_POST['current_password'] ?? ''));
-                        if ($currentPassword === '' || md5($currentPassword) !== $currentHash) {
+                        if ($currentPassword === '' || !$this->verifySubscriptionDevicePasswordWithMigration($clientRef, $currentPassword)) {
                             http_response_code(403);
                             echo json_encode(['ok' => false, 'message' => 'invalid current password']);
                             exit;
                         }
                     }
-                    $xr['inbounds'][0]['settings']['clients'][$idx]['device_delete_password_md5'] = md5($password);
+                    $this->setSubscriptionDevicePassword($clientRef, $password);
                     $this->writeXrayConfig($xr);
                     echo json_encode(['ok' => true, 'has_password' => true]);
                     exit;
                 case 'device_delete':
+                    $this->requireSubscriptionActionToken($ownerSubId);
                     $password = trim((string) ($_POST['password'] ?? ''));
                     $hwid = trim((string) ($_POST['hwid'] ?? ''));
                     if ($hwid === '') {
@@ -9960,19 +10082,20 @@ DNS-over-HTTPS with IP:
             exit;
         }
         $suburl   = "<a href='$scheme://{$domain}/pac$hash/sub?id={$uid}'>subscription</a>";
-        $traffic = $this->getClientTrafficStats($st, $client, $k);
-        $download = $this->getBytes($traffic['download']);
-        $upload   = $this->getBytes($traffic['upload']);
+        $trafficTotals = $this->getSubscriptionXrayTrafficTotals($st, $client, $clientIndex);
+        $download = $this->getBytes($trafficTotals['download']);
+        $upload   = $this->getBytes($trafficTotals['upload']);
         $trafficLimitBytes = $this->getClientTrafficLimitBytes($client, $pac);
         $trafficLimitHuman = $trafficLimitBytes > 0 ? $this->getBytes($trafficLimitBytes) : '0';
         $deviceTrafficMap = $this->getHwidDeviceTraffic($uid);
-        $hasDeviceDeletePassword = $this->getSubscriptionDevicePasswordHash($client) !== '';
+        $hasDeviceDeletePassword = $this->hasSubscriptionDevicePassword($client);
+        $subscriptionActionToken = $this->createSubscriptionActionToken($uid);
         $clash = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
             'h' => $hash,
             't' => 'cl',
             's' => $uid,
         ]));
-        $vless   = $this->linkXray($k);
+        $vless   = $this->isPermanentHwidRuntime($client) && empty($_SERVER['VPNBOT_DEVICE_UUID']) ? '' : $this->linkXray($clientIndex);
         $singbox = '';
         $xray    = '';
         $windows = '';
@@ -10035,8 +10158,19 @@ DNS-over-HTTPS with IP:
         if (!$return && !$this->processHwidRequest($client, $clientIndex)) {
             exit;
         }
-        if (!empty($_SERVER['VPNBOT_DEVICE_UUID']) && $this->isHwidRuntimeModeEnabled($client)) {
-            $uid = (string) $_SERVER['VPNBOT_DEVICE_UUID'];
+        $runtimeModeEnabled = $this->isPermanentHwidRuntime($client);
+        if ($runtimeModeEnabled) {
+            $deviceUuid = (string) ($_SERVER['VPNBOT_DEVICE_UUID'] ?? '');
+            if ($deviceUuid === '') {
+                if (!empty($_SERVER['VPNBOT_SUBSCRIPTION_BROWSER']) && $return) {
+                    return $this->buildEmptyClashSubscription();
+                }
+                http_response_code(403);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo 'Device HWID is required for subscription config';
+                exit;
+            }
+            $uid = $deviceUuid;
         }
         $subscriptionId = $subscriptionId ?? $this->getClientSubscriptionId($client);
 
@@ -10073,10 +10207,11 @@ DNS-over-HTTPS with IP:
             }
             $hwid = trim((string) ($_SERVER['HTTP_X_HWID'] ?? ''));
             $deviceUuid = (string) ($_SERVER['VPNBOT_DEVICE_UUID'] ?? '');
-            if ($deviceUuid === '' && $this->isHwidRuntimeModeEnabled($client)) {
-                $ownerSubId = $this->getClientSubscriptionId($client);
-                $devices = $this->getHwidDevicesByUser($ownerSubId);
-                $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
+            if ($deviceUuid === '' && $this->isPermanentHwidRuntime($client)) {
+                http_response_code(403);
+                header('Content-Type: text/plain; charset=utf-8');
+                echo 'Device HWID is required for WG profile';
+                exit;
             }
             $ownerSubId = $this->getClientSubscriptionId($client);
             $wgClient = $this->runInRuntimeWgContext(function () use ($ownerSubId, $hwid, $deviceUuid) {
@@ -10234,6 +10369,7 @@ DNS-over-HTTPS with IP:
 
         switch ($_GET['t']) {
             case 'cl':
+                $this->appendClashCompanionTransportProxy($c, $index, $client, $pac, $domain, $uid);
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
                     $c = $this->clashRules($c, $subscriptionId, $domain);
@@ -10623,7 +10759,6 @@ DNS-over-HTTPS with IP:
     {
         $conf     = $this->getPacConf();
         $template = file_get_contents('/config/nginx_default.conf');
-        // $template = preg_replace('~server_name ip~', "server_name {$this->ip}", $template);
         $serverNames = [];
         foreach ($this->getAllConfiguredDomains($conf) as $domainName) {
             $serverNames[] = "*.$domainName";
@@ -10652,19 +10787,12 @@ DNS-over-HTTPS with IP:
             location
         CONF;
         $template = preg_replace('~(location /adguard.+?})\s*location~s', $r, $template);
-        $template = preg_replace('~(/webapp|/pac|/adguard|/ws|location /dns-query)~', '${1}' . $h, $template);
-        file_put_contents('/config/nginx.conf', $template);
+        $template = $this->applyTransportAwareNginxTemplate($template, $conf);
+        $this->writeAndReloadNginx($template);
         $x = $this->getXray();
-        if (!empty($x['inbounds'][0]['streamSettings']['wsSettings']['path'])) {
-            $x['inbounds'][0]['streamSettings']['wsSettings']['path'] = "/ws$h";
+        if ($this->patchXrayInboundTransportPaths($x)) {
             $this->restartXray($x);
         }
-        if (!empty($x['inbounds'][0]['streamSettings']['xhttpSettings']['path'])) {
-            $x['inbounds'][0]['streamSettings']['xhttpSettings']['path'] = "/ws$h";
-            $this->restartXray($x);
-        }
-
-        return $this->ssh('nginx -s reload', 'ng');
     }
 
     public function getHashSubdomain($subdomain)
@@ -11597,117 +11725,6 @@ DNS-over-HTTPS with IP:
         }
     }
 
-    protected function buildXrayInboundsByRegistry(array $xray, array $pac): array
-    {
-        $h = $this->getHashBot();
-        $global = $this->getTransportRegistryGlobal($pac);
-        $clients = [];
-        foreach (($xray['inbounds'] ?? []) as $inbound) {
-            if (!empty($inbound['settings']['clients']) && is_array($inbound['settings']['clients'])) {
-                $clients = $inbound['settings']['clients'];
-                break;
-            }
-        }
-        $sniffing = ["destOverride" => ["http", "tls", "quic"], "enabled" => true];
-        foreach (($xray['inbounds'] ?? []) as $inbound) {
-            if (!empty($inbound['sniffing']) && is_array($inbound['sniffing'])) {
-                $sniffing = $inbound['sniffing'];
-                break;
-            }
-        }
-        $apiInbound = ["listen" => "127.0.0.1", "port" => 8080, "protocol" => "dokodemo-door", "settings" => ["address" => "127.0.0.1"], "tag" => "api"];
-        foreach (($xray['inbounds'] ?? []) as $inbound) {
-            if (($inbound['tag'] ?? '') === 'api' || ($inbound['protocol'] ?? '') === 'dokodemo-door') {
-                $apiInbound = $inbound;
-                break;
-            }
-        }
-        $apiInbound['listen'] = '127.0.0.1';
-        $apiInbound['port'] = 8080;
-        $apiInbound['protocol'] = 'dokodemo-door';
-        $apiInbound['settings'] = ['address' => '127.0.0.1'];
-        $apiInbound['tag'] = 'api';
-
-        $inbounds = [];
-        if (!empty($global['ws'])) {
-            $inbounds[] = [
-                "port" => 443,
-                "protocol" => "vless",
-                "settings" => ["clients" => $clients, "decryption" => "none"],
-                "sniffing" => $sniffing,
-                "streamSettings" => ["network" => "ws", "wsSettings" => ["path" => "/ws$h"]],
-                "tag" => "vless_tls",
-            ];
-        }
-        if (!empty($global['xhttp'])) {
-            $inbounds[] = [
-                "port" => 443,
-                "protocol" => "vless",
-                "settings" => ["clients" => $clients, "decryption" => "none"],
-                "sniffing" => $sniffing,
-                "streamSettings" => ["network" => "xhttp", "xhttpSettings" => ["mode" => "auto", "path" => "/ws$h"]],
-                "tag" => "vless_xhttp",
-            ];
-        }
-        if (!empty($global['reality'])) {
-            $inbounds[] = [
-                "port" => 33443,
-                "protocol" => "vless",
-                "settings" => ["clients" => $clients, "decryption" => "none"],
-                "sniffing" => $sniffing,
-                "streamSettings" => [
-                    "network" => "tcp",
-                    "realitySettings" => [
-                        "dest" => (string) ($pac['reality']['destination'] ?? (($pac['reality']['domain'] ?? 'yandex.ru') . ':443')),
-                        "privateKey" => (string) ($pac['reality']['privateKey'] ?? ''),
-                        "serverNames" => [(string) ($pac['reality']['domain'] ?? 'yandex.ru')],
-                        "shortIds" => [(string) ($pac['reality']['shortId'] ?? '')],
-                        "show" => false,
-                        "xver" => 0
-                    ],
-                    "tcpSettings" => ["acceptProxyProtocol" => true],
-                    "sockopt" => ["acceptProxyProtocol" => true],
-                    "security" => "reality"
-                ],
-                "tag" => "vless_reality",
-            ];
-        }
-        if (empty($inbounds)) {
-            $inbounds[] = [
-                "port" => 443,
-                "protocol" => "vless",
-                "settings" => ["clients" => [], "decryption" => "none"],
-                "sniffing" => $sniffing,
-                "streamSettings" => ["network" => "ws", "wsSettings" => ["path" => "/ws$h"]],
-                "tag" => "vless_tls",
-            ];
-        }
-        $inbounds[] = $apiInbound;
-        return $inbounds;
-    }
-
-    protected function applyTransportRegistryAndRuntime(): void
-    {
-        $pac = $this->getPacConf();
-        $pac = $this->normalizeTransportRegistry($pac);
-        $global = $this->getTransportRegistryGlobal($pac);
-        $x = $this->getXray();
-        $x['inbounds'] = $this->buildXrayInboundsByRegistry($x, $pac);
-        $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x));
-        $this->setUpstreamRealityPort(!empty($global['reality']) ? 33443 : 443);
-        $this->setPacConf($pac);
-        $this->restartXray($x);
-        $this->cloakNginx();
-        if (!empty($global['hysteria'])) {
-            $this->restartHysteria();
-        } else {
-            $this->ssh('pkill hysteria || true', 'hy');
-        }
-        if (empty($global['awg'])) {
-            $this->ssh('wg-quick down wg0 || true; awg-quick down wg0 || true', $this->getInstanceWG());
-        }
-    }
-
     public function toggleGlobalTransport($name)
     {
         $allowed = ['reality', 'ws', 'xhttp', 'hysteria', 'awg'];
@@ -11868,7 +11885,7 @@ DNS-over-HTTPS with IP:
                     "network"       => "xhttp",
                     "xhttpSettings" => [
                         "mode"  => "auto",
-                        "path"  => "/ws$h",
+                        "path"  => $this->getXhttpTransportPath($h),
                         "extra" => [
                             "noSSEHeader"          => true,
                             "xPaddingBytes"        => "100-1000",

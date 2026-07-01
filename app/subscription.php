@@ -1435,6 +1435,7 @@ body {
     <script>
         // Global state
         let panelData = null;
+        const SUB_ACTION_TOKEN = <?= json_encode($subscriptionActionToken ?? '', JSON_UNESCAPED_UNICODE) ?>;
         let appConfig = null;
         let currentLanguage = 'en';
         let currentPlatform = 'ios';
@@ -2120,6 +2121,9 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
             const url = baseUrl + (baseUrl.includes('?') ? '&' : '?') + `action=${encodeURIComponent(action)}`;
             const body = new URLSearchParams();
             Object.entries(payload).forEach(([k, v]) => body.append(k, String(v ?? '')));
+            if (SUB_ACTION_TOKEN) {
+                body.append('action_token', SUB_ACTION_TOKEN);
+            }
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
