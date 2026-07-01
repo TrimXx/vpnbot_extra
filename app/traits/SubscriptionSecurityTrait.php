@@ -94,9 +94,9 @@ trait SubscriptionSecurityTrait
         return hash_equals($expected, $sig);
     }
 
-    protected function denySubscriptionAction(string $message = 'invalid action token'): void
+    protected function denySubscriptionAction(string $message = 'invalid action token', int $status = 403): void
     {
-        http_response_code(403);
+        http_response_code($status);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['ok' => false, 'message' => $message]);
         exit;
@@ -107,6 +107,57 @@ trait SubscriptionSecurityTrait
         $token = trim((string) ($_POST['action_token'] ?? $_SERVER['HTTP_X_SUB_ACTION_TOKEN'] ?? ''));
         if (!$this->verifySubscriptionActionToken($subscriptionId, $token)) {
             $this->denySubscriptionAction('invalid or expired action token');
+        }
+    }
+
+    protected function getSubscriptionRateLimitPath(): string
+    {
+        return '/config/sub_action_rl.json';
+    }
+
+    protected function checkSubscriptionActionRateLimit(string $subscriptionId, string $action, int $max = 10, int $window = 300): bool
+    {
+        $path = $this->getSubscriptionRateLimitPath();
+        $now = time();
+        $data = [];
+        if (is_readable($path)) {
+            $decoded = json_decode((string) file_get_contents($path), true);
+            if (is_array($decoded)) {
+                $data = $decoded;
+            }
+        }
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $bucketKey = $subscriptionId . '|' . $action . '|' . $ip;
+        $entries = array_values(array_filter(
+            $data[$bucketKey] ?? [],
+            static fn($ts) => (int) $ts > $now - $window
+        ));
+        if (count($entries) >= $max) {
+            return false;
+        }
+        $entries[] = $now;
+        $data[$bucketKey] = $entries;
+        foreach ($data as $key => $timestamps) {
+            if (!is_array($timestamps)) {
+                unset($data[$key]);
+                continue;
+            }
+            $filtered = array_values(array_filter($timestamps, static fn($ts) => (int) $ts > $now - $window));
+            if ($filtered === []) {
+                unset($data[$key]);
+            } else {
+                $data[$key] = $filtered;
+            }
+        }
+        file_put_contents($path, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return true;
+    }
+
+    protected function requireSubscriptionActionRateLimit(string $subscriptionId, string $action, int $max = 10, int $window = 300): void
+    {
+        if (!$this->checkSubscriptionActionRateLimit($subscriptionId, $action, $max, $window)) {
+            $this->denySubscriptionAction('rate limit exceeded', 429);
         }
     }
 }

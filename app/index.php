@@ -48,7 +48,7 @@ switch (true) {
 
     // subs & pac
     case preg_match('~^' . preg_quote("/pac$hash") . '~', $_SERVER['REQUEST_URI']):
-        if (!empty($t = unserialize(base64_decode(explode('/', $_SERVER['REQUEST_URI'])[2])))) { // fix sing-box import
+        if (!empty($t = $bot->decodePacUrlPayload(explode('/', $_SERVER['REQUEST_URI'])[2] ?? ''))) {
             $_GET = array_merge($_GET, $t);
         }
         $type    = $_GET['t'] ?? 'pac';

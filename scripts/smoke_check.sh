@@ -95,7 +95,7 @@ else
 fi
 
 # --- php traits ---
-for trait in SubscriptionSecurityTrait.php TransportRegistryTrait.php; do
+for trait in SubscriptionSecurityTrait.php TransportRegistryTrait.php PacUrlTrait.php TransportRuntimeTrait.php; do
     if [ -f "$ROOT/app/traits/$trait" ]; then
         pass "trait $trait exists"
     else
@@ -109,6 +109,11 @@ if command -v php >/dev/null 2>&1; then
         pass "php -l app/bot.php"
     else
         fail "php -l app/bot.php"
+    fi
+    if php -l "$ROOT/app/index.php" >/dev/null 2>&1; then
+        pass "php -l app/index.php"
+    else
+        fail "php -l app/index.php"
     fi
 elif docker compose -f "$ROOT/docker-compose.yml" ps --status running php 2>/dev/null | grep -q php; then
     if docker compose -f "$ROOT/docker-compose.yml" exec -T php php -l /app/bot.php >/dev/null 2>&1; then

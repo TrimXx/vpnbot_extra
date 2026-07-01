@@ -2,11 +2,15 @@
 
 require_once __DIR__ . '/traits/SubscriptionSecurityTrait.php';
 require_once __DIR__ . '/traits/TransportRegistryTrait.php';
+require_once __DIR__ . '/traits/TransportRuntimeTrait.php';
+require_once __DIR__ . '/traits/PacUrlTrait.php';
 
 class Bot
 {
     use SubscriptionSecurityTrait;
     use TransportRegistryTrait;
+    use TransportRuntimeTrait;
+    use PacUrlTrait;
 
     public $input;
     public $adguard;
@@ -1008,25 +1012,20 @@ class Bot
 
     public function sspswd()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter password",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'sspwdch',
-            'args'           => [],
-        ];
+        if (!empty($this->input['callback_id'])) {
+            $this->answer($this->input['callback_id'], 'Shadowsocks removed in v3', true);
+        }
     }
 
     public function ssPswdCheck()
     {
-        $c = $this->getSSConfig();
-        if (empty($c['password']) || ($c['password'] == 'test')) {
-            $this->sspwdch(password_hash(time(), PASSWORD_DEFAULT), 1);
+        // Shadowsocks container removed in v3.
+    }
+
+    public function sspwdch($pass, $nomenu = false)
+    {
+        if (!empty($this->input['callback_id'])) {
+            $this->answer($this->input['callback_id'], 'Shadowsocks removed in v3', true);
         }
     }
 
@@ -1232,12 +1231,7 @@ class Bot
 
     public function restartOcserv($conf)
     {
-        file_put_contents('/config/ocserv.conf', $conf);
-        $this->ssh('pkill ocserv', 'oc');
-        $pac = $this->getPacConf();
-        if (!empty($pac['ocserv']) && !empty($this->getHashSubdomain('oc'))) {
-            $this->ssh('ocserv -c /etc/ocserv/ocserv.conf', 'oc');
-        }
+        // OpenConnect container removed in v3.
     }
 
     public function restartNaive()
@@ -1361,23 +1355,6 @@ class Bot
         }
         $this->restartOcserv(file_get_contents('/config/ocserv.conf'));
         $this->menu('oc');
-    }
-
-    public function sspwdch($pass, $nomenu = false)
-    {
-        $this->ssh('pkill sslocal', 'proxy');
-        $this->ssh('pkill ssserver', 'ss');
-        $c = $this->getSSConfig();
-        $l = $this->getSSLocalConfig();
-        $c['password'] = $l['password'] = $pass;
-        file_put_contents('/config/ssserver.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        file_put_contents('/config/sslocal.json', json_encode($l, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        $this->ssh('ssserver -v -d -c /config.json', 'ss');
-        $this->ssh('sslocal -v -d -c /config.json', 'proxy');
-
-        if (empty($nomenu)) {
-            $this->menu('ss');
-        }
     }
 
     public function v2ray()
@@ -2269,26 +2246,10 @@ class Bot
 
     public function qrSS()
     {
-        $conf    = $this->getPacConf();
-        $ip      = $this->ip;
-        $domain  = $this->getDomain();
-        $scheme  = empty($ssl = $this->nginxGetTypeCert()) ? 'http' : 'https';
-        $ss      = $this->getSSConfig();
-        $port    = !empty($ss['plugin']) ? (!empty($ssl) ? 443 : 80) : getenv('SSPORT');
-        $ss_link = preg_replace('~==~', '', 'ss://' . base64_encode("{$ss['method']}:{$ss['password']}")) . "@$domain:$port" . (!empty($ss['plugin']) ? '?plugin=' . urlencode("v2ray-plugin;path=/v2ray;host=$domain" . (!empty($ssl) ? ';tls' : '')) : '');
-        $qr_file = __DIR__ . "/qr/shadowsocks.png";
-        exec("qrencode -t png -o $qr_file '$ss_link'");
-        $r = $this->sendPhoto(
-            $this->input['chat'],
-            curl_file_create($qr_file),
-            "<code>$ss_link</code>"
-        );
-        unlink($qr_file);
-        if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->menu('ss');
+        if (!empty($this->input['callback_id'])) {
+            $this->answer($this->input['callback_id'], 'Shadowsocks removed in v3', true);
         }
+        $this->send($this->input['chat'], 'Shadowsocks removed in v3', $this->input['message_id']);
     }
 
     public function qrXray($i, $s = false)
@@ -2763,92 +2724,6 @@ class Bot
         ]);
     }
 
-    protected function appendClashCompanionTransportProxy(array &$c, int $index, array $client, array $pac, string $domain, string $uid): void
-    {
-        $flags = $this->getClientTransportFlags($client, $pac);
-        if (empty($flags['ws']) || empty($flags['xhttp'])) {
-            return;
-        }
-        if (!isset($c['proxies'][$index]) || !is_array($c['proxies'][$index])) {
-            return;
-        }
-        $baseName = (string) ($c['proxies'][$index]['name'] ?? 'proxy');
-        $hash = $this->getHashBot();
-        $existingNetworks = [];
-        foreach ($c['proxies'] as $proxy) {
-            if (!is_array($proxy)) {
-                continue;
-            }
-            $network = (string) ($proxy['network'] ?? '');
-            if ($network !== '') {
-                $existingNetworks[$network] = (string) ($proxy['name'] ?? '');
-            }
-        }
-        if (!isset($existingNetworks['ws'])) {
-            $wsProxy = $this->buildClashWsTransportProxy($baseName, $domain, $uid, $hash);
-            $c['proxies'][] = $wsProxy;
-            $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($wsProxy['name'] ?? ''));
-        }
-        if (!isset($existingNetworks['xhttp'])) {
-            $xhttpProxy = $this->buildClashXhttpTransportProxy($baseName, $domain, $uid, $hash);
-            $c['proxies'][] = $xhttpProxy;
-            $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($xhttpProxy['name'] ?? ''));
-        }
-    }
-
-    protected function patchXrayInboundTransportPaths(array &$xray, ?string $hash = null): bool
-    {
-        $hash = $hash ?? $this->getHashBot();
-        $expectedWs = $this->getWsTransportPath($hash);
-        $expectedXh = $this->getXhttpTransportPath($hash);
-        $changed = false;
-        foreach (($xray['inbounds'] ?? []) as $idx => $inbound) {
-            if (!is_array($inbound)) {
-                continue;
-            }
-            $network = (string) ($inbound['streamSettings']['network'] ?? '');
-            if ($network === 'ws') {
-                $current = (string) ($inbound['streamSettings']['wsSettings']['path'] ?? '');
-                if ($current !== $expectedWs) {
-                    $xray['inbounds'][$idx]['streamSettings']['wsSettings']['path'] = $expectedWs;
-                    $changed = true;
-                }
-            }
-            if ($network === 'xhttp') {
-                if (!isset($xray['inbounds'][$idx]['streamSettings']['xhttpSettings']) || !is_array($xray['inbounds'][$idx]['streamSettings']['xhttpSettings'])) {
-                    $xray['inbounds'][$idx]['streamSettings']['xhttpSettings'] = ['mode' => 'auto'];
-                    $changed = true;
-                }
-                $current = (string) ($inbound['streamSettings']['xhttpSettings']['path'] ?? '');
-                if ($current !== $expectedXh) {
-                    $xray['inbounds'][$idx]['streamSettings']['xhttpSettings']['path'] = $expectedXh;
-                    $changed = true;
-                }
-            }
-        }
-
-        return $changed;
-    }
-
-    protected function writeAndReloadNginx(string $template): bool
-    {
-        $livePath = '/config/nginx.conf';
-        $previous = is_file($livePath) ? (string) file_get_contents($livePath) : '';
-        file_put_contents($livePath, $template);
-        $output = trim((string) $this->ssh('nginx -t 2>&1', 'ng'));
-        $ok = stripos($output, 'syntax is ok') !== false || stripos($output, 'test is successful') !== false;
-        if (!$ok) {
-            if ($previous !== '') {
-                file_put_contents($livePath, $previous);
-            }
-
-            return false;
-        }
-        $this->ssh('nginx -s reload', 'ng');
-
-        return true;
-    }
-
     protected function getXraySessionTrafficTotals(): array
     {
         $download = 0;
@@ -2873,86 +2748,6 @@ class Bot
             'download' => $download,
             'upload'   => $upload,
         ];
-    }
-
-    protected function buildClashWsTransportProxy(string $baseName, string $domain, string $uid, string $hash): array
-    {
-        return [
-            'name' => $baseName . '-ws',
-            'type' => 'vless',
-            'server' => $domain,
-            'port' => 443,
-            'uuid' => $uid,
-            'network' => 'ws',
-            'udp' => true,
-            'tls' => true,
-            'servername' => $domain,
-            'client-fingerprint' => 'chrome',
-            'ws-opts' => [
-                'path' => $this->getWsTransportPath($hash),
-            ],
-        ];
-    }
-
-    protected function buildClashXhttpTransportProxy(string $baseName, string $domain, string $uid, string $hash): array
-    {
-        return [
-            'name' => $baseName . '-xhttp',
-            'type' => 'vless',
-            'server' => $domain,
-            'port' => 443,
-            'uuid' => $uid,
-            'network' => 'xhttp',
-            'udp' => true,
-            'tls' => true,
-            'servername' => $domain,
-            'client-fingerprint' => 'chrome',
-            'xhttp-opts' => [
-                'path' => $this->getXhttpTransportPath($hash),
-                'mode' => 'packet-up',
-            ],
-        ];
-    }
-
-    protected function linkClashTransportProxyToGroups(array &$c, string $baseName, string $proxyName): void
-    {
-        if ($proxyName === '' || empty($c['proxy-groups']) || !is_array($c['proxy-groups'])) {
-            return;
-        }
-        foreach ($c['proxy-groups'] as $gk => $group) {
-            if (empty($group['proxies']) || !is_array($group['proxies'])) {
-                continue;
-            }
-            if ($baseName !== '' && in_array($baseName, $group['proxies'], true) && !in_array($proxyName, $group['proxies'], true)) {
-                $c['proxy-groups'][$gk]['proxies'][] = $proxyName;
-            }
-        }
-    }
-
-    protected function stripNginxLocationPrefix(string $template, string $prefix): string
-    {
-        $pattern = '~\n\s*location\s+' . preg_quote($prefix, '~') . '[^\n]*\n.*?\n\s*}\s*~s';
-
-        return preg_replace($pattern, "\n", $template) ?? $template;
-    }
-
-    protected function applyTransportAwareNginxTemplate(string $template, array $pac): string
-    {
-        $global = $this->getTransportRegistryGlobal($pac);
-        $hash = $this->getHashBot();
-        $template = preg_replace(
-            '~(/webapp|/pac|/adguard|/ws|/xh|location /dns-query)~',
-            '${1}' . $hash,
-            $template
-        );
-        if (empty($global['ws'])) {
-            $template = $this->stripNginxLocationPrefix($template, '/ws' . $hash);
-        }
-        if (empty($global['xhttp'])) {
-            $template = $this->stripNginxLocationPrefix($template, '/xh' . $hash);
-        }
-
-        return $template;
     }
 
     protected function retireParentRuntimeUuid(array &$xray, int $ownerIndex): bool
@@ -4387,23 +4182,7 @@ DNS-over-HTTPS with IP:
 
     public function ocservRoute()
     {
-        $p = $this->getPacConf();
-        $c = file_get_contents('/config/ocserv.conf');
-        $t = preg_replace('~^route[^\n]+~sm', '', $c);
-        if (!empty($p['subnets'])) {
-            foreach ($p['subnets'] as $v) {
-                if (preg_match('~^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}~', $v)) {
-                    $t .= "route = $v";
-                    $flag = true;
-                }
-            }
-            if (empty($flag)) {
-                $t .= 'route = default';
-            }
-        } else {
-            $t .= 'route = default';
-        }
-        $this->restartOcserv($t);
+        // OpenConnect container removed in v3.
     }
 
     public function calc()
@@ -5475,6 +5254,9 @@ DNS-over-HTTPS with IP:
 
     public function dnstt($update = false)
     {
+        if (!empty($this->input['callback_id'])) {
+            $this->answer($this->input['callback_id'], 'DNSTT removed in v3', true);
+        }
         $this->send($this->input['chat'], 'removed', $this->input['message_id']);
     }
 
@@ -7365,9 +7147,8 @@ DNS-over-HTTPS with IP:
 	$path      = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 	$segments  = explode('/', trim($path, '/'));
         $token     = end($segments);
-	$paramsRaw = base64_decode($token, true);
-	$params    = @unserialize($paramsRaw);
-	$isRuleRequest = is_array($params) && !empty($params['r']);
+        $params    = $this->decodePacUrlPayload((string) $token);
+        $isRuleRequest = is_array($params) && !empty($params['r']);
 
         $hwidNotSupported = !$isRuleRequest && !$isBrowser && $hwid === '';
         $hwidMaxReached = count($devices) >= $limit;
@@ -10011,6 +9792,7 @@ DNS-over-HTTPS with IP:
                     ]);
                     exit;
                 case 'device_password_set':
+                    $this->requireSubscriptionActionRateLimit($ownerSubId, 'device_password_set', 5, 600);
                     $this->requireSubscriptionActionToken($ownerSubId);
                     $idx = $clientIndex;
                     if ($idx === null || !isset($xr['inbounds'][0]['settings']['clients'][$idx])) {
@@ -10040,6 +9822,7 @@ DNS-over-HTTPS with IP:
                     echo json_encode(['ok' => true, 'has_password' => true]);
                     exit;
                 case 'device_delete':
+                    $this->requireSubscriptionActionRateLimit($ownerSubId, 'device_delete', 10, 600);
                     $this->requireSubscriptionActionToken($ownerSubId);
                     $password = trim((string) ($_POST['password'] ?? ''));
                     $hwid = trim((string) ($_POST['hwid'] ?? ''));
@@ -10090,11 +9873,11 @@ DNS-over-HTTPS with IP:
         $deviceTrafficMap = $this->getHwidDeviceTraffic($uid);
         $hasDeviceDeletePassword = $this->hasSubscriptionDevicePassword($client);
         $subscriptionActionToken = $this->createSubscriptionActionToken($uid);
-        $clash = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
+        $clash = $this->buildPacUrl($scheme, $domain, $hash, [
             'h' => $hash,
             't' => 'cl',
             's' => $uid,
-        ]));
+        ]);
         $vless   = $this->isPermanentHwidRuntime($client) && empty($_SERVER['VPNBOT_DEVICE_UUID']) ? '' : $this->linkXray($clientIndex);
         $singbox = '';
         $xray    = '';
@@ -10175,21 +9958,21 @@ DNS-over-HTTPS with IP:
         $subscriptionId = $subscriptionId ?? $this->getClientSubscriptionId($client);
 
         if (!empty($_GET['r'])) {
-            $cl = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
+            $cl = $this->buildPacUrl($scheme, $domain, $hash, [
                 'h' => $hash,
                 't' => 'cl',
                 's' => $subscriptionId,
-            ]));
+            ]);
             switch ($_GET['r']) {
                 case 'c':
                     header("Location: clash://install-config/?url=$cl&overwrite=no&name=$email");
                     exit;
                 case 'awg':
-                    $wgSub = "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
+                    $wgSub = $this->buildPacUrl($scheme, $domain, $hash, [
                         'h' => $hash,
                         't' => 'wg',
                         's' => $subscriptionId,
-                    ]));
+                    ]);
                     header("Location: amnezia://import/$wgSub");
                     exit;
             }
@@ -10490,12 +10273,12 @@ DNS-over-HTTPS with IP:
                     }
                     $c['rule-providers'][$v['name']] = [
                         'type'     => 'http',
-                        'url'      => "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
+                        'url'      => $this->buildPacUrl($scheme, $domain, $hash, [
                             'h' => $hash,
                             't' => 'cl',
                             's' => $subscriptionId,
                             'r' => $v['name'],
-                        ])),
+                        ]),
                         'interval' => $v['interval'],
                         'behavior' => $v['behavior'],
                         'format'   => 'yaml',
@@ -10623,12 +10406,12 @@ DNS-over-HTTPS with IP:
                     }
                     $ruleset[] = [
                         "tag"             => $r['name'],
-                        "url"             => "$scheme://{$domain}/pac$hash/" . base64_encode(serialize([
+                        "url"             => $this->buildPacUrl($scheme, $domain, $hash, [
                             'h' => $hash,
                             't' => 'si',
                             's' => $subscriptionId,
                             'r' => $r['name'],
-                        ])),
+                        ]),
                         "update_interval" => $r['interval'],
                         "type"            => "remote",
                         "format"          => "binary",
