@@ -2,6 +2,11 @@ cat /ssh/key.pub > /root/.ssh/authorized_keys
 ssh-keygen -A
 exec /usr/sbin/sshd -D -e "$@" &
 
+if [ "$(jq -r '.transport_registry.global.awg // .wg1 // 0' /pac.json)" -ne 1 ]; then
+    tail -f /dev/null
+    exit 0
+fi
+
 INTERFACE=$(route | grep '^default' | grep -o '[^ ]*$')
 if [ "$HOSTNAME" = "wireguard1" ]
 then

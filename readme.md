@@ -10,7 +10,7 @@ Telegram-бот для управления VPN-сервером из Telegram.
 
 ### Что поддерживается
 
-- VLESS (`Reality` / `Websocket` / `Both`) + Mihomo/Clash подписки
+- VLESS transport registry (`Reality` / `Websocket` / `XHTTP` flags) + Mihomo/Clash подписки
 - WireGuard / AmneziaWG (только WG1)
 - AdGuardHome
 - MTProto
@@ -82,7 +82,7 @@ crontab -e
 - Отображение подключенных устройств и трафика по устройствам в `subscription`.
 - Пароль на удаление устройства + смена/сброс пароля.
 - Заголовки ответа по HWID-статусу в выдаче подписки.
-- Транспорт `Both` (WS + Reality) и флаг доступа Reality по пользователю.
+- Глобальные и per-user transport флаги (`Reality` / `WS` / `XHTTP` / `Hysteria` / `AWG`).
 - Многодоменная схема (`domain_main + aliases`) и SAN-сертификаты.
 - Runtime AWG-профили по `device_uuid` (включая выдачу в Mihomo/Clash при наличии `device_uuid`).
 - Runtime AWG операции закреплены за WG1-контекстом.
@@ -118,7 +118,7 @@ Telegram bot for managing a VPN server directly from Telegram.
 
 ### Supported stack
 
-- VLESS (`Reality` / `Websocket` / `Both`) + Mihomo/Clash subscriptions
+- VLESS transport registry (`Reality` / `Websocket` / `XHTTP` flags) + Mihomo/Clash subscriptions
 - WireGuard / AmneziaWG (WG1 only)
 - AdGuardHome
 - MTProto
@@ -180,7 +180,7 @@ Add:
 - Connected device list and per-device traffic in subscription UI.
 - Device deletion password flow with change/reset support.
 - HWID status response headers in subscription endpoints.
-- `Both` transport mode (WS + Reality) with per-user Reality access control.
+- Global and per-user transport flags (`Reality` / `WS` / `XHTTP` / `Hysteria` / `AWG`).
 - Multi-domain support (`domain_main + aliases`) with SAN certificates.
 - Runtime AWG profiles bound to `device_uuid` (including Mihomo/Clash output when `device_uuid` is present).
 - Runtime AWG operations pinned to WG1 context.

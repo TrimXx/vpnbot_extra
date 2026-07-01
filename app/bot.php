@@ -494,11 +494,17 @@ class Bot
             case preg_match('~^/userXrTools (\d+)$~', $this->input['callback'], $m):
                 $this->userXrTools($m[1]);
                 break;
+            case preg_match('~^/toggleUserTransport (\w+) (\d+)$~', $this->input['callback'], $m):
+                $this->toggleUserTransport($m[1], (int) $m[2]);
+                break;
+            case preg_match('~^/toggleGlobalTransport (\w+)$~', $this->input['callback'], $m):
+                $this->toggleGlobalTransport($m[1]);
+                break;
             case preg_match('~^/toggleUserBothReality (\d+)$~', $this->input['callback'], $m):
-                $this->toggleUserBothReality($m[1]);
+                $this->toggleUserTransport('reality', (int) $m[1]);
                 break;
             case preg_match('~^/toggleUserBothWs (\d+)$~', $this->input['callback'], $m):
-                $this->toggleUserBothWs($m[1]);
+                $this->toggleUserTransport('ws', (int) $m[1]);
                 break;
             case preg_match('~^/choiceTemplate (.+)$~', $this->input['callback'], $m):
                 $this->choiceTemplate($m[1]);
@@ -2055,7 +2061,7 @@ class Bot
         $c                      = $this->getXray()['inbounds'][0]['settings']['clients'][$u];
         $_GET['s']              = $c['id'];
         $_GET['t']              = $t;
-        $_SERVER['SERVER_NAME'] = $this->getDomain($pac['transport'] != 'Reality');
+        $_SERVER['SERVER_NAME'] = $this->getDomain(empty($this->getTransportRegistryGlobal($pac)['reality']));
         $conf                   = $this->subscription(1);
         $this->sendFile($this->input['from'], new CURLStringFile($conf, $c['email'] . ($t == 'cl' ? '_mihomo.yaml' :($t == 'si' ? '_singbox.json' : '_v2ray.json'))));
     }
@@ -2693,8 +2699,19 @@ class Bot
             'subscription_apps_config_url' => 'https://cdn.jsdelivr.net/gh/TrimXx/config@main/onlyhwidapp.json',
             'white' => [],
             'deny' => [],
+            'transport_registry' => [
+                'global' => [
+                    'reality' => 0,
+                    'ws' => 1,
+                    'xhttp' => 0,
+                    'hysteria' => 0,
+                    'awg' => 0,
+                ],
+                'users' => [],
+            ],
         ];
         $conf = array_replace_recursive($defaults, $raw);
+        $conf = $this->normalizeTransportRegistry($conf);
         $mainDomain = $this->getMainDomainFromConfig($conf);
         $conf['domain_main'] = $mainDomain;
         $conf['domain'] = $mainDomain;
@@ -2705,6 +2722,69 @@ class Bot
     public function setPacConf(array $conf)
     {
         return file_put_contents($this->pac, json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    protected function normalizeTransportRegistry(array $conf): array
+    {
+        $fallback = [
+            'reality' => 0,
+            'ws' => 1,
+            'xhttp' => 0,
+            'hysteria' => !empty($conf['hysteria']) ? 1 : 0,
+            'awg' => !empty($conf['wg1']) ? 1 : 0,
+        ];
+        $legacy = (string) ($conf['transport'] ?? 'Websocket');
+        if ($legacy === 'Reality') {
+            $fallback['reality'] = 1;
+            $fallback['ws'] = 0;
+            $fallback['xhttp'] = 0;
+        } elseif ($legacy === 'xhttp') {
+            $fallback['reality'] = 0;
+            $fallback['ws'] = 0;
+            $fallback['xhttp'] = 1;
+        } elseif ($legacy === 'Both') {
+            $fallback['reality'] = 1;
+            $fallback['ws'] = 1;
+            $fallback['xhttp'] = 0;
+        }
+        $registry = $conf['transport_registry'] ?? [];
+        $global = is_array($registry['global'] ?? null) ? $registry['global'] : [];
+        foreach ($fallback as $k => $v) {
+            $global[$k] = !empty($global[$k]) ? 1 : (int) $v;
+        }
+        $users = is_array($registry['users'] ?? null) ? $registry['users'] : [];
+        $conf['transport_registry'] = [
+            'global' => $global,
+            'users' => $users,
+        ];
+        return $conf;
+    }
+
+    protected function getTransportRegistryGlobal(array $pac): array
+    {
+        $pac = $this->normalizeTransportRegistry($pac);
+        return $pac['transport_registry']['global'] ?? [];
+    }
+
+    protected function getClientTransportFlags(array $client, array $pac): array
+    {
+        $global = $this->getTransportRegistryGlobal($pac);
+        $subId = $this->getClientSubscriptionId($client);
+        $overrides = [];
+        if ($subId !== '' && is_array($pac['transport_registry']['users'][$subId] ?? null)) {
+            $overrides = $pac['transport_registry']['users'][$subId];
+        }
+        foreach ($global as $k => $v) {
+            if (array_key_exists($k, $overrides)) {
+                $global[$k] = !empty($overrides[$k]) ? 1 : 0;
+            }
+        }
+        return $global;
+    }
+
+    protected function hasEnabledXrayTransport(array $flags): bool
+    {
+        return !empty($flags['reality']) || !empty($flags['ws']) || !empty($flags['xhttp']);
     }
 
     public function domain()
@@ -2886,7 +2966,8 @@ class Bot
             return;
         }
         if (preg_match('~^([\d.,]+)\s*\|\s*([\d.,]+)$~', $text, $m)) {
-            if (($pac['transport'] ?? '') !== 'Both') {
+            $global = $this->getTransportRegistryGlobal($pac);
+            if (empty($global['reality']) || (empty($global['ws']) && empty($global['xhttp']))) {
                 $this->send($this->input['chat'], $this->i18n('traffic limit split only both'), $this->input['message_id']);
 
                 return;
@@ -6133,7 +6214,8 @@ DNS-over-HTTPS with IP:
             'device_runtime' => 1,
         ];
 
-        if (($pac['transport'] ?? '') === 'Reality') {
+        $global = $this->getTransportRegistryGlobal($pac);
+        if (!empty($global['reality']) && empty($global['ws']) && empty($global['xhttp'])) {
             $client['flow'] = 'xtls-rprx-vision';
         }
 
@@ -6166,19 +6248,20 @@ DNS-over-HTTPS with IP:
     protected function isRuntimeDeviceWgEnabled(array $client): bool
     {
         $pac = $this->getPacConf();
-        return !empty($pac['hwid_runtime_wg_profile_enabled']) && $this->isHwidRuntimeModeEnabled($client);
+        $flags = $this->getClientTransportFlags($client, $pac);
+        return !empty($flags['awg']) && !empty($pac['hwid_runtime_wg_profile_enabled']) && $this->isHwidRuntimeModeEnabled($client);
     }
 
     protected function isBothTransportFlagEnabled(array $client, string $field): bool
     {
-        if (!array_key_exists($field, $client)) {
-            return true;
+        $pac = $this->getPacConf();
+        $flags = $this->getClientTransportFlags($client, $pac);
+        if ($field === 'both_reality_enabled') {
+            return !empty($flags['reality']);
         }
-        $v = $client[$field];
-        if ($v === false || $v === 0 || $v === '0' || $v === '') {
-            return false;
+        if ($field === 'both_ws_enabled') {
+            return !empty($flags['ws']);
         }
-
         return true;
     }
 
@@ -6267,9 +6350,6 @@ DNS-over-HTTPS with IP:
 
     protected function expandXrayRegistryClients(array &$c): void
     {
-        if (($this->getPacConf()['transport'] ?? '') !== 'Both') {
-            return;
-        }
         $registry = $c['inbounds'][0]['settings']['clients_all'] ?? null;
         if (is_array($registry) && $registry !== []) {
             $c['inbounds'][0]['settings']['clients'] = $registry;
@@ -6300,9 +6380,7 @@ DNS-over-HTTPS with IP:
     protected function applyBothTransportInboundClients(array &$c): void
     {
         $pac = $this->getPacConf();
-        if (($pac['transport'] ?? '') !== 'Both') {
-            return;
-        }
+        $global = $this->getTransportRegistryGlobal($pac);
 
         // Бот правит clients (после expand из clients_all); при сохранении — он источник истины, не устаревший clients_all.
         $master = $c['inbounds'][0]['settings']['clients'] ?? [];
@@ -6311,8 +6389,7 @@ DNS-over-HTTPS with IP:
         }
         $master = array_values($master);
 
-        $ownerRealityMap = [];
-        $ownerWsMap = [];
+        $ownerTransportMap = [];
         foreach ($master as $ownerClient) {
             if (!is_array($ownerClient) || !empty($ownerClient['device_parent_id'])) {
                 continue;
@@ -6321,39 +6398,36 @@ DNS-over-HTTPS with IP:
             if ($ownerSubId === '') {
                 continue;
             }
-            $ownerRealityMap[$ownerSubId] = $this->isBothRealityEnabledForOwner($ownerClient);
-            $ownerWsMap[$ownerSubId] = $this->isBothWsEnabledForOwner($ownerClient);
+            $ownerTransportMap[$ownerSubId] = $this->getClientTransportFlags($ownerClient, $pac);
         }
 
         $wsClients = [];
+        $xhttpClients = [];
         $realityClients = [];
         foreach ($master as $client) {
             if (!is_array($client) || !empty($client['off'])) {
                 continue;
             }
-
-            $allowReality = true;
+            $flags = $this->getClientTransportFlags($client, $pac);
             if (!empty($client['device_parent_id'])) {
-                $allowReality = $ownerRealityMap[$client['device_parent_id']] ?? true;
-            } else {
-                $allowReality = $this->isBothRealityEnabledForOwner($client);
+                $flags = $ownerTransportMap[$client['device_parent_id']] ?? $global;
             }
-            if ($allowReality) {
+
+            if (!empty($flags['reality'])) {
                 $realityCopy = $client;
                 $realityCopy['flow'] = 'xtls-rprx-vision';
                 $realityClients[] = $realityCopy;
             }
 
-            $allowWs = true;
-            if (!empty($client['device_parent_id'])) {
-                $allowWs = $ownerWsMap[$client['device_parent_id']] ?? true;
-            } else {
-                $allowWs = $this->isBothWsEnabledForOwner($client);
-            }
-            if ($allowWs) {
+            if (!empty($flags['ws'])) {
                 $wsCopy = $client;
                 unset($wsCopy['flow']);
                 $wsClients[] = $wsCopy;
+            }
+            if (!empty($flags['xhttp'])) {
+                $xhttpCopy = $client;
+                unset($xhttpCopy['flow']);
+                $xhttpClients[] = $xhttpCopy;
             }
         }
 
@@ -6373,6 +6447,16 @@ DNS-over-HTTPS with IP:
         }
         if (!$wsApplied) {
             $c['inbounds'][0]['settings']['clients'] = $wsClients;
+        }
+        foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
+            if (!is_array($inbound) || (($inbound['streamSettings']['network'] ?? '') !== 'xhttp')) {
+                continue;
+            }
+            if (!isset($c['inbounds'][$idx]['settings']) || !is_array($c['inbounds'][$idx]['settings'])) {
+                $c['inbounds'][$idx]['settings'] = [];
+            }
+            $c['inbounds'][$idx]['settings']['clients'] = $xhttpClients;
+            $c['inbounds'][$idx]['settings']['decryption'] = 'none';
         }
 
         foreach (($c['inbounds'] ?? []) as $idx => $inbound) {
@@ -7891,14 +7975,16 @@ DNS-over-HTTPS with IP:
     {
         $c      = $this->getXray();
         $pac    = $this->getPacConf();
-        $domain = $this->getDomain($pac['transport'] != 'Reality');
+        $globalTransports = $this->getTransportRegistryGlobal($pac);
+        $domain = $this->getDomain(empty($globalTransports['reality']));
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
 
         switch ($s) {
             default:
-                switch ($pac['transport']) {
-                    case 'Reality':
+                $client = $c['inbounds'][0]['settings']['clients'][$i];
+                $flags = $this->getClientTransportFlags($client, $pac);
+                if (!empty($flags['reality'])) {
                         $link = "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$domain:443"
                                     . "?security=reality"
                                     . "&sni={$c['inbounds'][0]['streamSettings']['realitySettings']['serverNames'][0]}"
@@ -7907,8 +7993,7 @@ DNS-over-HTTPS with IP:
                                     . "&type=tcp"
                                     . "&flow=xtls-rprx-vision"
                                     . "#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
-                        break;
-                    case 'xhttp':
+                } elseif (!empty($flags['xhttp'])) {
                         $link = "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$domain:443"
                                     . "?security=tls"
                                     . "&type=xhttp"
@@ -7922,53 +8007,7 @@ DNS-over-HTTPS with IP:
                                     . "&fp=chrome"
                                     . "&alpn=h2"
                                     . "#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
-                        break;
-                    case 'Both':
-                        $owner = $c['inbounds'][0]['settings']['clients'][$i];
-                        $ownerSubId = $this->getClientSubscriptionId($owner);
-                        $owner = $this->resolveOwnerClientForBothFlags($c, $owner, $ownerSubId);
-                        if (!$this->isBothWsEnabledForOwner($owner) && $this->isBothRealityEnabledForOwner($owner)) {
-                            $realityInbound = null;
-                            foreach (($c['inbounds'] ?? []) as $inbound) {
-                                if (is_array($inbound) && $this->isXrayRealityInbound($inbound)) {
-                                    $realityInbound = $inbound;
-                                    break;
-                                }
-                            }
-                            $rs = is_array($realityInbound) ? ($realityInbound['streamSettings']['realitySettings'] ?? []) : [];
-                            $serverName = $rs['serverNames'][0] ?? ($pac['reality']['domain'] ?? 'yandex.ru');
-                            $shortId = $rs['shortIds'][0] ?? ($pac['reality']['shortId'] ?? '');
-                            $realityPort = (int) ($realityInbound['port'] ?? 33443);
-                            $link = "vless://{$owner['id']}@$domain:{$realityPort}"
-                                . "?security=reality"
-                                . "&sni={$serverName}"
-                                . "&fp=chrome&pbk={$pac['xray']}"
-                                . "&sid={$shortId}"
-                                . "&type=tcp"
-                                . "&flow=xtls-rprx-vision"
-                                . "#{$owner['email']}";
-                        } elseif ($this->isBothWsEnabledForOwner($owner) && !$this->isBothRealityEnabledForOwner($owner)) {
-                            $link = "vless://{$owner['id']}@$domain:443"
-                                . "?flow="
-                                . "&path=%2Fws$hash"
-                                . "&security=tls"
-                                . "&sni=$domain"
-                                . "&fp=chrome"
-                                . "&type=ws"
-                                . "#{$owner['email']}";
-                        } else {
-                            $link = "vless://{$owner['id']}@$domain:443"
-                                . "?flow="
-                                . "&path=%2Fws$hash"
-                                . "&security=tls"
-                                . "&sni=$domain"
-                                . "&fp=chrome"
-                                . "&type=ws"
-                                . "#{$owner['email']}";
-                        }
-                        break;
-
-                    default:
+                } else {
                         $link =  "vless://{$c['inbounds'][0]['settings']['clients'][$i]['id']}@$domain:443"
                                     . "?flow="
                                     . "&path=%2Fws$hash"
@@ -7977,7 +8016,6 @@ DNS-over-HTTPS with IP:
                                     . "&fp=chrome"
                                     . "&type=ws"
                                     . "#{$c['inbounds'][0]['settings']['clients'][$i]['email']}";
-                        break;
                 }
                 return $link;
 
@@ -8174,7 +8212,8 @@ DNS-over-HTTPS with IP:
                 $this->send($this->input['chat'], "user {$user[0]} already exists");
                 return $this->xray();
             }
-            $c['inbounds'][0]['settings']['clients'][] = $p['transport'] != 'Reality' ? [
+            $global = $this->getTransportRegistryGlobal($p);
+            $c['inbounds'][0]['settings']['clients'][] = (empty($global['reality']) || !empty($global['ws']) || !empty($global['xhttp'])) ? [
                     'id'    => $uuid,
                     'email' => $user[0],
                 ] : [
@@ -8293,7 +8332,8 @@ DNS-over-HTTPS with IP:
         if ($direct > 0) {
             return $direct;
         }
-        if (($pac['transport'] ?? '') === 'Both') {
+        $global = $this->getTransportRegistryGlobal($pac);
+        if (!empty($global['reality']) && (!empty($global['ws']) || !empty($global['xhttp']))) {
             $tlsGb  = (float) ($client['traffic_limit_tls_gb'] ?? 0);
             $relGb  = (float) ($client['traffic_limit_reality_gb'] ?? 0);
             $poolGb = $tlsGb + $relGb;
@@ -8710,10 +8750,15 @@ DNS-over-HTTPS with IP:
                 break;
             }
         }
-        if (!empty($fake) && in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
+        $globalTransports = $this->getTransportRegistryGlobal($p);
+        if (!empty($fake) && !empty($globalTransports['reality'])) {
             $text[] = "fake domain: <code>$fake</code>";
         }
-        $text[] = 'transport: ' . ($p['transport'] ?: 'Websocket');
+        $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
+            . ' WS=' . (int) !empty($globalTransports['ws'])
+            . ' XHTTP=' . (int) !empty($globalTransports['xhttp'])
+            . ' Hysteria=' . (int) !empty($globalTransports['hysteria'])
+            . ' AWG=' . (int) !empty($globalTransports['awg']);
         $st = $this->getXrayStats();
         $td = $this->getBytes($st['global']['download'] + $st['session']['download']);
         $tu = $this->getBytes($st['global']['upload'] + $st['session']['upload']);
@@ -8826,8 +8871,13 @@ DNS-over-HTTPS with IP:
             }
         }
         $text[] = 'main outbound: ' . ($p['outbound'] ?: 'proxy');
-        $text[] = 'transport: ' . ($p['transport'] ?: 'Websocket');
-        if (!empty($fake) && in_array(($p['transport'] ?? ''), ['Reality', 'Both'], true)) {
+        $globalTransports = $this->getTransportRegistryGlobal($p);
+        $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
+            . ' WS=' . (int) !empty($globalTransports['ws'])
+            . ' XHTTP=' . (int) !empty($globalTransports['xhttp'])
+            . ' Hysteria=' . (int) !empty($globalTransports['hysteria'])
+            . ' AWG=' . (int) !empty($globalTransports['awg']);
+        if (!empty($fake) && !empty($globalTransports['reality'])) {
             $text[] = "fake domain: <code>$fake</code>";
             $bridgeServer = trim((string) ($p['reality']['bridge_server'] ?? ''));
             if ($bridgeServer !== '') {
@@ -8853,25 +8903,31 @@ DNS-over-HTTPS with IP:
             'text' => $p['linkdomain'] ?: $this->i18n('cdn'),
             'callback_data' => '/addLinkDomain',
         ]];
-            $data[] = [
-                [
-                'text'          => $this->i18n('Reality') . ' ' . ($p['transport'] == 'Reality' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport Reality",
+        $data[] = [
+            [
+                'text'          => 'Reality ' . $this->i18n(!empty($globalTransports['reality']) ? 'on' : 'off'),
+                'callback_data' => "/toggleGlobalTransport reality",
             ],
             [
-                'text'          => $this->i18n('Websocket') . ' ' . ($p['transport'] == 'Websocket' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport Websocket",
+                'text'          => 'WS ' . $this->i18n(!empty($globalTransports['ws']) ? 'on' : 'off'),
+                'callback_data' => "/toggleGlobalTransport ws",
             ],
             [
-                'text'          => $this->i18n('XHTTP') . ($p['transport'] == 'xhttp' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport xhttp",
-            ],
-            [
-                'text'          => 'Both ' . ($p['transport'] == 'Both' ? $this->i18n('on') : $this->i18n('off')),
-                'callback_data' => "/changeTransport Both",
+                'text'          => 'XHTTP ' . $this->i18n(!empty($globalTransports['xhttp']) ? 'on' : 'off'),
+                'callback_data' => "/toggleGlobalTransport xhttp",
             ],
         ];
-        if (in_array($p['transport'], ['Reality', 'Both'], true)) {
+        $data[] = [
+            [
+                'text'          => 'Hysteria ' . $this->i18n(!empty($globalTransports['hysteria']) ? 'on' : 'off'),
+                'callback_data' => "/toggleGlobalTransport hysteria",
+            ],
+            [
+                'text'          => 'AWG ' . $this->i18n(!empty($globalTransports['awg']) ? 'on' : 'off'),
+                'callback_data' => "/toggleGlobalTransport awg",
+            ],
+        ];
+        if (!empty($globalTransports['reality'])) {
             $row = [
                 [
                     'text'          => $this->i18n('changeFakeDomain'),
@@ -8882,7 +8938,7 @@ DNS-over-HTTPS with IP:
                     'callback_data' => "/changeTargetDestination",
                 ],
             ];
-            if ($p['transport'] === 'Reality') {
+            if (empty($globalTransports['ws']) && empty($globalTransports['xhttp'])) {
                 $row[] = [
                     'text'          => $this->i18n('selfFakeDomain'),
                     'callback_data' => "/selfFakeDomain",
@@ -9270,7 +9326,7 @@ DNS-over-HTTPS with IP:
         $xray   = $this->getXray();
         $c      = $xray['inbounds'][0]['settings']['clients'][$i];
         $pac    = $this->getPacConf();
-        $domain = $this->getDomain($pac['transport'] != 'Reality');
+        $domain = $this->getDomain(empty($this->getTransportRegistryGlobal($pac)['reality']));
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
 
@@ -9281,7 +9337,7 @@ DNS-over-HTTPS with IP:
             ? ($this->i18n(!empty($c['hwid_runtime_mode']) ? 'on' : 'off') . ' (override)')
             : ('default(' . $this->i18n(!empty($pac['hwid_runtime_mode_enabled']) ? 'on' : 'off') . ')');
         $runtimeModeText .= $this->getRuntimeParentRetiredEmoji($c);
-        $bothRealityEnabled = $this->isBothRealityEnabledForOwner($c);
+        $transportFlags = $this->getClientTransportFlags($c, $pac);
         $defaultHwid  = max(1, (int) ($pac['hwid_device_count'] ?: 1));
         $hwidLimit    = (int) ($c['hwid_limit'] ?? $defaultHwid);
 
@@ -9302,7 +9358,8 @@ DNS-over-HTTPS with IP:
         $limBytes = $this->getClientTrafficLimitBytes($c, $pac);
         if ($limBytes > 0) {
             $text[] = $this->i18n('traffic limit line') . ': ' . $this->getBytes($limBytes) . ' (↓+↑)';
-            if (($pac['transport'] ?? '') === 'Both'
+            $global = $this->getTransportRegistryGlobal($pac);
+            if (!empty($global['reality']) && (!empty($global['ws']) || !empty($global['xhttp']))
                 && (float) ($c['traffic_limit_gb'] ?? 0) <= 0
                 && (int) ($c['traffic_limit_bytes'] ?? 0) <= 0
                 && (((float) ($c['traffic_limit_tls_gb'] ?? 0) + (float) ($c['traffic_limit_reality_gb'] ?? 0)) > 0)) {
@@ -9356,19 +9413,20 @@ DNS-over-HTTPS with IP:
                 'callback_data' => "/hwidUserRuntimeMode $i",
             ],
         ];
-        if (($pac['transport'] ?? '') === 'Both') {
-            $bothWsEnabled = $this->isBothWsEnabledForOwner($c);
-            $data[] = [
-                [
-                    'text'          => 'Both WS: ' . $this->i18n($bothWsEnabled ? 'on' : 'off'),
-                    'callback_data' => "/toggleUserBothWs $i",
-                ],
-                [
-                    'text'          => 'Both Reality: ' . $this->i18n($bothRealityEnabled ? 'on' : 'off'),
-                    'callback_data' => "/toggleUserBothReality $i",
-                ],
-            ];
-        }
+        $data[] = [
+            [
+                'text'          => 'Reality: ' . $this->i18n(!empty($transportFlags['reality']) ? 'on' : 'off'),
+                'callback_data' => "/toggleUserTransport reality $i",
+            ],
+            [
+                'text'          => 'WS: ' . $this->i18n(!empty($transportFlags['ws']) ? 'on' : 'off'),
+                'callback_data' => "/toggleUserTransport ws $i",
+            ],
+            [
+                'text'          => 'XHTTP: ' . $this->i18n(!empty($transportFlags['xhttp']) ? 'on' : 'off'),
+                'callback_data' => "/toggleUserTransport xhttp $i",
+            ],
+        ];
         $data[] = [
             [
                 'text'          => 'imports & files',
@@ -9418,7 +9476,7 @@ DNS-over-HTTPS with IP:
         $xray   = $this->getXray();
         $c      = $xray['inbounds'][0]['settings']['clients'][$i];
         $pac    = $this->getPacConf();
-        $domain = $this->getDomain($pac['transport'] != 'Reality');
+        $domain = $this->getDomain(empty($this->getTransportRegistryGlobal($pac)['reality']));
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
         $ownerSubId = $this->getClientSubscriptionId($c);
@@ -9491,38 +9549,12 @@ DNS-over-HTTPS with IP:
 
     public function toggleUserBothReality($i)
     {
-        $xray = $this->getXray();
-        if (!isset($xray['inbounds'][0]['settings']['clients'][$i])) {
-            $this->answer($this->input['callback_id'], 'user not found', true);
-            return;
-        }
-        $enabled = $this->isBothRealityEnabledForOwner($xray['inbounds'][0]['settings']['clients'][$i]);
-        if ($enabled) {
-            $xray['inbounds'][0]['settings']['clients'][$i]['both_reality_enabled'] = 0;
-        } else {
-            $xray['inbounds'][0]['settings']['clients'][$i]['both_reality_enabled'] = 1;
-        }
-        $this->syncXrayRegistryClientAt($xray, $i);
-        $this->restartXray($xray);
-        $this->userXr($i);
+        $this->toggleUserTransport('reality', (int) $i);
     }
 
     public function toggleUserBothWs($i)
     {
-        $xray = $this->getXray();
-        if (!isset($xray['inbounds'][0]['settings']['clients'][$i])) {
-            $this->answer($this->input['callback_id'], 'user not found', true);
-            return;
-        }
-        $enabled = $this->isBothWsEnabledForOwner($xray['inbounds'][0]['settings']['clients'][$i]);
-        if ($enabled) {
-            $xray['inbounds'][0]['settings']['clients'][$i]['both_ws_enabled'] = 0;
-        } else {
-            $xray['inbounds'][0]['settings']['clients'][$i]['both_ws_enabled'] = 1;
-        }
-        $this->syncXrayRegistryClientAt($xray, $i);
-        $this->restartXray($xray);
-        $this->userXr($i);
+        $this->toggleUserTransport('ws', (int) $i);
     }
 
     protected function syncXrayRegistryClientAt(array &$xray, int $index): void
@@ -9814,7 +9846,7 @@ DNS-over-HTTPS with IP:
         $xr     = $this->getXray();
         $pac    = $this->getPacConf();
         $st     = $this->getXrayStats();
-        $useCdnDomain = !in_array(($pac['transport'] ?? ''), ['Reality', 'Both'], true);
+        $useCdnDomain = empty($this->getTransportRegistryGlobal($pac)['reality']);
         $domain = !empty($_GET['cdn'] ?? '') ? $_GET['cdn'] : ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
@@ -9965,7 +9997,7 @@ DNS-over-HTTPS with IP:
         }
         $type = $requestType === 'cl' ? 'clash' : 'wg';
         $pac    = $this->getPacConf();
-        $useCdnDomain = !in_array(($pac['transport'] ?? ''), ['Reality', 'Both'], true);
+        $useCdnDomain = empty($this->getTransportRegistryGlobal($pac)['reality']);
         $domain = !empty($_GET['cdn'] ?? '') ? $_GET['cdn'] : ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
         $xr     = $this->getXray();
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
@@ -10518,8 +10550,8 @@ DNS-over-HTTPS with IP:
 
     public function getUpstreamRealityDomain(array $pac, ?array $xray = null): string
     {
-        $transport = (string) ($pac['transport'] ?? '');
-        if (!in_array($transport, ['Reality', 'Both'], true)) {
+        $global = $this->getTransportRegistryGlobal($pac);
+        if (empty($global['reality'])) {
             return 't';
         }
         $domain = trim((string) ($pac['reality']['domain'] ?? ''));
@@ -11509,8 +11541,9 @@ DNS-over-HTTPS with IP:
     {
         $c = $this->getXray();
         $p = $this->getPacConf();
-        // In Both mode, keep reality destination on fake domain only.
-        if (($p['transport'] ?? '') === 'Both') {
+        // When both ws/xhttp and reality enabled, keep reality destination on fake domain only.
+        $global = $this->getTransportRegistryGlobal($p);
+        if (!empty($global['reality']) && (!empty($global['ws']) || !empty($global['xhttp']))) {
             $self = false;
         }
         $currentDest = $this->normalizeRealityTarget((string) ($p['reality']['destination'] ?? ''));
@@ -11564,8 +11597,181 @@ DNS-over-HTTPS with IP:
         }
     }
 
+    protected function buildXrayInboundsByRegistry(array $xray, array $pac): array
+    {
+        $h = $this->getHashBot();
+        $global = $this->getTransportRegistryGlobal($pac);
+        $clients = [];
+        foreach (($xray['inbounds'] ?? []) as $inbound) {
+            if (!empty($inbound['settings']['clients']) && is_array($inbound['settings']['clients'])) {
+                $clients = $inbound['settings']['clients'];
+                break;
+            }
+        }
+        $sniffing = ["destOverride" => ["http", "tls", "quic"], "enabled" => true];
+        foreach (($xray['inbounds'] ?? []) as $inbound) {
+            if (!empty($inbound['sniffing']) && is_array($inbound['sniffing'])) {
+                $sniffing = $inbound['sniffing'];
+                break;
+            }
+        }
+        $apiInbound = ["listen" => "127.0.0.1", "port" => 8080, "protocol" => "dokodemo-door", "settings" => ["address" => "127.0.0.1"], "tag" => "api"];
+        foreach (($xray['inbounds'] ?? []) as $inbound) {
+            if (($inbound['tag'] ?? '') === 'api' || ($inbound['protocol'] ?? '') === 'dokodemo-door') {
+                $apiInbound = $inbound;
+                break;
+            }
+        }
+        $apiInbound['listen'] = '127.0.0.1';
+        $apiInbound['port'] = 8080;
+        $apiInbound['protocol'] = 'dokodemo-door';
+        $apiInbound['settings'] = ['address' => '127.0.0.1'];
+        $apiInbound['tag'] = 'api';
+
+        $inbounds = [];
+        if (!empty($global['ws'])) {
+            $inbounds[] = [
+                "port" => 443,
+                "protocol" => "vless",
+                "settings" => ["clients" => $clients, "decryption" => "none"],
+                "sniffing" => $sniffing,
+                "streamSettings" => ["network" => "ws", "wsSettings" => ["path" => "/ws$h"]],
+                "tag" => "vless_tls",
+            ];
+        }
+        if (!empty($global['xhttp'])) {
+            $inbounds[] = [
+                "port" => 443,
+                "protocol" => "vless",
+                "settings" => ["clients" => $clients, "decryption" => "none"],
+                "sniffing" => $sniffing,
+                "streamSettings" => ["network" => "xhttp", "xhttpSettings" => ["mode" => "auto", "path" => "/ws$h"]],
+                "tag" => "vless_xhttp",
+            ];
+        }
+        if (!empty($global['reality'])) {
+            $inbounds[] = [
+                "port" => 33443,
+                "protocol" => "vless",
+                "settings" => ["clients" => $clients, "decryption" => "none"],
+                "sniffing" => $sniffing,
+                "streamSettings" => [
+                    "network" => "tcp",
+                    "realitySettings" => [
+                        "dest" => (string) ($pac['reality']['destination'] ?? (($pac['reality']['domain'] ?? 'yandex.ru') . ':443')),
+                        "privateKey" => (string) ($pac['reality']['privateKey'] ?? ''),
+                        "serverNames" => [(string) ($pac['reality']['domain'] ?? 'yandex.ru')],
+                        "shortIds" => [(string) ($pac['reality']['shortId'] ?? '')],
+                        "show" => false,
+                        "xver" => 0
+                    ],
+                    "tcpSettings" => ["acceptProxyProtocol" => true],
+                    "sockopt" => ["acceptProxyProtocol" => true],
+                    "security" => "reality"
+                ],
+                "tag" => "vless_reality",
+            ];
+        }
+        if (empty($inbounds)) {
+            $inbounds[] = [
+                "port" => 443,
+                "protocol" => "vless",
+                "settings" => ["clients" => [], "decryption" => "none"],
+                "sniffing" => $sniffing,
+                "streamSettings" => ["network" => "ws", "wsSettings" => ["path" => "/ws$h"]],
+                "tag" => "vless_tls",
+            ];
+        }
+        $inbounds[] = $apiInbound;
+        return $inbounds;
+    }
+
+    protected function applyTransportRegistryAndRuntime(): void
+    {
+        $pac = $this->getPacConf();
+        $pac = $this->normalizeTransportRegistry($pac);
+        $global = $this->getTransportRegistryGlobal($pac);
+        $x = $this->getXray();
+        $x['inbounds'] = $this->buildXrayInboundsByRegistry($x, $pac);
+        $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x));
+        $this->setUpstreamRealityPort(!empty($global['reality']) ? 33443 : 443);
+        $this->setPacConf($pac);
+        $this->restartXray($x);
+        $this->cloakNginx();
+        if (!empty($global['hysteria'])) {
+            $this->restartHysteria();
+        } else {
+            $this->ssh('pkill hysteria || true', 'hy');
+        }
+        if (empty($global['awg'])) {
+            $this->ssh('wg-quick down wg0 || true; awg-quick down wg0 || true', $this->getInstanceWG());
+        }
+    }
+
+    public function toggleGlobalTransport($name)
+    {
+        $allowed = ['reality', 'ws', 'xhttp', 'hysteria', 'awg'];
+        if (!in_array($name, $allowed, true)) {
+            $this->answer($this->input['callback_id'], 'unknown transport', true);
+            return;
+        }
+        $pac = $this->getPacConf();
+        $pac = $this->normalizeTransportRegistry($pac);
+        $pac['transport_registry']['global'][$name] = !empty($pac['transport_registry']['global'][$name]) ? 0 : 1;
+        $this->setPacConf($pac);
+        $this->applyTransportRegistryAndRuntime();
+        $this->xrayCore();
+    }
+
+    public function toggleUserTransport($name, $i)
+    {
+        $allowed = ['reality', 'ws', 'xhttp', 'hysteria', 'awg'];
+        if (!in_array($name, $allowed, true)) {
+            $this->answer($this->input['callback_id'], 'unknown transport', true);
+            return;
+        }
+        $xray = $this->getXray();
+        if (!isset($xray['inbounds'][0]['settings']['clients'][$i])) {
+            $this->answer($this->input['callback_id'], 'user not found', true);
+            return;
+        }
+        $client = $xray['inbounds'][0]['settings']['clients'][$i];
+        $pac = $this->getPacConf();
+        $pac = $this->normalizeTransportRegistry($pac);
+        $subId = $this->getClientSubscriptionId($client);
+        if ($subId === '') {
+            $this->answer($this->input['callback_id'], 'user not found', true);
+            return;
+        }
+        if (!isset($pac['transport_registry']['users'][$subId]) || !is_array($pac['transport_registry']['users'][$subId])) {
+            $pac['transport_registry']['users'][$subId] = [];
+        }
+        $current = $this->getClientTransportFlags($client, $pac);
+        $pac['transport_registry']['users'][$subId][$name] = !empty($current[$name]) ? 0 : 1;
+        $this->setPacConf($pac);
+        $this->applyTransportRegistryAndRuntime();
+        $this->userXr($i);
+    }
+
     public function changeTransport($transport)
     {
+        $legacyMap = [
+            'Reality' => ['reality' => 1, 'ws' => 0, 'xhttp' => 0],
+            'Websocket' => ['reality' => 0, 'ws' => 1, 'xhttp' => 0],
+            'xhttp' => ['reality' => 0, 'ws' => 0, 'xhttp' => 1],
+            'Both' => ['reality' => 1, 'ws' => 1, 'xhttp' => 0],
+        ];
+        if (is_string($transport) && isset($legacyMap[$transport])) {
+            $pac = $this->getPacConf();
+            $pac = $this->normalizeTransportRegistry($pac);
+            foreach ($legacyMap[$transport] as $name => $value) {
+                $pac['transport_registry']['global'][$name] = $value;
+            }
+            $this->setPacConf($pac);
+            $this->applyTransportRegistryAndRuntime();
+            $this->xray();
+            return;
+        }
         $p = $this->getPacConf();
         $x = $this->getXray();
         $h = $this->getHashBot();
