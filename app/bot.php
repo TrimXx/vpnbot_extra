@@ -4,6 +4,7 @@ require_once __DIR__ . '/traits/SubscriptionSecurityTrait.php';
 require_once __DIR__ . '/traits/TransportRegistryTrait.php';
 require_once __DIR__ . '/traits/TransportRuntimeTrait.php';
 require_once __DIR__ . '/traits/PacUrlTrait.php';
+require_once __DIR__ . '/traits/BotCacheTrait.php';
 
 class Bot
 {
@@ -11,6 +12,7 @@ class Bot
     use TransportRegistryTrait;
     use TransportRuntimeTrait;
     use PacUrlTrait;
+    use BotCacheTrait;
 
     public $input;
     public $adguard;
@@ -2609,6 +2611,9 @@ class Bot
 
     public function getPacConf()
     {
+        if ($this->pacConfCache !== null) {
+            return $this->pacConfCache;
+        }
         $raw = json_decode(file_get_contents($this->pac), true);
         if (!is_array($raw)) {
             $raw = [];
@@ -2688,11 +2693,15 @@ class Bot
         $conf['domain_main'] = $mainDomain;
         $conf['domain'] = $mainDomain;
         $conf['domain_aliases'] = $this->getDomainAliasesFromConfig($conf);
+        $this->pacConfCache = $conf;
+
         return $conf;
     }
 
     public function setPacConf(array $conf)
     {
+        $this->invalidatePacConfCache();
+
         return file_put_contents($this->pac, json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
@@ -5280,23 +5289,23 @@ DNS-over-HTTPS with IP:
             }
             $menuStatus = $this->getMenuServiceStatus();
             $cron   = !empty($this->dontshowcron) ? '' : $this->i18n(!empty($menuStatus['cron']) ? 'on' : 'off') . ' cron';
-            $f      = '/docker/compose';
-            $c      = yaml_parse_file($f)['services'];
+            $c      = $this->getDockerComposeServices();
             $main[] = 'v' . getenv('VER');
 
             if (!empty($conf['domain'])) {
                 $main[] = '';
                 if (!empty($conf['domain'])) {
-                    $ssl_expiry = $this->expireCert();
-                    $certs      = $this->domainsCert() ?: [];
+                    $certSnapshot = $this->getCertificateMenuSnapshot();
+                    $ssl_expiry = $certSnapshot['expiry'] ?: false;
+                    $certs      = $certSnapshot['domains'] ?: [];
 
                     $main[] = "<blockquote>";
                     $main[] = "Domains:";
-                    $main[] = $conf['domain'] . (in_array($conf['domain'], $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
+                    $main[] = $conf['domain'] . (in_array($conf['domain'], $certs, true) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
                     if (!empty($conf['adguardkey'])) {
                         foreach ($this->getDnsDomainsForOutput($conf) as $dnsDomain) {
                             $dotDomain = "{$conf['adguardkey']}.{$dnsDomain}";
-                            $main[] = $dotDomain . (in_array($dotDomain, $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';
+                            $main[] = $dotDomain . (in_array($dotDomain, $certs, true) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';
                         }
                     }
                     $main[] = "</blockquote>";
@@ -5306,8 +5315,7 @@ DNS-over-HTTPS with IP:
             }
 
 
-            $ports   = yaml_parse_file('/docker/compose')['services'];
-            $hy_port = explode(':', $c['hy']['ports'][0])[0];
+            $hy_port = explode(':', $c['hy']['ports'][0] ?? '')[0] ?? '';
             $main[]  = '';
 
             $main[] = '<code>';
@@ -5352,7 +5360,7 @@ DNS-over-HTTPS with IP:
                     [
                         [
                             [
-                                'text'          => $this->i18n($this->getPacConf()['wg1_amnezia'] ? 'amnezia' : 'wg_title'),
+                                'text'          => $this->i18n($conf['wg1_amnezia'] ? 'amnezia' : 'wg_title'),
                                 'callback_data' => "/changeWG 1",
                             ],
                             [
@@ -6372,6 +6380,7 @@ DNS-over-HTTPS with IP:
     protected function writeXrayConfig(array $c): void
     {
         $this->applyBothTransportInboundClients($c);
+        $this->invalidateXrayConfigCache();
         file_put_contents('/config/xray.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
@@ -7979,9 +7988,8 @@ DNS-over-HTTPS with IP:
     public function hysteriaMenu()
     {
         $pac    = $this->getPacConf();
-        $f      = '/docker/compose';
-        $c      = yaml_parse_file($f)['services'];
-        $port   = explode(':', $c['hy']['ports'][0])[0];
+        $c      = $this->getDockerComposeServices();
+        $port   = explode(':', $c['hy']['ports'][0] ?? '')[0] ?? '';
         $domain = $this->getDomain();
         $text[] = "Menu -> Hysteria";
         $text[] = "server: " . ($port? "<code>$domain:$port</code>" : 'port unavailable');
@@ -8185,6 +8193,9 @@ DNS-over-HTTPS with IP:
 
     public function getXrayStats()
     {
+        if ($this->xrayStatsCache !== null) {
+            return $this->xrayStatsCache;
+        }
         $stats = json_decode(file_get_contents('/config/xray.stats'), true) ?: [];
         if (!isset($stats['global']) || !is_array($stats['global'])) {
             $stats['global'] = ['download' => 0, 'upload' => 0];
@@ -8201,6 +8212,8 @@ DNS-over-HTTPS with IP:
         if (!isset($stats['inbounds']) || !is_array($stats['inbounds'])) {
             $stats['inbounds'] = [];
         }
+        $this->xrayStatsCache = $stats;
+
         return $stats;
     }
 
@@ -8284,6 +8297,7 @@ DNS-over-HTTPS with IP:
 
     public function setXrayStats($x)
     {
+        $this->invalidateXrayStatsCache();
         file_put_contents('/config/xray.stats', json_encode($x));
     }
 
@@ -10437,11 +10451,15 @@ DNS-over-HTTPS with IP:
 
     public function getXray()
     {
+        if ($this->xrayConfigCache !== null) {
+            return $this->xrayConfigCache;
+        }
         $c = json_decode(file_get_contents('/config/xray.json'), true);
         if (!is_array($c)) {
             return [];
         }
         $this->expandXrayRegistryClients($c);
+        $this->xrayConfigCache = $c;
 
         return $c;
     }
@@ -10802,17 +10820,20 @@ DNS-over-HTTPS with IP:
 
     public function expireCert()
     {
-        $c = openssl_x509_read(file_get_contents("/certs/cert_public"));
-        return openssl_x509_parse($c)["validTo_time_t"] ?: false;
+        $snapshot = $this->getCertificateMenuSnapshot();
+
+        return $snapshot['expiry'] ?: false;
     }
 
     public function domainsCert()
     {
-        $domains = openssl_x509_parse(openssl_x509_read(file_get_contents("/certs/cert_public")))['extensions']["subjectAltName"];
-        if (empty($domains)) {
+        $snapshot = $this->getCertificateMenuSnapshot();
+        $domains = $snapshot['domains'] ?? [];
+        if ($domains === []) {
             return false;
         }
-        return array_map(fn($e) => trim($e), explode(',', str_replace('DNS:', '', $domains)));
+
+        return $domains;
     }
 
     public function updatebot()
@@ -11051,8 +11072,7 @@ DNS-over-HTTPS with IP:
     public function ports()
     {
         $text[] = 'Settings -> Ports';
-        $f      = '/docker/compose';
-        $c      = yaml_parse_file($f)['services'];
+        $c      = $this->getDockerComposeServices();
         $pac = $this->getPacConf();
         $data   = [
             [[
@@ -11139,6 +11159,7 @@ DNS-over-HTTPS with IP:
             file_put_contents($f, $yaml);
         }
 
+        $this->invalidateDockerComposeCache();
         $pac = $this->getPacConf();
         $pac['restart'] = 1;
         $this->setPacConf($pac);
@@ -11189,6 +11210,7 @@ DNS-over-HTTPS with IP:
             file_put_contents($f, $yaml);
         }
 
+        $this->invalidateDockerComposeCache();
         $pac = $this->getPacConf();
         $pac['restart'] = 1;
         $this->setPacConf($pac);

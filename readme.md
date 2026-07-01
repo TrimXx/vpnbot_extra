@@ -91,6 +91,16 @@ crontab -e
   - добавление DoH URL по алиасам в `dns.nameserver` для Clash-подписки.
 - Кнопка `change reality server ip/domain` теперь меняет только клиентский Reality `server` (bridge), не трогая `xray reality dest`.
 - Обновлен импорт бэкапа: `pac` восстанавливается merge-способом для совместимости старых/новых бэкапов и новых полей.
+
+### Roadmap (v3.x)
+
+- Модульность `bot.php`: вынести HWID в отдельный trait
+- Полная зачистка legacy SS / OC / DNSTT / Naive в коде и compose
+- **Ускорение интерфейса бота** — кэш pac/xray/stats на запрос, docker-compose и SSL-снимок в меню
+- Подпись/ротация subscription URL поверх hashbot
+- Полный отказ от `unserialize` (оставить только decode legacy PAC-ссылок)
+- Реестр транспортов v3.1: отдельные порты per-transport, тонкая настройка inbounds
+
 ### Деплой v3-trimx (runbook)
 
 1. Экспорт настроек через бот (**config → export**)
@@ -190,6 +200,15 @@ Add:
 - `change reality server ip/domain` now changes only client-facing Reality `server` (bridge), without changing `xray reality dest`.
 - Backup import improved: `pac` is restored via merge strategy for old/new backup compatibility.
 - `/mirror` script updated (socat TCP/UDP, systemd units, install/status/restart/logs/uninstall).
+
+### Roadmap (v3.x)
+
+- Split `bot.php`: extract HWID into a dedicated trait
+- Remove remaining legacy SS / OC / DNSTT / Naive code and compose services
+- **Bot UI performance** — per-request pac/xray/stats cache, docker-compose and SSL snapshot for menus
+- Subscription URL signing/rotation on top of hashbot
+- Drop `unserialize` entirely (keep legacy PAC URL decode only)
+- Transport registry v3.1: per-transport ports and finer inbound tuning
 
 ### Backup / restore notes
 
