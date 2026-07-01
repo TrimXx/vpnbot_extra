@@ -6,6 +6,7 @@ require_once __DIR__ . '/traits/TransportRuntimeTrait.php';
 require_once __DIR__ . '/traits/PacUrlTrait.php';
 require_once __DIR__ . '/traits/BotCacheTrait.php';
 require_once __DIR__ . '/traits/HwidTrait.php';
+require_once __DIR__ . '/traits/LegacyRemovedTrait.php';
 
 class Bot
 {
@@ -15,6 +16,7 @@ class Bot
     use PacUrlTrait;
     use BotCacheTrait;
     use HwidTrait;
+    use LegacyRemovedTrait;
 
     public $input;
     public $adguard;
@@ -1051,98 +1053,32 @@ class Bot
 
     public function changeOcDomain()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter subdomain",
-            $this->input['message_id'],
-            reply: 'enter subdomain',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chOcSubdomain',
-            'args'           => [],
-        ];
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function changeOcDns()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter dns",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chocdns',
-            'args'           => [],
-        ];
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function changeOcPass()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter pass",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chocpass',
-            'args'           => [],
-        ];
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function changeNaiveUser()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter login",
-            $this->input['message_id'],
-            reply: 'enter login',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chnplogin',
-            'args'           => [],
-        ];
+        $this->legacyRemovedMenu('NaiveProxy');
     }
 
     public function changeNaiveSubdomain()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter subdomain",
-            $this->input['message_id'],
-            reply: 'enter subdomain',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chNpSubdomain',
-            'args'           => [],
-        ];
+        $this->legacyRemovedMenu('NaiveProxy');
     }
 
     public function changeNaivePass()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter password",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chnppass',
-            'args'           => [],
-        ];
+        $this->legacyRemovedMenu('NaiveProxy');
     }
 
     public function changeHysteriaPass()
@@ -1163,18 +1099,7 @@ class Bot
 
     public function addOcUser()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter name",
-            $this->input['message_id'],
-            reply: 'enter name',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'addocus',
-            'args'           => [],
-        ];
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function addXrUser()
@@ -1240,14 +1165,7 @@ class Bot
 
     public function restartNaive()
     {
-        $pac = $this->getPacConf();
-        $this->ssh('pkill caddy', 'np');
-        $c = file_get_contents('/config/Caddyfile');
-        $t = preg_replace('~^(\t+)?basic_auth[^\n]+~sm', '$1basic_auth ' . ($pac['naive']['user'] ?? '_') . ' ' . ($pac['naive']['pass'] ?? '__'), $c);
-        file_put_contents('/config/Caddyfile', $t);
-        if (!empty($pac['naive']['pass']) && !empty($this->getHashSubdomain('np'))) {
-            $this->ssh('caddy run -c /config/Caddyfile', 'np', false);
-        }
+        // NaiveProxy container removed in v3.
     }
 
     public function restartHysteria()
@@ -1267,56 +1185,27 @@ class Bot
 
     public function chocdns($dns)
     {
-        $c = file_get_contents('/config/ocserv.conf');
-        $t = preg_replace('~^dns[^\n]+~sm', "dns = $dns", $c);
-        $this->restartOcserv($t);
-        $this->menu('oc');
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function chOcSubdomain($domain)
     {
-        $pac = $this->getPacConf();
-        if ($domain == -1) {
-            unset($pac["oc_domain"]);
-        } else {
-            $pac["oc_domain"] = $domain;
-        }
-        $this->setPacConf($pac);
-        $this->chocdomain($pac['domain']);
-        $this->setUpstreamDomainOcserv($this->getAllConfiguredDomains($pac));
-        $this->menu('oc');
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function chNpSubdomain($domain)
     {
-        $pac = $this->getPacConf();
-        if ($domain == -1) {
-            unset($pac['np_domain']);
-        } else {
-            $pac['np_domain'] = $domain;
-        }
-        $this->setPacConf($pac);
-        $this->restartNaive();
-        $this->setUpstreamDomainNaive($this->getAllConfiguredDomains($pac));
-        $this->menu('naive');
+        $this->legacyRemovedMenu('NaiveProxy');
     }
 
     public function chnplogin($user)
     {
-        $pac = $this->getPacConf();
-        $pac['naive']['user'] = $user;
-        $this->setPacConf($pac);
-        $this->restartNaive();
-        $this->menu('naive');
+        $this->legacyRemovedMenu('NaiveProxy');
     }
 
     public function chnppass($pass)
     {
-        $pac = $this->getPacConf();
-        $pac['naive']['pass'] = $pass;
-        $this->setPacConf($pac);
-        $this->restartNaive();
-        $this->menu('naive');
+        $this->legacyRemovedMenu('NaiveProxy');
     }
 
     public function chhypass($pass)
@@ -1334,31 +1223,17 @@ class Bot
 
     public function chockey($pass)
     {
-        $c = file_get_contents('/config/ocserv.conf');
-        $t = preg_replace('~^camouflage_secret[^\n]+~sm', "camouflage_secret = \"$pass\"", $c);
-        $this->restartOcserv($t);
-        $this->menu('oc');
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function chocdomain($domain)
     {
-        $oc = $this->getHashSubdomain('oc');
-        $c  = file_get_contents('/config/ocserv.conf');
-        $t  = preg_replace('~^default-domain[^\n]+~sm', "default-domain = $oc.$domain", $c);
-        $this->restartOcserv($t);
+        // OpenConnect container removed in v3.
     }
 
     public function chocpass($pass)
     {
-        $pac = $this->getPacConf();
-        $pac['ocserv'] = $pass;
-        $this->setPacConf($pac);
-        $clients = $this->getClientsOc();
-        foreach ($clients as $k => $v) {
-            $this->ssh("echo '$pass' | ocpasswd -c /etc/ocserv/ocserv.passwd $v", 'oc');
-        }
-        $this->restartOcserv(file_get_contents('/config/ocserv.conf'));
-        $this->menu('oc');
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function v2ray()
@@ -2065,9 +1940,7 @@ class Bot
         $code   = $this->createConfig($client);
         $this->upload(preg_replace(['~\s+~', '~\(|\)~'], ['_', ''], $name) . ".conf", $code);
         if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->menu('client', "{$cl}_0");
+            $this->finishQrMenuRefresh(fn () => $this->menu('client', "{$cl}_0"));
         }
     }
 
@@ -2242,9 +2115,7 @@ class Bot
             $this->sendQr($name, $this->createConfig($client), "$name for Wireguard");
         }
         if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->menu('client', "{$cl}_0");
+            $this->finishQrMenuRefresh(fn () => $this->menu('client', "{$cl}_0"));
         }
     }
 
@@ -2268,9 +2139,7 @@ class Bot
         );
         unlink($qr_file);
         if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->xray();
+            $this->finishQrMenuRefresh(fn () => $this->xray());
         }
     }
 
@@ -2286,9 +2155,7 @@ class Bot
         );
         unlink($qr_file);
         if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->mtproto();
+            $this->finishQrMenuRefresh(fn () => $this->mtproto());
         }
     }
 
@@ -4136,9 +4003,9 @@ DNS-over-HTTPS with IP:
             $page = floor(count($c['subnets']) / $this->limit);
         }
         if (!empty($openconnect)) {
-            $this->ocservRoute();
+            $this->legacyRemovedNotice('OpenConnect');
         }
-        $this->subnet($wgpage, $page, $openconnect);
+        $this->subnet($wgpage, $page, 0);
     }
 
     public function subnetDelete($wgpage, $k, $page = 0, $openconnect = 0)
@@ -4147,9 +4014,9 @@ DNS-over-HTTPS with IP:
         unset($c['subnets'][$k]);
         $this->setPacConf($c);
         if (!empty($openconnect)) {
-            $this->ocservRoute();
+            $this->legacyRemovedNotice('OpenConnect');
         }
-        $this->subnet($wgpage, $page, $openconnect);
+        $this->subnet($wgpage, $page, 0);
     }
 
     public function ocservRoute()
@@ -4213,7 +4080,7 @@ DNS-over-HTTPS with IP:
     public function subnet($wgpage = 0, $page = 0, $openconnect = 0)
     {
         $count  = $this->limit;
-        $text   = 'Menu -> ' . ($openconnect ? 'Openconnect' : 'Wireguard') . ' -> ' . $this->i18n('listSubnet') . "\n";
+        $text   = 'Menu -> Wireguard -> ' . $this->i18n('listSubnet') . "\n";
         $data[] = [
             [
                 'text'          => $this->i18n('calc'),
@@ -5074,12 +4941,12 @@ DNS-over-HTTPS with IP:
 
     public function getSSConfig()
     {
-        return json_decode(file_get_contents('/config/ssserver.json'), true);
+        return ['method' => '', 'password' => ''];
     }
 
     public function getSSLocalConfig()
     {
-        return json_decode(file_get_contents('/config/sslocal.json'), true);
+        return ['password' => ''];
     }
 
     public function menuSS()
@@ -6512,23 +6379,12 @@ DNS-over-HTTPS with IP:
 
     public function changeOcExpose()
     {
-        $c = file_get_contents('/config/ocserv.conf');
-        preg_match('~^expose-iroutes = ([^\n]+)~sm', $c, $m);
-        $t = preg_replace('~^expose-iroutes[^\n]+~sm', "expose-iroutes = " . ($m[1] == 'true' ? 'false' : 'true'), $c);
-        $this->restartOcserv($t);
-        $this->menu('oc');
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function deloc($i)
     {
-        $clients = $this->getClientsOc();
-        foreach ($clients as $k => $v) {
-            if ($i == $k) {
-                $this->ssh("ocpasswd -c /etc/ocserv/ocserv.passwd -d $v", 'oc');
-                break;
-            }
-        }
-        $this->menu('oc');
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function delxr($i)
@@ -6572,15 +6428,12 @@ DNS-over-HTTPS with IP:
 
     public function getClientsOc()
     {
-        $users = array_filter(explode("\n", file_get_contents('/config/ocserv.passwd')), fn ($e) => !empty($e));
-        return array_map(fn($e) => explode(':', $e)[0], $users);
+        return [];
     }
 
     public function addocus($user)
     {
-        $pac = $this->getPacConf();
-        $this->ssh("echo '{$pac['ocserv']}' | ocpasswd -c /etc/ocserv/ocserv.passwd $user", 'oc');
-        $this->menu('oc');
+        $this->legacyRemovedMenu('OpenConnect');
     }
 
     public function addxrus($users)

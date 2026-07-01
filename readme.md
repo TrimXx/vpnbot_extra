@@ -95,8 +95,8 @@ crontab -e
 ### Roadmap (v3.x)
 
 - Модульность `bot.php`: HWID вынесен в `HwidTrait` (~1800 строк)
-- Полная зачистка legacy SS / OC / DNSTT / Naive в коде и compose
-- **Ускорение интерфейса бота** — кэш pac/xray/stats на запрос, docker-compose и SSL-снимок в меню
+- Полная зачистка legacy SS/OC/DNSTT/Naive — заглушки и `LegacyRemovedTrait`
+- **Ускорение интерфейса бота** — кэш pac/xray/stats, docker-compose/SSL; blinkmenu без delete+resend
 - Подпись/ротация subscription URL поверх hashbot
 - Полный отказ от `unserialize` (оставить только decode legacy PAC-ссылок)
 - Реестр транспортов v3.1: отдельные порты per-transport, тонкая настройка inbounds
@@ -204,8 +204,8 @@ Add:
 ### Roadmap (v3.x)
 
 - Split `bot.php`: HWID logic moved to `HwidTrait` (~1800 lines)
-- Remove remaining legacy SS / OC / DNSTT / Naive code and compose services
-- **Bot UI performance** — per-request pac/xray/stats cache, docker-compose and SSL snapshot for menus
+- Remove remaining legacy SS/OC/DNSTT/Naive paths via stubs and `LegacyRemovedTrait`
+- **Bot UI performance** — pac/xray/stats cache, docker-compose/SSL snapshot; blinkmenu without delete+resend
 - Subscription URL signing/rotation on top of hashbot
 - Drop `unserialize` entirely (keep legacy PAC URL decode only)
 - Transport registry v3.1: per-transport ports and finer inbound tuning
