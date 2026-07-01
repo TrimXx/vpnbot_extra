@@ -46,7 +46,23 @@ trait PacUrlTrait
             return $wrapper;
         }
 
-        $legacy = @unserialize($raw);
+        return $this->decodeLegacyPacUrlArray($raw);
+    }
+
+    protected function decodeLegacyPacUrlArray(string $raw): array
+    {
+        if ($raw === '') {
+            return [];
+        }
+        if ($raw[0] === '{' || $raw[0] === '[') {
+            $json = json_decode($raw, true);
+
+            return is_array($json) ? $json : [];
+        }
+        if (!preg_match('~^a:\d+:\{~', $raw)) {
+            return [];
+        }
+        $legacy = @unserialize($raw, ['allowed_classes' => false]);
 
         return is_array($legacy) ? $legacy : [];
     }

@@ -95,11 +95,11 @@ crontab -e
 ### Roadmap (v3.x)
 
 - Модульность `bot.php`: HWID вынесен в `HwidTrait` (~1800 строк)
-- Полная зачистка legacy SS/OC/DNSTT/Naive — заглушки и `LegacyRemovedTrait`
-- **Ускорение интерфейса бота** — кэш pac/xray/stats, docker-compose/SSL; blinkmenu без delete+resend
-- Подпись/ротация subscription URL поверх hashbot
-- Полный отказ от `unserialize` (оставить только decode legacy PAC-ссылок)
-- Реестр транспортов v3.1: отдельные порты per-transport, тонкая настройка inbounds
+- Legacy SS/OC/DNSTT/Naive: заглушки и `LegacyRemovedTrait`
+- Ускорение UI: кэш pac/xray/stats, blinkmenu in-place, `ackCallback` на меню
+- Подпись subscription URL (`sig` + epoch) и ротация в config
+- PAC decode: только legacy serialize с `allowed_classes => false`
+- Transport registry v3.1: порты WS/XHTTP/Reality в `pac.transport_registry.ports`
 
 ### Деплой v3-trimx (runbook)
 
@@ -204,11 +204,11 @@ Add:
 ### Roadmap (v3.x)
 
 - Split `bot.php`: HWID logic moved to `HwidTrait` (~1800 lines)
-- Remove remaining legacy SS/OC/DNSTT/Naive paths via stubs and `LegacyRemovedTrait`
-- **Bot UI performance** — pac/xray/stats cache, docker-compose/SSL snapshot; blinkmenu without delete+resend
-- Subscription URL signing/rotation on top of hashbot
-- Drop `unserialize` entirely (keep legacy PAC URL decode only)
-- Transport registry v3.1: per-transport ports and finer inbound tuning
+- Legacy SS/OC/DNSTT/Naive stubs via `LegacyRemovedTrait`
+- UI performance: pac/xray/stats cache, in-place blinkmenu, menu `ackCallback`
+- Subscription URL signing (`sig` + epoch) and rotation in config menu
+- PAC decode: legacy serialize only with `allowed_classes => false`
+- Transport registry v3.1: WS/XHTTP/Reality ports in `pac.transport_registry.ports`
 
 ### Backup / restore notes
 

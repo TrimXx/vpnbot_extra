@@ -516,6 +516,15 @@ class Bot
             case preg_match('~^/toggleGlobalTransport (\w+)$~', $this->input['callback'], $m):
                 $this->toggleGlobalTransport($m[1]);
                 break;
+            case preg_match('~^/toggleSubscriptionUrlSigned$~', $this->input['callback'], $m):
+                $this->toggleSubscriptionUrlSigned();
+                break;
+            case preg_match('~^/rotateSubscriptionUrls$~', $this->input['callback'], $m):
+                $this->rotateSubscriptionUrls();
+                break;
+            case preg_match('~^/setTransportPort (\w+)$~', $this->input['callback'], $m):
+                $this->setTransportPort($m[1]);
+                break;
             case preg_match('~^/toggleUserBothReality (\d+)$~', $this->input['callback'], $m):
                 $this->toggleUserTransport('reality', (int) $m[1]);
                 break;
@@ -2554,7 +2563,14 @@ class Bot
                     'awg' => 0,
                 ],
                 'users' => [],
+                'ports' => [
+                    'ws' => 443,
+                    'xhttp' => 8443,
+                    'reality' => 33443,
+                ],
             ],
+            'subscription_url_signed' => 0,
+            'subscription_url_epoch' => 1,
         ];
         $conf = array_replace_recursive($defaults, $raw);
         $conf = $this->normalizeTransportRegistry($conf);
@@ -5101,6 +5117,9 @@ DNS-over-HTTPS with IP:
 
     public function menu($type = false, $arg = false, $return = false)
     {
+        if ($type === false && !empty($this->input['callback_id'])) {
+            $this->ackCallback();
+        }
         if ($type === 'wg') {
             $this->wg = 1;
         }
@@ -5146,6 +5165,7 @@ DNS-over-HTTPS with IP:
 
 
             $hy_port = explode(':', $c['hy']['ports'][0] ?? '')[0] ?? '';
+            $xrPort = (int) ($this->getTransportRegistryPorts($conf)['ws'] ?? 443);
             $main[]  = '';
 
             $main[] = '<code>';
@@ -5160,7 +5180,7 @@ DNS-over-HTTPS with IP:
                 ],
                 [
                     $this->i18n($c['wg1'] ? 'on' : 'off') . ' ' . getenv('WG1PORT'),
-                    $this->i18n('on') . ' 443',
+                    $this->i18n('on') . ' ' . $xrPort,
                     $this->i18n($hy_port ? 'on' : 'off') . ($hy_port ? " $hy_port" : 'port unavailable'),
                     $this->i18n($c['tg'] ? 'on' : 'off') . ' ' . getenv('TGPORT'),
                     $this->i18n($c['ad'] ? 'on' : 'off') . ' 853',
@@ -6237,9 +6257,11 @@ DNS-over-HTTPS with IP:
             }
         }
 
+        $clientPort = $this->getTransportClientPort((string) $transport, $pac);
+
         switch ($transport) {
             case 'reality':
-                return "vless://{$clientId}@$domain:443"
+                return "vless://{$clientId}@$domain:{$clientPort}"
                     . "?security=reality"
                     . "&sni={$realitySni}"
                     . "&fp=chrome&pbk={$pac['xray']}"
@@ -6250,7 +6272,7 @@ DNS-over-HTTPS with IP:
             case 'xhttp':
                 $xhPath = rawurlencode($this->getXhttpTransportPath($hash));
 
-                return "vless://{$clientId}@$domain:443"
+                return "vless://{$clientId}@$domain:{$clientPort}"
                     . "?security=tls"
                     . "&type=xhttp"
                     . "&headerType="
@@ -6267,7 +6289,7 @@ DNS-over-HTTPS with IP:
             default:
                 $wsPath = rawurlencode($this->getWsTransportPath($hash));
 
-                return "vless://{$clientId}@$domain:443"
+                return "vless://{$clientId}@$domain:{$clientPort}"
                     . "?flow="
                     . "&path={$wsPath}"
                     . "&security=tls"
@@ -6986,6 +7008,7 @@ DNS-over-HTTPS with IP:
 
     public function xray($page = 0)
     {
+        $this->ackCallback();
         $c      = $this->getXray();
         $p      = $this->getPacConf();
         $text[] = "Menu -> " . $this->i18n('xray');
@@ -7106,6 +7129,7 @@ DNS-over-HTTPS with IP:
 
     public function xrayCore()
     {
+        $this->ackCallback();
         $c = $this->getXray();
         $p = $this->getPacConf();
         $text[] = "Menu -> " . $this->i18n('xray') . " -> core/network";
@@ -7119,6 +7143,8 @@ DNS-over-HTTPS with IP:
         }
         $text[] = 'main outbound: ' . ($p['outbound'] ?: 'proxy');
         $globalTransports = $this->getTransportRegistryGlobal($p);
+        $ports = $this->getTransportRegistryPorts($p);
+        $text[] = 'ports: WS=' . $ports['ws'] . ' XHTTP=' . $ports['xhttp'] . ' Reality=' . $ports['reality'];
         $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
             . ' WS=' . (int) !empty($globalTransports['ws'])
             . ' XHTTP=' . (int) !empty($globalTransports['xhttp'])
@@ -7172,6 +7198,20 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => 'AWG ' . $this->i18n(!empty($globalTransports['awg']) ? 'on' : 'off'),
                 'callback_data' => "/toggleGlobalTransport awg",
+            ],
+        ];
+        $data[] = [
+            [
+                'text'          => 'WS port: ' . $ports['ws'],
+                'callback_data' => '/setTransportPort ws',
+            ],
+            [
+                'text'          => 'XHTTP port: ' . $ports['xhttp'],
+                'callback_data' => '/setTransportPort xhttp',
+            ],
+            [
+                'text'          => 'Reality port: ' . $ports['reality'],
+                'callback_data' => '/setTransportPort reality',
             ],
         ];
         if (!empty($globalTransports['reality'])) {
@@ -7514,6 +7554,7 @@ DNS-over-HTTPS with IP:
 
     public function userXr($i)
     {
+        $this->ackCallback();
         $xray   = $this->getXray();
         $c      = $xray['inbounds'][0]['settings']['clients'][$i];
         $pac    = $this->getPacConf();
@@ -7534,7 +7575,7 @@ DNS-over-HTTPS with IP:
 
         $text[] = "Menu -> " . $this->i18n('xray') . " -> {$c['email']}\n";
         if (file_exists(__DIR__ . '/subscription.php')) {
-            $text[] = "<a href='$scheme://{$domain}/pac$hash/sub?id={$ownerSubId}'>subscription</a>";
+            $text[] = '<a href="' . htmlspecialchars($this->buildSubscriptionPageUrl($scheme, $domain, $hash, $ownerSubId), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '">subscription</a>';
         }
         $text[] = "<pre><code>{$this->linkXray($i)}</code></pre>\n";
         if (!empty($transportFlags['ws']) && !empty($transportFlags['xhttp']) && empty($transportFlags['reality'])) {
@@ -7833,6 +7874,8 @@ DNS-over-HTTPS with IP:
             exit;
         }
 
+        $this->requireSubscriptionUrlAccess($uid);
+
         $action = (string) ($_GET['action'] ?? '');
         if ($action !== '') {
             header('Content-Type: application/json; charset=utf-8');
@@ -7917,7 +7960,7 @@ DNS-over-HTTPS with IP:
         if (!$flag && !$this->processHwidRequest($client, $clientIndex)) {
             exit;
         }
-        $suburl   = "<a href='$scheme://{$domain}/pac$hash/sub?id={$uid}'>subscription</a>";
+        $suburl   = '<a href="' . htmlspecialchars($this->buildSubscriptionPageUrl($scheme, $domain, $hash, $uid), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '">subscription</a>';
         $trafficTotals = $this->getSubscriptionXrayTrafficTotals($st, $client, $clientIndex);
         $download = $this->getBytes($trafficTotals['download']);
         $upload   = $this->getBytes($trafficTotals['upload']);
@@ -9035,6 +9078,17 @@ DNS-over-HTTPS with IP:
 
         $data[] = [
             [
+                'text'          => 'sub URL signed: ' . $this->i18n(!empty($conf['subscription_url_signed']) ? 'on' : 'off'),
+                'callback_data' => '/toggleSubscriptionUrlSigned',
+            ],
+            [
+                'text'          => 'rotate subscription URLs',
+                'callback_data' => '/rotateSubscriptionUrls',
+            ],
+        ];
+
+        $data[] = [
+            [
                 'text'          => $this->i18n('lang'),
                 'callback_data' => "/menu lang",
             ],
@@ -9576,6 +9630,7 @@ DNS-over-HTTPS with IP:
             $this->answer($this->input['callback_id'], 'unknown transport', true);
             return;
         }
+        $this->ackCallback();
         $pac = $this->getPacConf();
         $pac = $this->normalizeTransportRegistry($pac);
         $pac['transport_registry']['global'][$name] = !empty($pac['transport_registry']['global'][$name]) ? 0 : 1;
@@ -9612,6 +9667,66 @@ DNS-over-HTTPS with IP:
         $this->setPacConf($pac);
         $this->applyTransportRegistryAndRuntime();
         $this->userXr($i);
+    }
+
+    public function toggleSubscriptionUrlSigned()
+    {
+        $pac = $this->getPacConf();
+        $pac['subscription_url_signed'] = !empty($pac['subscription_url_signed']) ? 0 : 1;
+        $this->setPacConf($pac);
+        $this->ackCallback('sub URL signed: ' . $this->i18n(!empty($pac['subscription_url_signed']) ? 'on' : 'off'), true);
+        $this->menu('config');
+    }
+
+    public function rotateSubscriptionUrls()
+    {
+        $epoch = $this->rotateSubscriptionUrlEpoch();
+        $this->ackCallback("subscription URLs rotated (epoch $epoch)", true);
+        $this->menu('config');
+    }
+
+    public function setTransportPort($name)
+    {
+        $allowed = ['ws', 'xhttp', 'reality'];
+        if (!in_array($name, $allowed, true)) {
+            $this->ackCallback('unknown transport', true);
+            return;
+        }
+        $ports = $this->getTransportRegistryPorts();
+        $current = (int) ($ports[$name] ?? 0);
+        $r = $this->send(
+            $this->input['chat'],
+            "@{$this->input['username']} enter inbound port for $name\ncurrent: $current",
+            $this->input['message_id'],
+            reply: "enter port for $name",
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'callback'      => 'saveTransportPort',
+            'args'          => [$name],
+        ];
+    }
+
+    public function saveTransportPort($port, $name)
+    {
+        $allowed = ['ws', 'xhttp', 'reality'];
+        if (!in_array($name, $allowed, true)) {
+            $this->send($this->input['chat'], 'unknown transport', $this->input['message_id']);
+            return;
+        }
+        $port = (int) $port;
+        if ($port <= 0 || $port > 65535) {
+            $this->send($this->input['chat'], 'invalid port', $this->input['message_id']);
+            $this->xrayCore();
+            return;
+        }
+        $pac = $this->getPacConf();
+        $pac = $this->normalizeTransportRegistry($pac);
+        $pac['transport_registry']['ports'][$name] = $port;
+        $this->setPacConf($pac);
+        $this->applyTransportRegistryAndRuntime();
+        $this->send($this->input['chat'], "$name port saved: $port", $this->input['message_id']);
+        $this->xrayCore();
     }
 
     public function changeTransport($transport)

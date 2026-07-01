@@ -29,6 +29,14 @@ trait BotCacheTrait
         $this->dockerComposeMtime = null;
     }
 
+    protected function ackCallback(?string $text = null, bool $showAlert = false): void
+    {
+        if (empty($this->input['callback_id'])) {
+            return;
+        }
+        $this->answer($this->input['callback_id'], $text ?? '', $showAlert);
+    }
+
     protected function getDockerComposeServices(): array
     {
         $path = '/docker/compose';

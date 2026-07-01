@@ -160,4 +160,69 @@ trait SubscriptionSecurityTrait
             $this->denySubscriptionAction('rate limit exceeded', 429);
         }
     }
+
+    protected function getSubscriptionUrlEpoch(?array $pac = null): int
+    {
+        $pac = $pac ?? $this->getPacConf();
+
+        return max(1, (int) ($pac['subscription_url_epoch'] ?? 1));
+    }
+
+    protected function createSubscriptionUrlSig(string $subscriptionId, ?int $epoch = null): string
+    {
+        $epoch = $epoch ?? $this->getSubscriptionUrlEpoch();
+        $digest = hash_hmac('sha256', $subscriptionId . '|' . $epoch, $this->key, true);
+
+        return rtrim(strtr(base64_encode($digest), '+/', '-_'), '=');
+    }
+
+    protected function verifySubscriptionUrlSig(string $subscriptionId, string $sig): bool
+    {
+        $sig = trim($sig);
+        if ($sig === '' || $subscriptionId === '') {
+            return false;
+        }
+        $epoch = $this->getSubscriptionUrlEpoch();
+        if (hash_equals($this->createSubscriptionUrlSig($subscriptionId, $epoch), $sig)) {
+            return true;
+        }
+
+        return $epoch > 1 && hash_equals($this->createSubscriptionUrlSig($subscriptionId, $epoch - 1), $sig);
+    }
+
+    protected function buildSubscriptionPageUrl(string $scheme, string $domain, string $hash, string $subscriptionId): string
+    {
+        $subscriptionId = trim($subscriptionId);
+        $query = http_build_query([
+            'id' => $subscriptionId,
+            'sig' => $this->createSubscriptionUrlSig($subscriptionId),
+        ]);
+
+        return "{$scheme}://{$domain}/pac{$hash}/sub?{$query}";
+    }
+
+    protected function requireSubscriptionUrlAccess(string $subscriptionId): void
+    {
+        $pac = $this->getPacConf();
+        $sig = trim((string) ($_GET['sig'] ?? ''));
+        $signedRequired = !empty($pac['subscription_url_signed']);
+        if ($sig === '' && !$signedRequired) {
+            return;
+        }
+        if ($sig === '' || !$this->verifySubscriptionUrlSig($subscriptionId, $sig)) {
+            http_response_code(403);
+            header('Content-Type: text/html; charset=utf-8');
+            echo '<html><body><h2>Subscription link invalid or expired</h2><p>Please open the bot and request a new subscription link.</p></body></html>';
+            exit;
+        }
+    }
+
+    protected function rotateSubscriptionUrlEpoch(): int
+    {
+        $pac = $this->getPacConf();
+        $pac['subscription_url_epoch'] = $this->getSubscriptionUrlEpoch($pac) + 1;
+        $this->setPacConf($pac);
+
+        return (int) $pac['subscription_url_epoch'];
+    }
 }

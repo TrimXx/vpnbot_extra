@@ -31,12 +31,52 @@ trait TransportRegistryTrait
             $global[$k] = !empty($global[$k]) ? 1 : (int) $v;
         }
         $users = is_array($registry['users'] ?? null) ? $registry['users'] : [];
+        $portDefaults = [
+            'ws' => 443,
+            'xhttp' => 8443,
+            'reality' => 33443,
+        ];
+        $ports = is_array($registry['ports'] ?? null) ? $registry['ports'] : [];
+        foreach ($portDefaults as $k => $defaultPort) {
+            $value = (int) ($ports[$k] ?? $defaultPort);
+            $ports[$k] = $value > 0 ? $value : $defaultPort;
+        }
         $conf['transport_registry'] = [
             'global' => $global,
             'users' => $users,
+            'ports' => $ports,
         ];
 
         return $conf;
+    }
+
+    protected function getTransportRegistryPorts(?array $pac = null): array
+    {
+        $pac = $pac ?? $this->getPacConf();
+        $pac = $this->normalizeTransportRegistry($pac);
+
+        return $pac['transport_registry']['ports'] ?? [
+            'ws' => 443,
+            'xhttp' => 8443,
+            'reality' => 33443,
+        ];
+    }
+
+    protected function getTransportClientPort(string $transport, ?array $pac = null): int
+    {
+        $ports = $this->getTransportRegistryPorts($pac);
+        if ($transport === 'xhttp' || $transport === 'ws' || $transport === 'reality') {
+            return 443;
+        }
+
+        return (int) ($ports[$transport] ?? 443);
+    }
+
+    protected function getWsInboundPort(?array $pac = null): int
+    {
+        $ports = $this->getTransportRegistryPorts($pac);
+
+        return (int) $ports['ws'];
     }
 
     protected function getTransportRegistryGlobal(array $pac): array
@@ -78,15 +118,25 @@ trait TransportRegistryTrait
         return '/xh' . ($hash !== '' ? $hash : $this->getHashBot());
     }
 
-    protected function getXhttpInboundPort(): int
+    protected function getXhttpInboundPort(?array $pac = null): int
     {
-        return 8443;
+        $ports = $this->getTransportRegistryPorts($pac);
+
+        return (int) $ports['xhttp'];
+    }
+
+    protected function getRealityInboundPort(?array $pac = null): int
+    {
+        $ports = $this->getTransportRegistryPorts($pac);
+
+        return (int) $ports['reality'];
     }
 
     protected function buildXrayInboundsByRegistry(array $xray, array $pac): array
     {
         $h = $this->getHashBot();
         $global = $this->getTransportRegistryGlobal($pac);
+        $ports = $this->getTransportRegistryPorts($pac);
         $clients = [];
         foreach (($xray['inbounds'] ?? []) as $inbound) {
             if (!empty($inbound['settings']['clients']) && is_array($inbound['settings']['clients'])) {
@@ -117,7 +167,7 @@ trait TransportRegistryTrait
         $inbounds = [];
         if (!empty($global['ws'])) {
             $inbounds[] = [
-                'port' => 443,
+                'port' => $ports['ws'],
                 'protocol' => 'vless',
                 'settings' => ['clients' => $clients, 'decryption' => 'none'],
                 'sniffing' => $sniffing,
@@ -127,7 +177,7 @@ trait TransportRegistryTrait
         }
         if (!empty($global['xhttp'])) {
             $inbounds[] = [
-                'port' => $this->getXhttpInboundPort(),
+                'port' => $ports['xhttp'],
                 'protocol' => 'vless',
                 'settings' => ['clients' => $clients, 'decryption' => 'none'],
                 'sniffing' => $sniffing,
@@ -137,7 +187,7 @@ trait TransportRegistryTrait
         }
         if (!empty($global['reality'])) {
             $inbounds[] = [
-                'port' => 33443,
+                'port' => $ports['reality'],
                 'protocol' => 'vless',
                 'settings' => ['clients' => $clients, 'decryption' => 'none'],
                 'sniffing' => $sniffing,
@@ -160,7 +210,7 @@ trait TransportRegistryTrait
         }
         if (empty($inbounds)) {
             $inbounds[] = [
-                'port' => 443,
+                'port' => $ports['ws'],
                 'protocol' => 'vless',
                 'settings' => ['clients' => [], 'decryption' => 'none'],
                 'sniffing' => $sniffing,
@@ -181,7 +231,7 @@ trait TransportRegistryTrait
         $x = $this->getXray();
         $x['inbounds'] = $this->buildXrayInboundsByRegistry($x, $pac);
         $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x));
-        $this->setUpstreamRealityPort(!empty($global['reality']) ? 33443 : 443);
+        $this->setUpstreamRealityPort(!empty($global['reality']) ? $this->getRealityInboundPort($pac) : $this->getWsInboundPort($pac));
         $this->setPacConf($pac);
         $this->restartXray($x);
         $this->cloakNginx();
