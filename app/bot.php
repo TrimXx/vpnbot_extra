@@ -7990,7 +7990,7 @@ DNS-over-HTTPS with IP:
         if (!$flag && !$this->processHwidRequest($client, $clientIndex)) {
             exit;
         }
-        $suburl   = '<a href="' . htmlspecialchars($this->buildSubscriptionPageUrl($scheme, $domain, $hash, $uid), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '">subscription</a>';
+        $suburl   = $this->buildSubscriptionPageUrl($scheme, $domain, $hash, $uid);
         $trafficTotals = $this->getSubscriptionXrayTrafficTotals($st, $client, $clientIndex);
         $download = $this->getBytes($trafficTotals['download']);
         $upload   = $this->getBytes($trafficTotals['upload']);

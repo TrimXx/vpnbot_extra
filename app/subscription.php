@@ -6,7 +6,10 @@ $metaDescription = (string) ($pacConfig['subscription_meta_description'] ?? 'Sec
 $supportUrl = (string) ($pacConfig['subscription_support_url'] ?? 'https://t.me/example_support');
 $brandingTitle = (string) ($pacConfig['subscription_branding_title'] ?? 'VPN Service');
 $brandingLogoUrl = (string) ($pacConfig['subscription_branding_logo_url'] ?? 'https://example.com/logo.svg');
-$subscription_url = preg_replace("/<a href='([^']+)'>.*<\/a>/", '$1', $suburl);
+$subscription_url = (string) $suburl;
+if (preg_match('~<a\s+href=["\']([^"\']+)["\']~i', $subscription_url, $m)) {
+    $subscription_url = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
 $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 $username = htmlspecialchars($email ?? '', ENT_QUOTES, 'UTF-8');
 $connectedDevices = method_exists($this, 'getHwidDevicesByUser') ? ($this->getHwidDevicesByUser($uid) ?: []) : [];
