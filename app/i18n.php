@@ -610,8 +610,8 @@ $i = [
         'ru' => 'AWG включён, но интерфейс не поднят. Нажмите «обновить статус» или: docker compose restart wg1',
     ],
     'hysteria menu hint' => [
-        'en' => 'Set a password to start Hysteria. Managed here, not in Vless menu.',
-        'ru' => 'Задайте пароль — Hysteria запустится. Управление здесь, не в меню Vless.',
+        'en' => 'Enable HY in Vless -> core/network, set a password here. Traffic: UDP/443 via upstream, masquerade path /hy.',
+        'ru' => 'Включите HY в Vless -> core/network, задайте пароль здесь. Трафик: UDP/443 через upstream, маскировка /hy.',
     ],
     'subscription transport' => [
         'en' => 'in sub',

@@ -146,8 +146,15 @@ trait TransportRuntimeTrait
     {
         $services = $this->getDockerComposeServices();
         $port = (int) explode(':', (string) ($services['hy']['ports'][0] ?? ''))[0];
+        if ($port > 0) {
+            return $port;
+        }
+        $pac = $this->getPacConf();
+        if (!empty($this->getTransportRegistryGlobal($pac)['hysteria'])) {
+            return 443;
+        }
 
-        return $port > 0 ? $port : 0;
+        return 0;
     }
 
     protected function buildClashHysteria2Proxy(string $baseName, string $domain, array $pac): ?array
@@ -210,7 +217,7 @@ trait TransportRuntimeTrait
         $global = $this->getTransportRegistryGlobal($pac);
         $hash = $this->getHashBot();
         $template = preg_replace(
-            '~(/webapp|/pac|/adguard|/ws|/xh|location /dns-query)~',
+            '~(/webapp|/pac|/adguard|/ws|/xh|/hy|location /dns-query)~',
             '${1}' . $hash,
             $template
         );
@@ -220,7 +227,52 @@ trait TransportRuntimeTrait
         if (empty($global['xhttp'])) {
             $template = $this->stripNginxLocationPrefix($template, '/xh' . $hash);
         }
+        if (empty($global['hysteria'])) {
+            $template = $this->stripNginxLocationPrefix($template, '/hy' . $hash);
+        }
 
         return $template;
+    }
+
+    public function applyHysteriaUpstreamRuntime(array $pac): void
+    {
+        $enabled = !empty($this->getTransportRegistryGlobal($pac)['hysteria']);
+        $path = '/config/upstream.conf';
+        if (!is_readable($path)) {
+            return;
+        }
+        $nginx = (string) file_get_contents($path);
+        if (!str_contains($nginx, 'upstream hysteria')) {
+            $insert = "    upstream hysteria {\n        server hy:443;\n    }\n\n";
+            $replaced = preg_replace('~(upstream\s+reality\s*\{[^}]*\}\s*)~s', '$1' . "\n" . $insert, $nginx, 1, $count);
+            if ($count > 0 && $replaced !== null) {
+                $nginx = $replaced;
+            }
+        }
+        $hysteriaUdp = <<<'NGINX'
+
+    server {
+        listen          443 udp reuseport;
+        proxy_pass      hysteria;
+        proxy_protocol  on;
+    }
+NGINX;
+        $fallbackUdp = <<<'NGINX'
+
+    server {
+        listen          443 udp reuseport;
+        proxy_pass      other;
+        proxy_protocol  on;
+        ssl_preread     on;
+    }
+NGINX;
+        $pattern = '~\n\s*server\s*\{[^{}]*listen\s+443\s+udp[^{}]*\}\s*~s';
+        $replacement = $enabled ? $hysteriaUdp : $fallbackUdp;
+        $updated = preg_replace($pattern, $replacement, $nginx, 1);
+        if ($updated === null || $updated === $nginx) {
+            return;
+        }
+        file_put_contents($path, $updated);
+        $this->ssh('nginx -s reload 2>&1', 'upstream');
     }
 }

@@ -126,6 +126,11 @@ trait TransportRegistryTrait
         return '/xh' . ($hash !== '' ? $hash : $this->getHashBot());
     }
 
+    protected function getHyTransportPath(string $hash = ''): string
+    {
+        return '/hy' . ($hash !== '' ? $hash : $this->getHashBot());
+    }
+
     protected function getXhttpInboundPort(?array $pac = null): int
     {
         $ports = $this->getTransportRegistryPorts($pac);
@@ -240,6 +245,7 @@ trait TransportRegistryTrait
         $x['inbounds'] = $this->buildXrayInboundsByRegistry($x, $pac);
         $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x));
         $this->setUpstreamRealityPort(!empty($global['reality']) ? $this->getRealityInboundPort($pac) : $this->getWsInboundPort($pac));
+        $this->applyHysteriaUpstreamRuntime($pac);
         $this->setPacConf($pac);
         $this->restartXray($x);
         $this->cloakNginx();

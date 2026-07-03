@@ -1232,12 +1232,27 @@ class Bot
     public function restartHysteria()
     {
         $pac = $this->getPacConf();
+        $global = $this->getTransportRegistryGlobal($pac);
         $this->ssh('pkill hysteria || true', 'hy');
-        if (empty($pac['hysteria_pass'])) {
+        if (empty($global['hysteria']) || empty($pac['hysteria_pass'])) {
             return;
         }
         $c = yaml_parse_file('/config/hysteria.yaml');
+        if (!is_array($c)) {
+            $c = [];
+        }
+        $c['auth']['type'] = 'password';
         $c['auth']['password'] = $pac['hysteria_pass'];
+        $hash = $this->getHashBot();
+        $domain = $this->getDomain();
+        $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
+        $c['masquerade'] = [
+            'type'  => 'proxy',
+            'proxy' => [
+                'url'         => $scheme . '://' . $domain . $this->getHyTransportPath($hash) . '/',
+                'rewriteHost' => true,
+            ],
+        ];
         yaml_emit_file('/config/hysteria.yaml', $c);
         $this->ssh('hysteria server -c /config/hysteria.yaml', 'hy', false, '/logs/hysteria');
     }
@@ -7185,9 +7200,9 @@ DNS-over-HTTPS with IP:
         $globalTransports = $this->getTransportRegistryGlobal($p);
         $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
             . ' WS=' . (int) !empty($globalTransports['ws'])
-            . ' XHTTP=' . (int) !empty($globalTransports['xhttp']);
-        $text[] = 'subscription: HY=' . (int) !empty($globalTransports['hysteria'])
-            . ' AWG=' . (int) !empty($globalTransports['awg']);
+            . ' XHTTP=' . (int) !empty($globalTransports['xhttp'])
+            . ' HY=' . (int) !empty($globalTransports['hysteria']);
+        $text[] = 'subscription: AWG=' . (int) !empty($globalTransports['awg']);
         if (!empty($fake) && !empty($globalTransports['reality'])) {
             $text[] = "fake domain: <code>$fake</code>";
             $bridgeServer = trim((string) ($p['reality']['bridge_server'] ?? ''));
@@ -7227,12 +7242,12 @@ DNS-over-HTTPS with IP:
                 'text'          => 'XHTTP ' . $this->i18n(!empty($globalTransports['xhttp']) ? 'on' : 'off'),
                 'callback_data' => "/toggleGlobalTransport xhttp",
             ],
+            [
+                'text'          => 'HY ' . $this->i18n(!empty($globalTransports['hysteria']) ? 'on' : 'off'),
+                'callback_data' => '/toggleGlobalTransport hysteria',
+            ],
         ];
         $data[] = [
-            [
-                'text'          => 'HY ' . $this->i18n('subscription transport') . ': ' . $this->i18n(!empty($globalTransports['hysteria']) ? 'on' : 'off'),
-                'callback_data' => '/toggleSubscriptionTransport hysteria',
-            ],
             [
                 'text'          => 'AWG ' . $this->i18n('subscription transport') . ': ' . $this->i18n(!empty($globalTransports['awg']) ? 'on' : 'off'),
                 'callback_data' => '/toggleSubscriptionTransport awg',
@@ -7688,7 +7703,7 @@ DNS-over-HTTPS with IP:
         ];
         $data[] = [
             [
-                'text'          => 'HY ' . $this->i18n('subscription transport') . ': ' . $this->i18n(!empty($transportFlags['hysteria']) ? 'on' : 'off'),
+                'text'          => 'HY ' . $this->i18n(!empty($transportFlags['hysteria']) ? 'on' : 'off'),
                 'callback_data' => "/toggleUserTransport hysteria $i",
             ],
             [
@@ -9662,7 +9677,7 @@ DNS-over-HTTPS with IP:
 
     public function toggleGlobalTransport($name)
     {
-        $allowed = ['reality', 'ws', 'xhttp'];
+        $allowed = ['reality', 'ws', 'xhttp', 'hysteria'];
         if (!in_array($name, $allowed, true)) {
             $this->answer($this->input['callback_id'], 'unknown transport', true);
             return;
@@ -9678,7 +9693,12 @@ DNS-over-HTTPS with IP:
 
     public function toggleSubscriptionTransport($name)
     {
-        $allowed = ['hysteria', 'awg'];
+        if ($name === 'hysteria') {
+            $this->toggleGlobalTransport('hysteria');
+
+            return;
+        }
+        $allowed = ['awg'];
         if (!in_array($name, $allowed, true)) {
             $this->answer($this->input['callback_id'], 'unknown subscription transport', true);
             return;

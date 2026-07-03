@@ -22,6 +22,7 @@ $bot->dontshowcron = 1;
 $bot->sslip();
 $bot->adguardSync();
 $bot->cloakNginx();
+$bot->applyHysteriaUpstreamRuntime($c);
 $bot->syncDeny();
 $bot->cleanDocker();
 $bot->restartHysteria();
