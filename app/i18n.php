@@ -565,6 +565,22 @@ $i = [
         'en' => 'Set a deletion password to remove devices from the bot.',
         'ru' => 'Задайте пароль удаления, чтобы удалять устройства из бота.',
     ],
+    'user portal enter device name' => [
+        'en' => 'Enter a name for this device',
+        'ru' => 'Введите имя для этого устройства',
+    ],
+    'user portal current device name' => [
+        'en' => 'Current name',
+        'ru' => 'Текущее имя',
+    ],
+    'user portal device renamed' => [
+        'en' => 'Device renamed',
+        'ru' => 'Устройство переименовано',
+    ],
+    'user portal empty device name' => [
+        'en' => 'Name cannot be empty',
+        'ru' => 'Имя не может быть пустым',
+    ],
     'user portal enter delete password' => [
         'en' => 'Enter device deletion password',
         'ru' => 'Введите пароль удаления устройства',

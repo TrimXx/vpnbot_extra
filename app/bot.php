@@ -151,6 +151,7 @@ class Bot
                         'userPortalDeleteDevicePassword',
                         'userPortalSavePassword',
                         'userPortalChangePasswordVerify',
+                        'userPortalRenameDeviceSave',
                     ], true)) {
                         $keep[$k] = $v;
                         continue;
@@ -207,6 +208,9 @@ class Bot
                 break;
             case preg_match('~^/userPortalDel (\d+)_(\w+)$~', $this->input['callback'], $m):
                 $this->userPortalDel($m[1] . '_' . $m[2], $m[2]);
+                break;
+            case preg_match('~^/userPortalRename (\d+)_(\w+)$~', $this->input['callback'], $m):
+                $this->userPortalRename($m[1] . '_' . $m[2], $m[2]);
                 break;
             case preg_match('~^/toggleUserPortal$~', $this->input['callback'], $m):
                 $this->toggleUserPortal();
@@ -7972,6 +7976,21 @@ DNS-over-HTTPS with IP:
                         exit;
                     }
                     echo json_encode(['ok' => true]);
+                    exit;
+                case 'device_rename':
+                    $this->requireSubscriptionActionRateLimit($ownerSubId, 'device_rename', 30, 600);
+                    $this->requireSubscriptionActionToken($ownerSubId);
+                    $hwid = trim((string) ($_POST['hwid'] ?? ''));
+                    $name = trim((string) ($_POST['name'] ?? ''));
+                    $result = $this->renameHwidDevice($ownerSubId, $hwid, $name);
+                    if (empty($result['ok'])) {
+                        $message = (string) ($result['message'] ?? 'error');
+                        $status = $message === 'empty name' ? 400 : 404;
+                        http_response_code($status);
+                        echo json_encode(['ok' => false, 'message' => $message]);
+                        exit;
+                    }
+                    echo json_encode(['ok' => true, 'device_name' => (string) ($result['device_name'] ?? '')]);
                     exit;
             }
             http_response_code(400);

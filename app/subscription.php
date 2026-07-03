@@ -31,6 +31,7 @@ foreach ($connectedDevices as $deviceHwid => $deviceInfo) {
         'device_os' => (string)($deviceInfo['device_os'] ?? ''),
         'os_version' => (string)($deviceInfo['os_version'] ?? ''),
         'device_model' => (string)($deviceInfo['device_model'] ?? ''),
+        'device_name' => (string)($deviceInfo['device_name'] ?? ''),
         'time' => (int)($deviceInfo['time'] ?? 0),
         'traffic_total' => (int)($deviceTrafficMap[$hwidKey]['total'] ?? 0),
         'traffic_upload' => (int)($deviceTrafficMap[$hwidKey]['upload'] ?? 0),
@@ -2050,7 +2051,9 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
             const badgeText = maxDevices > 0 ? `${devices.length} / ${maxDevices}` : `${devices.length}`;
 
             const rows = devices.map(device => {
+                const customName = String(device.device_name || '').trim();
                 const model = escapeHtml(device.device_model || '-');
+                const title = escapeHtml(customName || model);
                 const os = escapeHtml(device.device_os || '-');
                 const osVersion = escapeHtml(device.os_version || '');
                 const hwid = escapeHtml(device.hwid || '-');
@@ -2064,7 +2067,7 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                 return `
                     <div class="link-item connected-device-card">
                         <div class="connected-device-main">
-                            <div class="connected-device-title" title="${model}">📱 ${model}</div>
+                            <div class="connected-device-title" title="${title}">📱 ${title}</div>
                             <div class="connected-device-hwid" title="${hwid}">🔑 ${hwid}</div>
                             <div class="connected-device-traffic">⬇ ${trafficDownload} · ⬆ ${trafficUpload}</div>
                         </div>
@@ -2074,6 +2077,7 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                             <div class="connected-device-time">🕒 ${lastSeen}</div>
                         </div>
                         <div class="connected-device-actions">
+                            <button type="button" class="btn btn-sm" style="padding: 6px 12px;" onclick="renameDeviceByHwid('${escapeForAttribute(device.hwid || '')}', '${escapeForAttribute(customName || model)}')">✏️</button>
                             <button type="button" class="btn btn-sm" style="padding: 6px 12px; border-color: var(--error); color: var(--error);" onclick="deleteDeviceByHwid('${escapeForAttribute(device.hwid || '')}')">🗑️</button>
                         </div>
                     </div>
@@ -2190,6 +2194,31 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                 renderHeaderControls();
                 closeModal('devicePasswordModal');
                 showToast(currentLanguage === 'ru' ? 'Пароль сохранён' : 'Password saved');
+            } catch (e) {
+                showToast((currentLanguage === 'ru' ? 'Ошибка: ' : 'Error: ') + (e?.message || 'unknown'));
+            }
+        }
+
+        async function renameDeviceByHwid(hwid, currentName) {
+            const safeHwid = String(hwid || '').trim();
+            if (!safeHwid) return;
+            const promptText = currentLanguage === 'ru' ? 'Новое имя устройства:' : 'New device name:';
+            const nextName = window.prompt(promptText, String(currentName || '').trim());
+            if (nextName === null) return;
+            const name = String(nextName).trim();
+            if (!name) {
+                showToast(currentLanguage === 'ru' ? 'Введите имя' : 'Enter a name');
+                return;
+            }
+            try {
+                const data = await postSubscriptionAction('device_rename', { hwid: safeHwid, name });
+                const devices = panelData?.response?.user?.connectedDevices || [];
+                const device = devices.find(d => (d?.hwid || '') === safeHwid);
+                if (device) {
+                    device.device_name = data?.device_name || name;
+                }
+                renderContent();
+                showToast(currentLanguage === 'ru' ? 'Имя сохранено' : 'Name saved');
             } catch (e) {
                 showToast((currentLanguage === 'ru' ? 'Ошибка: ' : 'Error: ') + (e?.message || 'unknown'));
             }

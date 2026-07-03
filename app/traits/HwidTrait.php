@@ -244,6 +244,55 @@ trait HwidTrait
         return $storage[$uid] ?? [];
     }
 
+    protected function sanitizeHwidDeviceName(string $name): string
+    {
+        $name = trim(preg_replace('/\s+/u', ' ', $name) ?? '');
+        $name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? '';
+        if (function_exists('mb_substr')) {
+            return mb_substr($name, 0, 64, 'UTF-8');
+        }
+
+        return substr($name, 0, 64);
+    }
+
+    protected function getHwidDeviceDisplayName(array $info): string
+    {
+        $custom = trim((string) ($info['device_name'] ?? ''));
+        if ($custom !== '') {
+            return $custom;
+        }
+        $parts = array_filter([
+            (string) ($info['device_model'] ?? ''),
+            (string) ($info['device_os'] ?? ''),
+            (string) ($info['os_version'] ?? ''),
+        ], static fn($v) => $v !== '');
+
+        return implode(' ', $parts);
+    }
+
+    public function renameHwidDevice(string $ownerSubId, string $hwid, string $name): array
+    {
+        $ownerSubId = trim($ownerSubId);
+        $hwid = trim($hwid);
+        $name = $this->sanitizeHwidDeviceName($name);
+        if ($ownerSubId === '' || $hwid === '') {
+            return ['ok' => false, 'message' => 'device not found'];
+        }
+        if ($name === '') {
+            return ['ok' => false, 'message' => 'empty name'];
+        }
+
+        $storage = $this->getHwidStorage();
+        if (!isset($storage[$ownerSubId][$hwid]) || !is_array($storage[$ownerSubId][$hwid])) {
+            return ['ok' => false, 'message' => 'device not found'];
+        }
+
+        $storage[$ownerSubId][$hwid]['device_name'] = $name;
+        $this->setHwidStorage($storage);
+
+        return ['ok' => true, 'device_name' => $name];
+    }
+
     public function getHwidDeviceTraffic(string $ownerSubId): array
     {
         $ownerSubId = trim($ownerSubId);

@@ -24,6 +24,7 @@ trait UserPortalTrait
             'userPortalDeleteDevicePassword',
             'userPortalSavePassword',
             'userPortalChangePasswordVerify',
+            'userPortalRenameDeviceSave',
         ], true);
     }
 
@@ -114,6 +115,7 @@ trait UserPortalTrait
             'userPortalDeleteDevicePassword'  => $this->i18n('user portal enter delete password'),
             'userPortalSavePassword'          => $this->i18n('user portal enter new password'),
             'userPortalChangePasswordVerify'  => $this->i18n('user portal enter current password'),
+            'userPortalRenameDeviceSave'      => $this->i18n('user portal enter device name'),
             default                           => '',
         };
         $this->userPortalShow($text, $data, $placeholder, [
@@ -259,6 +261,11 @@ trait UserPortalTrait
             }
             if ($callback === 'userPortalChangePasswordVerify') {
                 $this->userPortalChangePasswordVerify($message);
+
+                return;
+            }
+            if ($callback === 'userPortalRenameDeviceSave') {
+                $this->userPortalRenameDeviceSave($message, ...$args);
 
                 return;
             }
@@ -719,13 +726,19 @@ trait UserPortalTrait
             foreach ($hwidsPage as $index => $hwid) {
                 $info = $devices[$hwid];
                 $number = $page * $perPage + $index + 1;
+                $customName = trim((string) ($info['device_name'] ?? ''));
                 $details = array_filter([
                     $info['device_os'] ?? '',
                     $info['os_version'] ?? '',
                     $info['device_model'] ?? '',
                 ], fn($v) => $v !== '');
                 $text[] = str_repeat('-', 40);
-                $text[] = $number . '. <code>' . htmlspecialchars($hwid, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+                if ($customName !== '') {
+                    $text[] = $number . '. <b>' . htmlspecialchars($customName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</b>';
+                    $text[] = '<code>' . htmlspecialchars($hwid, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+                } else {
+                    $text[] = $number . '. <code>' . htmlspecialchars($hwid, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+                }
                 if ($details !== []) {
                     $text[] = htmlspecialchars(implode(' ', $details), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
                 }
@@ -735,13 +748,18 @@ trait UserPortalTrait
                 $devDown = (int) ($deviceTraffic[$hwid]['download'] ?? 0);
                 $devUp = (int) ($deviceTraffic[$hwid]['upload'] ?? 0);
                 $text[] = $this->formatTrafficDisplayLine($devDown, $devUp);
+                $token = $this->rememberHwidToken($scope, $hwid);
+                $row = [[
+                    'text'          => $this->i18n('rename') . ' ' . $number,
+                    'callback_data' => "/userPortalRename {$page}_{$token}",
+                ]];
                 if ($this->hasSubscriptionDevicePassword($client)) {
-                    $token = $this->rememberHwidToken($scope, $hwid);
-                    $data[] = [[
+                    $row[] = [
                         'text'          => $this->i18n('delete') . ' ' . $number,
                         'callback_data' => "/userPortalDel {$page}_{$token}",
-                    ]];
+                    ];
                 }
+                $data[] = $row;
             }
         }
 
@@ -775,6 +793,89 @@ trait UserPortalTrait
         ]];
 
         $this->userPortalShow(implode("\n", $text), $data ?: false);
+    }
+
+    public function userPortalRename($pageToken, $token)
+    {
+        $session = $this->getUserPortalSession();
+        if ($session === null) {
+            $this->ackCallback($this->i18n('user portal bind first'), true);
+            $this->userPortalMenu();
+
+            return;
+        }
+
+        $scope = $this->getUserPortalTokenScope();
+        $hwid = $this->resolveHwidToken($scope, $token);
+        if ($hwid === '') {
+            $this->ackCallback('device not found', true);
+            $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
+
+            return;
+        }
+
+        $devices = $this->getHwidDevicesByUser($session['subscription_id']);
+        $info = $devices[$hwid] ?? [];
+        $currentName = trim((string) ($info['device_name'] ?? ''));
+        $prompt = $this->i18n('user portal enter device name');
+        if ($currentName !== '') {
+            $prompt .= "\n\n" . $this->i18n('user portal current device name') . ': <b>' . htmlspecialchars($currentName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</b>';
+        }
+        $prompt .= "\n\n<code>" . htmlspecialchars($hwid, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+
+        $this->userPortalPromptInput(
+            $prompt,
+            'userPortalRenameDeviceSave',
+            [$pageToken, $token],
+            [[
+                'text'          => $this->i18n('back'),
+                'callback_data' => '/userPortalDevices_' . (int) explode('_', (string) $pageToken)[0],
+            ]],
+        );
+    }
+
+    public function userPortalRenameDeviceSave($name, $pageToken, $token)
+    {
+        $session = $this->getUserPortalSession();
+        if ($session === null) {
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal bind first'));
+            $this->userPortalMenu();
+
+            return;
+        }
+
+        $scope = $this->getUserPortalTokenScope();
+        $hwid = $this->resolveHwidToken($scope, $token);
+        if ($hwid === '') {
+            $this->userPortalSetFlash('⚠️ device not found');
+            $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
+
+            return;
+        }
+
+        $ownerSubId = $session['subscription_id'];
+        if (!$this->checkSubscriptionActionRateLimit($ownerSubId, 'device_rename', 30, 600)) {
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal rate limit'));
+            $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
+
+            return;
+        }
+
+        $result = $this->renameHwidDevice($ownerSubId, $hwid, (string) $name);
+        if (empty($result['ok'])) {
+            $message = (string) ($result['message'] ?? 'error');
+            if ($message === 'empty name') {
+                $message = $this->i18n('user portal empty device name');
+            }
+            $this->userPortalSetFlash('⚠️ ' . $message);
+            $this->userPortalRename($pageToken, $token);
+
+            return;
+        }
+
+        $savedName = (string) ($result['device_name'] ?? '');
+        $this->userPortalSetFlash('✅ ' . $this->i18n('user portal device renamed') . ': ' . $savedName);
+        $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
     }
 
     public function userPortalDel($pageToken, $token)
