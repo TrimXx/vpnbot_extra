@@ -2438,17 +2438,9 @@ class Bot
                     $this->send($this->input['chat'], "ERROR\nmain domain is empty");
                     break;
                 }
-                $oc = $this->getHashSubdomain('oc');
-                $np = $this->getHashSubdomain('np');
                 $certDomains = [];
                 foreach ($domains as $domainName) {
                     $certDomains[] = $domainName;
-                    if (!empty($oc)) {
-                        $certDomains[] = "$oc.$domainName";
-                    }
-                    if (!empty($np)) {
-                        $certDomains[] = "$np.$domainName";
-                    }
                     if (!empty($conf['adguardkey'])) {
                         $certDomains[] = "{$conf['adguardkey']}.$domainName";
                     }
