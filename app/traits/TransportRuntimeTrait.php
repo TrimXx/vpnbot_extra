@@ -234,7 +234,7 @@ trait TransportRuntimeTrait
         return $template;
     }
 
-    public function applyHysteriaUpstreamRuntime(array $pac): void
+    public function applyHysteriaUpstreamRuntime(array $pac, bool $reload = true): void
     {
         $enabled = !empty($this->getTransportRegistryGlobal($pac)['hysteria']);
         $path = '/config/upstream.conf';
@@ -301,16 +301,18 @@ NGINX;
             return;
         }
         file_put_contents($path, $nginx);
-        $this->ssh('nginx -s reload 2>&1', 'up');
+        if ($reload) {
+            $this->ssh('nginx -s reload 2>&1', 'up');
+        }
     }
 
-    public function syncUpstreamRuntime(?array $xray = null): void
+    public function syncUpstreamRuntime(?array $xray = null, bool $reload = true): void
     {
         $pac = $this->getPacConf();
         $x = $xray ?? $this->getXray();
         $global = $this->getTransportRegistryGlobal($pac);
-        $this->applyHysteriaUpstreamRuntime($pac);
-        $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x));
-        $this->setUpstreamRealityPort(!empty($global['reality']) ? $this->getRealityInboundPort($pac) : $this->getWsInboundPort($pac));
+        $this->applyHysteriaUpstreamRuntime($pac, $reload);
+        $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x), $reload);
+        $this->setUpstreamRealityPort(!empty($global['reality']) ? $this->getRealityInboundPort($pac) : $this->getWsInboundPort($pac), $reload);
     }
 }

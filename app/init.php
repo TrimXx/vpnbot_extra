@@ -10,8 +10,8 @@ if (!empty($c['debug'] ?? false)) {
 }
 
 $bot = new Bot($c['key'], $i);
-$bot->syncUpstreamRuntime();
 $bot->cleanQueue();
 $bot->setwebhook();
+$bot->syncUpstreamRuntime(null, false);
 $bot->syncPortClients();
 $bot->setcommands();

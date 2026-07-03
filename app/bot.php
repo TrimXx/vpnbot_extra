@@ -8622,18 +8622,23 @@ DNS-over-HTTPS with IP:
         return $domain !== '' ? $domain : 't';
     }
 
-    public function setUpstreamDomain($domain)
+    public function setUpstreamDomain($domain, bool $reload = true)
     {
         $nginx = file_get_contents('/config/upstream.conf');
         $t = preg_replace('~#domain\s*\R.*?\R\s*#domain~s', "#domain\n$domain reality;\n#domain", $nginx);
         if ($t === null) {
             $t = $nginx;
         }
+        if ($t === $nginx) {
+            return;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        if ($reload) {
+            $this->ssh("nginx -s reload 2>&1", 'up');
+        }
     }
 
-    public function setUpstreamRealityPort($port)
+    public function setUpstreamRealityPort($port, bool $reload = true)
     {
         $port = (int) $port;
         if ($port <= 0) {
@@ -8652,8 +8657,13 @@ DNS-over-HTTPS with IP:
                 $t = $nginx;
             }
         }
+        if ($t === $nginx) {
+            return;
+        }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
+        if ($reload) {
+            $this->ssh("nginx -s reload 2>&1", 'up');
+        }
     }
 
     public function setUpstreamDomainOcserv($domains)
