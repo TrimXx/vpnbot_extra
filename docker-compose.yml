@@ -99,10 +99,11 @@ services:
             xr:
                 condition: service_started
         healthcheck:
-            test: ["CMD", "nginx", "-t"]
+            test: ["CMD-SHELL", "nginx -t && nc -z 10.10.0.2 443"]
             interval: 10s
             timeout: 5s
-            retries: 3
+            retries: 5
+            start_period: 15s
     php:
         image: mercurykd/vpnbot-php:1.7
         build:

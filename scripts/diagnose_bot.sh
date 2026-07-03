@@ -12,6 +12,25 @@ grep -n "vpnbot_trace\|before action" app/index.php app/timezone.php app/bot.php
 echo ""
 echo "=== containers ==="
 docker compose ps
+echo ""
+echo "=== upstream (host :443) ==="
+UP_STATUS="$(docker compose ps -a --format '{{.Name}} {{.Status}}' 2>/dev/null | grep '^up ' || true)"
+if [ -n "$UP_STATUS" ]; then
+    echo "$UP_STATUS"
+else
+    echo "WARNING: container up is not running — Telegram webhook needs host :443 (Connection refused)"
+fi
+if command -v nc >/dev/null 2>&1; then
+    if nc -z 127.0.0.1 443 2>/dev/null; then
+        echo "host :443 TCP open"
+    else
+        echo "host :443 TCP CLOSED — external HTTPS webhooks will fail"
+    fi
+else
+    echo "nc not installed, skip host :443 probe"
+fi
+docker compose exec -T up sh -c 'tail -15 /logs/upstream_error 2>/dev/null' 2>/dev/null || echo "cannot read upstream_error (up down?)"
+docker compose exec -T ng sh -c 'nc -z 10.10.0.2 443 && echo ng:443 listening || echo ng:443 NOT listening' 2>/dev/null || echo "cannot probe ng:443"
 
 echo ""
 echo "=== /logs in php ==="
@@ -48,13 +67,30 @@ echo "pending: " . ($r["pending_update_count"] ?? "?") . "\n";
 echo "last_error_date: " . ($r["last_error_date"] ?? "-") . "\n";
 echo "last_error_message: " . ($r["last_error_message"] ?? "-") . "\n";
 echo "max_connections: " . ($r["max_connections"] ?? "-") . "\n";
+$err = $r["last_error_message"] ?? "";
+if (stripos($err, "connection refused") !== false) {
+    echo "hint: fix container up (publishes host :443). Internal http://php/tlgrm can work while Telegram cannot.\n";
+}
 '
 
-echo ""
-echo "=== local POST /tlgrm (synthetic /id) ==="
 KEY="$(docker compose exec -T php php -r 'require "/app/config.php"; echo $c["key"];')"
 ADMIN="$(docker compose exec -T php php -r 'require "/app/config.php"; echo is_array($c["admin"]) ? $c["admin"][0] : $c["admin"];')"
 BODY="{\"update_id\":999001,\"message\":{\"message_id\":1,\"from\":{\"id\":$ADMIN,\"username\":\"diag\"},\"chat\":{\"id\":$ADMIN,\"type\":\"private\"},\"text\":\"/id\"}}"
+
+echo ""
+echo "=== HTTPS POST /tlgrm via host :443 ==="
+if command -v curl >/dev/null 2>&1 && nc -z 127.0.0.1 443 2>/dev/null; then
+    CODE="$(curl -k -sS -o /dev/null -w '%{http_code}' -X POST \
+        -H 'Content-Type: application/json' \
+        --data "$BODY" \
+        "https://127.0.0.1/tlgrm?k=$KEY" 2>/dev/null || echo fail)"
+    echo "http_code: $CODE (expect 200; this is the path Telegram uses)"
+else
+    echo "skipped (curl missing or host :443 closed)"
+fi
+
+echo ""
+echo "=== local POST /tlgrm (synthetic /id, bypasses :443) ==="
 docker compose exec -T ng wget -qO- \
   --header='Content-Type: application/json' \
   --post-data="$BODY" \
