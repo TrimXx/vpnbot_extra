@@ -40,12 +40,37 @@ trait BotCacheTrait
         return is_array($ports) && $ports !== [];
     }
 
+    protected function releaseSessionLock(): void
+    {
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+    }
+
+    protected function resumeSessionLock(): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE && !empty($this->input['from'])) {
+            session_id((string) $this->input['from']);
+            session_start();
+        }
+    }
+
+    protected function telegramRequestOk(?array $response): bool
+    {
+        if (!empty($response['ok'])) {
+            return true;
+        }
+        $description = (string) ($response['description'] ?? '');
+
+        return str_contains($description, 'message is not modified');
+    }
+
     protected function replyMenu($chat, int $messageId, string $text, $buttons = false, $reply = false): void
     {
         $markup = $buttons ?: false;
         if (!empty($this->input['callback_id']) && $messageId > 0) {
             $r = $this->update($chat, $messageId, $text, $markup, $reply !== false ? $reply : false);
-            if (!empty($r['ok'])) {
+            if ($this->telegramRequestOk($r)) {
                 return;
             }
             if ($markup) {
@@ -54,34 +79,14 @@ trait BotCacheTrait
                     'message_id'   => $messageId,
                     'reply_markup' => json_encode(['inline_keyboard' => $markup]),
                 ]);
-                if (!empty($rk['ok'])) {
-                    $this->update($chat, $messageId, $text, false, $reply !== false ? $reply : false);
-
+                if ($this->telegramRequestOk($rk)) {
                     return;
                 }
             }
+
+            return;
         }
         $this->send($chat, $text, $messageId, $markup, $reply !== false ? $reply : false);
-    }
-
-    protected function probeRemoteProcess(string $host, string $pattern): bool
-    {
-        $cmd = sprintf(
-            '(command -v pgrep >/dev/null 2>&1 && pgrep -f %s >/dev/null 2>&1) || ps w 2>/dev/null | grep -v grep | grep -q %s && echo 1 || true',
-            escapeshellarg($pattern),
-            escapeshellarg($pattern)
-        );
-
-        return trim((string) $this->ssh($cmd, $host)) !== '';
-    }
-
-    protected function probeHysteriaProcess(): bool
-    {
-        $cmd = 'grep -aq hysteria /proc/1/cmdline 2>/dev/null && echo 1 || '
-            . '(command -v pgrep >/dev/null 2>&1 && pgrep -f hysteria >/dev/null 2>&1 && echo 1) || '
-            . '(ps w 2>/dev/null | grep -v grep | grep -q hysteria && echo 1) || true';
-
-        return trim((string) $this->ssh($cmd, 'hy')) !== '';
     }
 
     protected function ackCallback(?string $text = null, bool $showAlert = false): void

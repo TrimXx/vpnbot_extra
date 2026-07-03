@@ -5072,10 +5072,12 @@ DNS-over-HTTPS with IP:
         $conf = $this->getPacConf();
         $ver = getenv('VER') ?: '';
         $wg1Amnezia = !empty($conf['wg1_amnezia']) ? '1' : '0';
+        $this->releaseSessionLock();
         $raw = trim((string) $this->ssh(
             "VER='{$ver}' WG1_AWG='{$wg1Amnezia}' sh /scripts/menu_status.sh",
             'service'
         ));
+        $this->resumeSessionLock();
         $batch = json_decode($raw, true);
         if (!is_array($batch)) {
             $batch = [];
@@ -5089,18 +5091,6 @@ DNS-over-HTTPS with IP:
             'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
             'warp' => trim((string) ($batch['warp'] ?? 'off')) ?: 'off',
         ];
-        if (empty($status['hy']) && $this->probeHysteriaProcess()) {
-            $status['hy'] = true;
-        }
-        if (empty($status['xr']) && $this->probeRemoteProcess('xr', 'xray')) {
-            $status['xr'] = true;
-        }
-        if (empty($status['wg1']) && $this->probeRemoteProcess($this->getInstanceWG(), !empty($conf['wg1_amnezia']) ? 'awg' : 'wg')) {
-            $status['wg1'] = true;
-        }
-        if (empty($status['tg']) && $this->probeRemoteProcess('tg', 'mtproto-proxy')) {
-            $status['tg'] = true;
-        }
         @file_put_contents($cacheFile, json_encode($status));
 
         return $status;
@@ -5206,7 +5196,7 @@ DNS-over-HTTPS with IP:
                     $backup = "{$conf['backup']} - wrong format";
                 }
             }
-            $menuStatus = $this->getMenuServiceStatus(true);
+            $menuStatus = $this->getMenuServiceStatus();
             $cron   = !empty($this->dontshowcron) ? '' : $this->i18n(!empty($menuStatus['cron']) ? 'on' : 'off') . ' cron';
             $c      = $this->getDockerComposeServices();
             $main[] = 'v' . getenv('VER');

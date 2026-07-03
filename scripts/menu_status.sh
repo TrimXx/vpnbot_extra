@@ -1,6 +1,6 @@
 #!/bin/sh
 # One-shot service health for main menu (run inside service container via docker.sock).
-set -eu
+set -u
 
 VER="${VER:-}"
 WG1_AWG="${WG1_AWG:-0}"
@@ -29,7 +29,8 @@ proc_match_in() {
             exit 0
         fi
         exit 1
-    " 2>/dev/null
+    " 2>/dev/null || return 1
+    return 0
 }
 
 proc_match_resolved() {
