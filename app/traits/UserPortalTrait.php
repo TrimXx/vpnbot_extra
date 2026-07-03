@@ -212,6 +212,9 @@ trait UserPortalTrait
 
     protected function shouldHandleUserPortalTextInput(): bool
     {
+        if (!empty($this->input['callback'])) {
+            return false;
+        }
         $message = trim((string) ($this->input['message'] ?? ''));
         if ($message === '' || preg_match('~^/~', $message)) {
             return false;
@@ -225,6 +228,9 @@ trait UserPortalTrait
 
     public function handleUserPortalTextInput(): void
     {
+        if (!empty($this->input['callback'])) {
+            return;
+        }
         $message = trim((string) ($this->input['message'] ?? ''));
         $pending = $this->getPendingUserPortalReply();
         if ($pending !== null) {
