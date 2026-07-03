@@ -5070,11 +5070,10 @@ DNS-over-HTTPS with IP:
             }
         }
         $conf = $this->getPacConf();
-        $ver = getenv('VER') ?: '';
         $wg1Amnezia = !empty($conf['wg1_amnezia']) ? '1' : '0';
         $this->releaseSessionLock();
         $raw = trim((string) $this->ssh(
-            "VER='{$ver}' WG1_AWG='{$wg1Amnezia}' sh /scripts/menu_status.sh",
+            "WG1_AWG='{$wg1Amnezia}' sh /scripts/menu_status.sh",
             'service'
         ));
         $this->resumeSessionLock();

@@ -1,18 +1,8 @@
 #!/bin/sh
-# One-shot service health for main menu (run inside service container via docker.sock).
+# One-shot service health for main menu (run inside svc container via docker.sock).
 set -u
 
-VER="${VER:-}"
 WG1_AWG="${WG1_AWG:-0}"
-
-resolve_container() {
-    want="$1"
-    if docker inspect -f '{{.State.Running}}' "$want" 2>/dev/null | grep -q true; then
-        printf '%s' "$want"
-        return 0
-    fi
-    docker ps --format '{{.Names}}' 2>/dev/null | grep -F "$want" | head -n1
-}
 
 proc_match_in() {
     cname="$1"
@@ -33,25 +23,14 @@ proc_match_in() {
     return 0
 }
 
-proc_match_resolved() {
-    base="$1"
-    pattern="$2"
-    cname="$(resolve_container "$base")"
-    if [ -z "$cname" ]; then
-        return 1
-    fi
-    proc_match_in "$cname" "$pattern"
-}
-
 hysteria_running() {
-    cname="$(resolve_container "hysteria-${VER}")"
-    if [ -z "$cname" ]; then
+    if ! docker inspect -f '{{.State.Running}}' hy 2>/dev/null | grep -q true; then
         return 1
     fi
-    if docker exec "$cname" sh -c 'grep -aq hysteria /proc/1/cmdline 2>/dev/null' 2>/dev/null; then
+    if docker exec hy sh -c 'grep -aq hysteria /proc/1/cmdline 2>/dev/null' 2>/dev/null; then
         return 0
     fi
-    proc_match_in "$cname" hysteria
+    proc_match_in hy hysteria
 }
 
 wg1_cmd="wg"
@@ -66,26 +45,25 @@ tg=0
 cron=0
 warp="off"
 
-if proc_match_resolved "wireguard1-${VER}" "$wg1_cmd"; then
+if proc_match_in wg1 "$wg1_cmd"; then
     wg1=1
 fi
-if proc_match_resolved "xray-${VER}" xray; then
+if proc_match_in xr xray; then
     xr=1
 fi
 if hysteria_running; then
     hy=1
 fi
-if proc_match_resolved "mtproto-${VER}" mtproto-proxy; then
+if proc_match_in tg mtproto-proxy; then
     tg=1
 fi
-if proc_match_resolved "service-${VER}" cron.php; then
+if proc_match_in svc cron.php; then
     cron=1
 fi
 
-wp="warp-${VER}"
-if docker inspect -f '{{.State.Running}}' "$wp" 2>/dev/null | grep -q true; then
-    if docker exec "$wp" sh -c 'pgrep warp-svc' 2>/dev/null | grep -q .; then
-        trace="$(docker exec "$wp" curl -m 1 -s -x socks5://127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+if docker inspect -f '{{.State.Running}}' wp 2>/dev/null | grep -q true; then
+    if docker exec wp sh -c 'pgrep warp-svc' 2>/dev/null | grep -q .; then
+        trace="$(docker exec wp curl -m 1 -s -x socks5://127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
         warp="$(echo "$trace" | sed -n 's/^warp=\(.*\)$/\1/p' | head -n1)"
         if [ -z "$warp" ]; then
             warp="on"

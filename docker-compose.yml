@@ -38,7 +38,7 @@ services:
             - 443:443/tcp
             - 443:443/udp
         hostname: upstream
-        container_name: upstream-${VER}
+        container_name: up
         depends_on:
             ng:
                 condition: service_healthy
@@ -77,7 +77,7 @@ services:
         ports:
             - 80:80
         hostname: nginx
-        container_name: nginx-${VER}
+        container_name: ng
         env_file:
             - path: ./.env
               required: true # default
@@ -136,7 +136,7 @@ services:
             - path: ./override.env
               required: false
         hostname: php
-        container_name: php-${VER}
+        container_name: php
         # restart: unless-stopped
         stop_grace_period: 1s
         command: ["/bin/sh", "/start_php.sh"]
@@ -183,7 +183,7 @@ services:
             - path: ./override.env
               required: false
         hostname: service
-        container_name: service-${VER}
+        container_name: svc
         # restart: unless-stopped
         stop_grace_period: 1s
         command: ["/bin/sh", "/start_service.sh"]
@@ -218,7 +218,7 @@ services:
             - ./ssh:/ssh
             - ./config/sshd_config:/etc/ssh/sshd_config
         hostname: wireguard1
-        container_name: wireguard1-${VER}
+        container_name: wg1
         depends_on:
             php:
                 condition: service_healthy
@@ -257,7 +257,7 @@ services:
             - ./logs/:/logs/
             - ./scripts/start_ad.sh:/start_ad.sh
         hostname: adguard
-        container_name: adguard-${VER}
+        container_name: ad
         depends_on:
             php:
                 condition: service_healthy
@@ -286,7 +286,7 @@ services:
             - ./config/mtprotosecret:/mtprotosecret
             - ./logs/:/logs/
         hostname: telegram
-        container_name: mtproto-${VER}
+        container_name: tg
         depends_on:
             php:
                 condition: service_healthy
@@ -317,7 +317,7 @@ services:
             - ./scripts/start_xray.sh:/start_xray.sh
             - ./logs:/logs
         hostname: xray
-        container_name: xray-${VER}
+        container_name: xr
         depends_on:
             php:
                 condition: service_healthy
@@ -353,7 +353,7 @@ services:
             - ./scripts/start_wp.sh:/start_wp.sh
             - warp:/var/lib/cloudflare-warp
         hostname: warp
-        container_name: warp-${VER}
+        container_name: wp
         depends_on:
             php:
                 condition: service_healthy
@@ -383,7 +383,7 @@ services:
             - ./config:/config
             - ./scripts/start_hysteria.sh:/start_hysteria.sh
         hostname: hysteria
-        container_name: hysteria-${VER}
+        container_name: hy
         depends_on:
             php:
                 condition: service_healthy
