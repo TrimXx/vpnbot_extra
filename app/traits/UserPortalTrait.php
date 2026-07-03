@@ -9,6 +9,93 @@ trait UserPortalTrait
         return !empty($pac['user_portal_enabled']);
     }
 
+    protected function ensureUserPortalSession(): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_id((string) ($this->input['from'] ?? ''));
+            session_start();
+        }
+    }
+
+    protected function isUserPortalReplyCallback(string $callback): bool
+    {
+        return in_array($callback, ['userPortalImportLink', 'userPortalDeleteDevicePassword'], true);
+    }
+
+    protected function getPendingUserPortalReply(): ?array
+    {
+        $this->ensureUserPortalSession();
+        foreach ($_SESSION['reply'] ?? [] as $messageId => $reply) {
+            if (!is_array($reply)) {
+                continue;
+            }
+            $callback = (string) ($reply['callback'] ?? '');
+            if ($this->isUserPortalReplyCallback($callback)) {
+                return array_merge($reply, ['message_id' => $messageId]);
+            }
+        }
+
+        return null;
+    }
+
+    protected function clearPendingUserPortalReply(?string $callback = null): void
+    {
+        $this->ensureUserPortalSession();
+        foreach ($_SESSION['reply'] ?? [] as $messageId => $reply) {
+            if (!is_array($reply)) {
+                continue;
+            }
+            $cb = (string) ($reply['callback'] ?? '');
+            if ($callback !== null && $cb !== $callback) {
+                continue;
+            }
+            if ($this->isUserPortalReplyCallback($cb)) {
+                $this->delete($this->input['chat'], $messageId);
+                unset($_SESSION['reply'][$messageId]);
+            }
+        }
+        if (empty($_SESSION['reply'])) {
+            unset($_SESSION['reply']);
+        }
+    }
+
+    protected function shouldHandleUserPortalTextInput(): bool
+    {
+        $message = trim((string) ($this->input['message'] ?? ''));
+        if ($message === '' || preg_match('~^/~', $message)) {
+            return false;
+        }
+        if ($this->parseSubscriptionLink($message) !== null) {
+            return true;
+        }
+
+        return $this->getPendingUserPortalReply() !== null;
+    }
+
+    public function handleUserPortalTextInput(): void
+    {
+        $message = trim((string) ($this->input['message'] ?? ''));
+        $pending = $this->getPendingUserPortalReply();
+        if ($pending !== null) {
+            $callback = (string) ($pending['callback'] ?? '');
+            $args = $pending['args'] ?? [];
+            $this->clearPendingUserPortalReply($callback);
+            if ($callback === 'userPortalImportLink') {
+                $this->userPortalImportLink($message);
+
+                return;
+            }
+            if ($callback === 'userPortalDeleteDevicePassword') {
+                $this->userPortalDeleteDevicePassword($message, ...$args);
+
+                return;
+            }
+        }
+        if ($this->parseSubscriptionLink($message) !== null) {
+            $this->userPortalImportLink($message);
+        }
+    }
+
     protected function isUserPortalRequest(): bool
     {
         $message = (string) ($this->input['message'] ?? '');
@@ -21,12 +108,22 @@ trait UserPortalTrait
             return true;
         }
         if (!empty($this->input['reply'])) {
+            $this->ensureUserPortalSession();
             $reply = $_SESSION['reply'][$this->input['reply']] ?? null;
             if (is_array($reply)) {
                 $cb = (string) ($reply['callback'] ?? '');
-                if (in_array($cb, ['userPortalImportLink', 'userPortalDeleteDevicePassword'], true)) {
+                if ($this->isUserPortalReplyCallback($cb)) {
                     return true;
                 }
+            }
+        }
+        $text = trim($message);
+        if ($text !== '' && !preg_match('~^/~', $text)) {
+            if ($this->parseSubscriptionLink($text) !== null) {
+                return true;
+            }
+            if ($this->getPendingUserPortalReply() !== null) {
+                return true;
             }
         }
 
