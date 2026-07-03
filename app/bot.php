@@ -6266,7 +6266,7 @@ DNS-over-HTTPS with IP:
         }
         $this->setPacConf($pac);
         file_put_contents('/config/deny', $text ?: '');
-        $this->ssh('nginx -s reload', 'upstream');
+        $this->ssh('nginx -s reload', 'up');
     }
 
     public function linkXray($i, $s = false)
@@ -8630,7 +8630,7 @@ DNS-over-HTTPS with IP:
             $t = $nginx;
         }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'upstream');
+        $this->ssh("nginx -s reload 2>&1", 'up');
     }
 
     public function setUpstreamRealityPort($port)
@@ -8653,7 +8653,7 @@ DNS-over-HTTPS with IP:
             }
         }
         file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'upstream');
+        $this->ssh("nginx -s reload 2>&1", 'up');
     }
 
     public function setUpstreamDomainOcserv($domains)

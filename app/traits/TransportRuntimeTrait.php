@@ -285,9 +285,8 @@ NGINX;
 
     server {
         listen          443 udp reuseport;
-        proxy_pass      $sni_name;
+        proxy_pass      other;
         proxy_protocol  on;
-        ssl_preread     on;
     }
 NGINX;
         $pattern = '~\n\s*server\s*\{[^{}]*listen\s+443\s+udp[^{}]*\}\s*~s';
@@ -303,5 +302,15 @@ NGINX;
         }
         file_put_contents($path, $nginx);
         $this->ssh('nginx -s reload 2>&1', 'up');
+    }
+
+    public function syncUpstreamRuntime(?array $xray = null): void
+    {
+        $pac = $this->getPacConf();
+        $x = $xray ?? $this->getXray();
+        $global = $this->getTransportRegistryGlobal($pac);
+        $this->applyHysteriaUpstreamRuntime($pac);
+        $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x));
+        $this->setUpstreamRealityPort(!empty($global['reality']) ? $this->getRealityInboundPort($pac) : $this->getWsInboundPort($pac));
     }
 }

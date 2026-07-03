@@ -243,9 +243,7 @@ trait TransportRegistryTrait
         $global = $this->getTransportRegistryGlobal($pac);
         $x = $this->getXray();
         $x['inbounds'] = $this->buildXrayInboundsByRegistry($x, $pac);
-        $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x));
-        $this->setUpstreamRealityPort(!empty($global['reality']) ? $this->getRealityInboundPort($pac) : $this->getWsInboundPort($pac));
-        $this->applyHysteriaUpstreamRuntime($pac);
+        $this->syncUpstreamRuntime($x);
         $this->setPacConf($pac);
         $this->restartXray($x);
         $this->cloakNginx();
