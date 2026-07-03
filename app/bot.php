@@ -143,7 +143,7 @@ class Bot
         session_id($this->input['from']);
         session_start();
         if (!empty($_SESSION['reply'])) {
-            if (empty($this->input['reply'])) {
+            if (empty($this->input['reply']) && empty($this->input['callback'])) {
                 $keep = [];
                 foreach ($_SESSION['reply'] as $k => $v) {
                     if (is_array($v) && in_array($v['callback'] ?? '', [
@@ -5057,10 +5057,10 @@ DNS-over-HTTPS with IP:
         $this->menu('wg', $page);
     }
 
-    public function getMenuServiceStatus(): array
+    public function getMenuServiceStatus(bool $forceRefresh = false): array
     {
         $cacheFile = '/tmp/vpnbot_menu_status.json';
-        if (is_readable($cacheFile)) {
+        if (!$forceRefresh && is_readable($cacheFile)) {
             $age = time() - (int) filemtime($cacheFile);
             if ($age >= 0 && $age < 60) {
                 $cached = json_decode((string) file_get_contents($cacheFile), true);
@@ -5089,20 +5089,20 @@ DNS-over-HTTPS with IP:
             'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
             'warp' => trim((string) ($batch['warp'] ?? 'off')) ?: 'off',
         ];
-        $global = $this->getTransportRegistryGlobal($conf);
-        if (empty($status['hy']) && !empty($global['hysteria']) && !empty($conf['hysteria_pass'])) {
-            $probe = trim((string) $this->ssh('pgrep -f hysteria 2>/dev/null || true', 'hy'));
-            if ($probe !== '') {
-                $status['hy'] = true;
-            }
+        if (empty($status['hy']) && $this->probeHysteriaProcess()) {
+            $status['hy'] = true;
         }
-        if (empty($status['xr'])) {
-            $probe = trim((string) $this->ssh('pgrep -f xray 2>/dev/null || true', 'xr'));
-            if ($probe !== '') {
-                $status['xr'] = true;
-            }
+        if (empty($status['xr']) && $this->probeRemoteProcess('xr', 'xray')) {
+            $status['xr'] = true;
+        }
+        if (empty($status['wg1']) && $this->probeRemoteProcess($this->getInstanceWG(), !empty($conf['wg1_amnezia']) ? 'awg' : 'wg')) {
+            $status['wg1'] = true;
+        }
+        if (empty($status['tg']) && $this->probeRemoteProcess('tg', 'mtproto-proxy')) {
+            $status['tg'] = true;
         }
         @file_put_contents($cacheFile, json_encode($status));
+
         return $status;
     }
 
@@ -5206,7 +5206,7 @@ DNS-over-HTTPS with IP:
                     $backup = "{$conf['backup']} - wrong format";
                 }
             }
-            $menuStatus = $this->getMenuServiceStatus();
+            $menuStatus = $this->getMenuServiceStatus(true);
             $cron   = !empty($this->dontshowcron) ? '' : $this->i18n(!empty($menuStatus['cron']) ? 'on' : 'off') . ' cron';
             $c      = $this->getDockerComposeServices();
             $main[] = 'v' . getenv('VER');
@@ -5249,11 +5249,11 @@ DNS-over-HTTPS with IP:
                     $this->i18n($menuStatus['warp'] ?? 'off') . ' ' . $this->i18n('warp'),
                 ],
                 [
-                    $this->i18n($c['wg1'] ? 'on' : 'off') . ' ' . getenv('WG1PORT'),
-                    $this->i18n('on') . ' ' . $xrPort,
-                    $this->i18n($hy_port ? 'on' : 'off') . ($hy_port ? " $hy_port" : 'port unavailable'),
-                    $this->i18n($c['tg'] ? 'on' : 'off') . ' ' . getenv('TGPORT'),
-                    $this->i18n($c['ad'] ? 'on' : 'off') . ' 853',
+                    $this->i18n(!empty($menuStatus['wg1']) && $this->isComposePortPublished('wg1') ? 'on' : 'off') . ' ' . getenv('WG1PORT'),
+                    $this->i18n(!empty($menuStatus['xr']) ? 'on' : 'off') . ' ' . $xrPort,
+                    $this->i18n(!empty($menuStatus['hy']) && $hy_port ? 'on' : 'off') . ($hy_port ? " $hy_port" : ' port unavailable'),
+                    $this->i18n(!empty($menuStatus['tg']) && $this->isComposePortPublished('tg') ? 'on' : 'off') . ' ' . getenv('TGPORT'),
+                    $this->i18n(!empty($menuStatus['ad']) && $this->isComposePortPublished('ad') ? 'on' : 'off') . ' 853',
                     '',
                 ],
             ]);
@@ -5309,14 +5309,14 @@ DNS-over-HTTPS with IP:
                             ],
                         ],
                     ],
-                    [array_merge(
+                    [
                         [
                             [
                                 'text'          => $this->i18n('Hysteria'),
                                 'callback_data' => "/menu hy",
                             ],
                         ],
-                    )],
+                    ],
                     [
                         [
                             [
@@ -5344,21 +5344,12 @@ DNS-over-HTTPS with IP:
             return [$text, $data];
         }
 
-        if (!empty($this->input['callback_id'])) {
-            $this->update(
-                $this->input['chat'],
-                $this->input['message_id'],
-                $text,
-                $data ?: false,
-            );
-        } else {
-            $this->send(
-                $this->input['chat'],
-                $text,
-                $this->input['message_id'],
-                $data ?: false,
-            );
-        }
+        $this->replyMenu(
+            $this->input['chat'],
+            (int) ($this->input['message_id'] ?? 0),
+            $text,
+            $data ?: false,
+        );
     }
 
     public function switchScanIp()

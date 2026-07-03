@@ -29,6 +29,61 @@ trait BotCacheTrait
         $this->dockerComposeMtime = null;
     }
 
+    protected function isComposePortPublished(string $service): bool
+    {
+        $services = $this->getDockerComposeServices();
+        if (empty($services[$service]) || !is_array($services[$service])) {
+            return false;
+        }
+        $ports = $services[$service]['ports'] ?? [];
+
+        return is_array($ports) && $ports !== [];
+    }
+
+    protected function replyMenu($chat, int $messageId, string $text, $buttons = false, $reply = false): void
+    {
+        $markup = $buttons ?: false;
+        if (!empty($this->input['callback_id']) && $messageId > 0) {
+            $r = $this->update($chat, $messageId, $text, $markup, $reply !== false ? $reply : false);
+            if (!empty($r['ok'])) {
+                return;
+            }
+            if ($markup) {
+                $rk = $this->request('editMessageReplyMarkup', [
+                    'chat_id'      => $chat,
+                    'message_id'   => $messageId,
+                    'reply_markup' => json_encode(['inline_keyboard' => $markup]),
+                ]);
+                if (!empty($rk['ok'])) {
+                    $this->update($chat, $messageId, $text, false, $reply !== false ? $reply : false);
+
+                    return;
+                }
+            }
+        }
+        $this->send($chat, $text, $messageId, $markup, $reply !== false ? $reply : false);
+    }
+
+    protected function probeRemoteProcess(string $host, string $pattern): bool
+    {
+        $cmd = sprintf(
+            '(command -v pgrep >/dev/null 2>&1 && pgrep -f %s >/dev/null 2>&1) || ps w 2>/dev/null | grep -v grep | grep -q %s && echo 1 || true',
+            escapeshellarg($pattern),
+            escapeshellarg($pattern)
+        );
+
+        return trim((string) $this->ssh($cmd, $host)) !== '';
+    }
+
+    protected function probeHysteriaProcess(): bool
+    {
+        $cmd = 'grep -aq hysteria /proc/1/cmdline 2>/dev/null && echo 1 || '
+            . '(command -v pgrep >/dev/null 2>&1 && pgrep -f hysteria >/dev/null 2>&1 && echo 1) || '
+            . '(ps w 2>/dev/null | grep -v grep | grep -q hysteria && echo 1) || true';
+
+        return trim((string) $this->ssh($cmd, 'hy')) !== '';
+    }
+
     protected function ackCallback(?string $text = null, bool $showAlert = false): void
     {
         if (empty($this->input['callback_id'])) {

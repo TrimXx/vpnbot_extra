@@ -5,15 +5,6 @@ set -eu
 VER="${VER:-}"
 WG1_AWG="${WG1_AWG:-0}"
 
-pgrep_in() {
-    local cname="$1"
-    local pattern="$2"
-    if ! docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null | grep -q true; then
-        return 1
-    fi
-    docker exec "$cname" sh -c "pgrep $pattern" 2>/dev/null | grep -q .
-}
-
 resolve_container() {
     want="$1"
     if docker inspect -f '{{.State.Running}}' "$want" 2>/dev/null | grep -q true; then
@@ -23,14 +14,43 @@ resolve_container() {
     docker ps --format '{{.Names}}' 2>/dev/null | grep -F "$want" | head -n1
 }
 
-pgrep_in_resolved() {
+proc_match_in() {
+    cname="$1"
+    pattern="$2"
+    if ! docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null | grep -q true; then
+        return 1
+    fi
+    docker exec "$cname" sh -c "
+        pattern=\"$pattern\"
+        if command -v pgrep >/dev/null 2>&1; then
+            pgrep -f \"\$pattern\" >/dev/null 2>&1 && exit 0
+        fi
+        if ps w 2>/dev/null | grep -v grep | grep -q \"\$pattern\"; then
+            exit 0
+        fi
+        exit 1
+    " 2>/dev/null
+}
+
+proc_match_resolved() {
     base="$1"
     pattern="$2"
     cname="$(resolve_container "$base")"
     if [ -z "$cname" ]; then
         return 1
     fi
-    pgrep_in "$cname" "$pattern"
+    proc_match_in "$cname" "$pattern"
+}
+
+hysteria_running() {
+    cname="$(resolve_container "hysteria-${VER}")"
+    if [ -z "$cname" ]; then
+        return 1
+    fi
+    if docker exec "$cname" sh -c 'grep -aq hysteria /proc/1/cmdline 2>/dev/null' 2>/dev/null; then
+        return 0
+    fi
+    proc_match_in "$cname" hysteria
 }
 
 wg1_cmd="wg"
@@ -45,19 +65,19 @@ tg=0
 cron=0
 warp="off"
 
-if pgrep_in_resolved "wireguard1-${VER}" "-x $wg1_cmd"; then
+if proc_match_resolved "wireguard1-${VER}" "$wg1_cmd"; then
     wg1=1
 fi
-if pgrep_in_resolved "xray-${VER}" "-f xray"; then
+if proc_match_resolved "xray-${VER}" xray; then
     xr=1
 fi
-if pgrep_in_resolved "hysteria-${VER}" "-f hysteria"; then
+if hysteria_running; then
     hy=1
 fi
-if pgrep_in_resolved "mtproto-${VER}" "-f mtproto-proxy"; then
+if proc_match_resolved "mtproto-${VER}" mtproto-proxy; then
     tg=1
 fi
-if pgrep_in_resolved "service-${VER}" "-f cron.php"; then
+if proc_match_resolved "service-${VER}" cron.php; then
     cron=1
 fi
 
