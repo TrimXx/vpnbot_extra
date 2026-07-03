@@ -3809,7 +3809,7 @@ DNS-over-HTTPS with IP:
         $status  = $this->readStatus();
         if (empty($status)) {
             return [
-                'text' => "Menu -> " . $this->getTitleWG() . "\n\nerror status",
+                'text' => "Menu -> " . $this->getTitleWG() . "\n\n" . $this->getWgStatusErrorText(),
                 'data' => [[
                     [
                         'text'          => $this->i18n('back'),
@@ -10013,9 +10013,14 @@ DNS-over-HTTPS with IP:
 
     public function readStatus()
     {
-        $r = $this->ssh($this->getWGType(), $this->getInstanceWG());
+        $cmd = $this->getWGType() . ' show wg0';
+        $r = trim((string) $this->ssh($cmd, $this->getInstanceWG()));
+        if ($r === '') {
+            return [];
+        }
         $r = explode(PHP_EOL, $r);
         $r = array_filter($r);
+        $data = [];
         $i = 0;
         foreach ($r as $k => $v) {
             if (preg_match('~^(interface|peer):~', $v, $m)) {
@@ -10027,8 +10032,15 @@ DNS-over-HTTPS with IP:
                 }
             }
             $t = explode(':', $v, 2);
+            if (!isset($t[1])) {
+                continue;
+            }
             $data[$i][trim($t[0])] = trim($t[1]);
         }
+        if (empty($data)) {
+            return [];
+        }
+        $d = [];
         foreach ($data as $v) {
             $type = $v['type'];
             unset($v['type']);
@@ -10038,7 +10050,22 @@ DNS-over-HTTPS with IP:
                 $d['peers'][] = $v;
             }
         }
+
         return $d;
+    }
+
+    protected function getWgStatusErrorText(): string
+    {
+        $pac = $this->getPacConf();
+        $global = $this->getTransportRegistryGlobal($pac);
+        $lines = [$this->i18n('wg status unavailable')];
+        if (empty($global['awg'])) {
+            $lines[] = $this->i18n('wg status enable awg');
+        } else {
+            $lines[] = $this->i18n('wg status restart hint');
+        }
+
+        return implode("\n\n", $lines);
     }
 
     public function getName(array $a): string

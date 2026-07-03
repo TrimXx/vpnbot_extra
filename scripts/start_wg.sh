@@ -2,7 +2,7 @@ cat /ssh/key.pub > /root/.ssh/authorized_keys
 ssh-keygen -A
 exec /usr/sbin/sshd -D -e "$@" &
 
-if [ "$(jq -r '.transport_registry.global.awg // .wg1 // 0' /pac.json)" -ne 1 ]; then
+if [ "$(jq -r 'if (.transport_registry.global.awg // 0) == 1 then 1 elif (.wg1 // 0) == 1 then 1 elif (.wg1_amnezia // 0) == 1 then 1 else 0 end' /pac.json)" -ne 1 ]; then
     tail -f /dev/null
     exit 0
 fi

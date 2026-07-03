@@ -509,6 +509,18 @@ $i = [
         'en' => 'Too many attempts. Try again later.',
         'ru' => 'Слишком много попыток. Попробуйте позже.',
     ],
+    'wg status unavailable' => [
+        'en' => 'WireGuard status is unavailable.',
+        'ru' => 'Статус WireGuard недоступен.',
+    ],
+    'wg status enable awg' => [
+        'en' => 'Enable AWG in Vless -> core/network, then tap "update status" or run: docker compose restart wg1',
+        'ru' => 'Включите AWG в Vless -> core/network, затем «обновить статус» или: docker compose restart wg1',
+    ],
+    'wg status restart hint' => [
+        'en' => 'AWG is enabled but interface is down. Tap "update status" or run: docker compose restart wg1',
+        'ru' => 'AWG включён, но интерфейс не поднят. Нажмите «обновить статус» или: docker compose restart wg1',
+    ],
 ];
 
 if (file_exists(__DIR__ . '/i18n.override.php')) {

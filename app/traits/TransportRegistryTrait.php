@@ -238,6 +238,19 @@ trait TransportRegistryTrait
         $this->restartHysteria();
         if (empty($global['awg'])) {
             $this->ssh('wg-quick down wg0 || true; awg-quick down wg0 || true', $this->getInstanceWG());
+        } else {
+            $prevWg = $this->wg ?? null;
+            $this->wg = 1;
+            try {
+                $conf = $this->createConfig($this->readConfig());
+                $this->restartWG($conf, true);
+            } finally {
+                if ($prevWg === null) {
+                    unset($this->wg);
+                } else {
+                    $this->wg = $prevWg;
+                }
+            }
         }
     }
 }
