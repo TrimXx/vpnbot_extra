@@ -497,6 +497,74 @@ $i = [
         'en' => 'Set a device deletion password on the subscription page first:',
         'ru' => 'Сначала задайте пароль удаления устройств на странице подписки:',
     ],
+    'user portal expires' => [
+        'en' => 'Valid until',
+        'ru' => 'Действует до',
+    ],
+    'user portal expired' => [
+        'en' => 'Expired',
+        'ru' => 'Истекла',
+    ],
+    'user portal no expiry' => [
+        'en' => 'no limit',
+        'ru' => 'без ограничения',
+    ],
+    'user portal traffic' => [
+        'en' => 'Traffic used',
+        'ru' => 'Израсходовано',
+    ],
+    'user portal delete password' => [
+        'en' => 'Device deletion password',
+        'ru' => 'Пароль удаления устройств',
+    ],
+    'user portal password set' => [
+        'en' => 'set',
+        'ru' => 'задан',
+    ],
+    'user portal password not set' => [
+        'en' => 'not set',
+        'ru' => 'не задан',
+    ],
+    'user portal set password' => [
+        'en' => 'Set deletion password',
+        'ru' => 'Задать пароль удаления',
+    ],
+    'user portal change password' => [
+        'en' => 'Change deletion password',
+        'ru' => 'Сменить пароль удаления',
+    ],
+    'user portal enter new password' => [
+        'en' => 'Enter a new device deletion password',
+        'ru' => 'Введите новый пароль удаления устройств',
+    ],
+    'user portal enter current password' => [
+        'en' => 'Enter current device deletion password',
+        'ru' => 'Введите текущий пароль удаления устройств',
+    ],
+    'user portal password saved' => [
+        'en' => 'Password saved',
+        'ru' => 'Пароль сохранён',
+    ],
+    'user portal invalid password' => [
+        'en' => 'Invalid password',
+        'ru' => 'Неверный пароль',
+    ],
+    'user portal empty password' => [
+        'en' => 'Password cannot be empty',
+        'ru' => 'Пароль не может быть пустым',
+    ],
+    'user portal password already set' => [
+        'en' => 'Password is already set — use change password',
+        'ru' => 'Пароль уже задан — используйте смену пароля',
+    ],
+    'user portal password verify first' => [
+        'en' => 'Verify current password first',
+        'ru' => 'Сначала подтвердите текущий пароль',
+    ],
+    'user portal set password to delete' => [
+        'en' => 'Set a deletion password to remove devices from the bot.',
+        'ru' => 'Задайте пароль удаления, чтобы удалять устройства из бота.',
+    ],
     'user portal enter delete password' => [
         'en' => 'Enter device deletion password',
         'ru' => 'Введите пароль удаления устройства',

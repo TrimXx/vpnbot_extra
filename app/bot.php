@@ -146,7 +146,12 @@ class Bot
             if (empty($this->input['reply'])) {
                 $keep = [];
                 foreach ($_SESSION['reply'] as $k => $v) {
-                    if (is_array($v) && in_array($v['callback'] ?? '', ['userPortalImportLink', 'userPortalDeleteDevicePassword'], true)) {
+                    if (is_array($v) && in_array($v['callback'] ?? '', [
+                        'userPortalImportLink',
+                        'userPortalDeleteDevicePassword',
+                        'userPortalSavePassword',
+                        'userPortalChangePasswordVerify',
+                    ], true)) {
                         $keep[$k] = $v;
                         continue;
                     }
@@ -193,6 +198,9 @@ class Bot
                 break;
             case preg_match('~^/userPortalImport$~', $this->input['callback'], $m):
                 $this->userPortalImport();
+                break;
+            case preg_match('~^/userPortalPassword$~', $this->input['callback'], $m):
+                $this->userPortalPassword();
                 break;
             case preg_match('~^/userPortalDevices(?:_(\d+))?$~', $this->input['callback'], $m):
                 $this->userPortalDevices((int) ($m[1] ?? 0));

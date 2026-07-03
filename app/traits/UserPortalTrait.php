@@ -19,7 +19,112 @@ trait UserPortalTrait
 
     protected function isUserPortalReplyCallback(string $callback): bool
     {
-        return in_array($callback, ['userPortalImportLink', 'userPortalDeleteDevicePassword'], true);
+        return in_array($callback, [
+            'userPortalImportLink',
+            'userPortalDeleteDevicePassword',
+            'userPortalSavePassword',
+            'userPortalChangePasswordVerify',
+        ], true);
+    }
+
+    protected function getUserPortalUiMessageId(): ?int
+    {
+        $this->ensureUserPortalSession();
+        $id = (int) ($_SESSION['userPortalUi']['message_id'] ?? 0);
+
+        return $id > 0 ? $id : null;
+    }
+
+    protected function setUserPortalUiMessageId(int $messageId): void
+    {
+        $this->ensureUserPortalSession();
+        $_SESSION['userPortalUi']['message_id'] = $messageId;
+    }
+
+    protected function userPortalSetFlash(string $text): void
+    {
+        $this->ensureUserPortalSession();
+        $_SESSION['userPortalUi']['flash'] = $text;
+    }
+
+    protected function userPortalTakeFlash(): string
+    {
+        $this->ensureUserPortalSession();
+        $flash = trim((string) ($_SESSION['userPortalUi']['flash'] ?? ''));
+        unset($_SESSION['userPortalUi']['flash']);
+
+        return $flash;
+    }
+
+    protected function resolveUserPortalMessageId(): int
+    {
+        if (!empty($this->input['callback']) && !empty($this->input['message_id'])) {
+            return (int) $this->input['message_id'];
+        }
+
+        return (int) ($this->getUserPortalUiMessageId() ?? 0);
+    }
+
+    protected function userPortalShow(string $text, $buttons = false, $replyPlaceholder = false, ?array $replyState = null): void
+    {
+        $chat = $this->input['chat'];
+        $messageId = $this->resolveUserPortalMessageId();
+
+        if ($replyState !== null && $messageId > 0) {
+            $_SESSION['reply'][$messageId] = array_merge($replyState, [
+                'start_message'  => $messageId,
+                'start_callback' => $this->input['callback_id'] ?? false,
+                'keep_message' => true,
+            ]);
+        }
+
+        if ($messageId > 0) {
+            $this->update($chat, $messageId, $text, $buttons ?: false, $replyPlaceholder !== false ? $replyPlaceholder : false);
+            $this->setUserPortalUiMessageId($messageId);
+
+            return;
+        }
+
+        $r = $this->send($chat, $text, false, $buttons ?: false, $replyPlaceholder !== false ? $replyPlaceholder : false);
+        if (!empty($r['result']['message_id'])) {
+            $newId = (int) $r['result']['message_id'];
+            $this->setUserPortalUiMessageId($newId);
+            if ($replyState !== null) {
+                $_SESSION['reply'][$newId] = array_merge($replyState, [
+                    'start_message'  => $newId,
+                    'start_callback' => $this->input['callback_id'] ?? false,
+                    'keep_message' => true,
+                ]);
+            }
+        }
+    }
+
+    protected function userPortalPromptInput(string $text, string $callback, array $args = [], $buttons = false): void
+    {
+        $data = is_array($buttons) ? $buttons : [];
+        $data[] = [[
+            'text'          => $this->i18n('back'),
+            'callback_data' => '/userPortal',
+        ]];
+        $placeholder = match ($callback) {
+            'userPortalImportLink'            => $this->i18n('user portal send old link'),
+            'userPortalDeleteDevicePassword'  => $this->i18n('user portal enter delete password'),
+            'userPortalSavePassword'          => $this->i18n('user portal enter new password'),
+            'userPortalChangePasswordVerify'  => $this->i18n('user portal enter current password'),
+            default                           => '',
+        };
+        $this->userPortalShow($text, $data, $placeholder, [
+            'callback' => $callback,
+            'args'     => $args,
+        ]);
+    }
+
+    protected function userPortalDeleteUserMessage(): void
+    {
+        $messageId = (int) ($this->input['message_id'] ?? 0);
+        if ($messageId > 0 && empty($this->input['callback'])) {
+            $this->delete($this->input['chat'], $messageId);
+        }
     }
 
     protected function getPendingUserPortalReply(): ?array
@@ -50,13 +155,56 @@ trait UserPortalTrait
                 continue;
             }
             if ($this->isUserPortalReplyCallback($cb)) {
-                $this->delete($this->input['chat'], $messageId);
+                if (empty($reply['keep_message'])) {
+                    $this->delete($this->input['chat'], $messageId);
+                }
                 unset($_SESSION['reply'][$messageId]);
             }
         }
         if (empty($_SESSION['reply'])) {
             unset($_SESSION['reply']);
         }
+    }
+
+    protected function buildUserPortalAccountInfoLines(array $session): array
+    {
+        $client = $session['client'];
+        $pac = $this->getPacConf();
+        $st = $this->getXrayStats();
+        $lines = [];
+        $email = (string) ($client['email'] ?? '');
+        if ($email !== '') {
+            $lines[] = $this->i18n('user portal account') . ': <code>' . htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+        }
+
+        $time = (int) ($client['time'] ?? 0);
+        if ($time > 0) {
+            $date = date('d.m.Y H:i', $time);
+            if ($time > time()) {
+                $lines[] = $this->i18n('user portal expires') . ': ' . $date . ' (' . $this->getTime($time) . ')';
+            } else {
+                $lines[] = $this->i18n('user portal expired') . ': ' . $date;
+            }
+        } else {
+            $lines[] = $this->i18n('user portal expires') . ': ' . $this->i18n('user portal no expiry');
+        }
+
+        $totals = $this->getSubscriptionXrayTrafficTotals($st, $client, $session['clientIndex']);
+        $trafficLine = $this->i18n('user portal traffic') . ': ' . $this->formatTrafficUpDown((int) $totals['download'], (int) $totals['upload']);
+        $limit = $this->getClientTrafficLimitBytes($client, $pac);
+        if ($limit > 0) {
+            $trafficLine .= ' / ' . $this->getBytes($limit);
+        }
+        $lines[] = $trafficLine;
+
+        $ownerSubId = $session['subscription_id'];
+        $deviceCount = count($this->getHwidDevicesByUser($ownerSubId));
+        $lines[] = $this->i18n('hwid devices') . ': ' . $deviceCount;
+        $lines[] = $this->i18n('user portal delete password') . ': ' . $this->i18n(
+            $this->hasSubscriptionDevicePassword($client) ? 'user portal password set' : 'user portal password not set'
+        );
+
+        return $lines;
     }
 
     protected function shouldHandleUserPortalTextInput(): bool
@@ -79,7 +227,12 @@ trait UserPortalTrait
         if ($pending !== null) {
             $callback = (string) ($pending['callback'] ?? '');
             $args = $pending['args'] ?? [];
+            $uiId = (int) ($pending['message_id'] ?? $pending['start_message'] ?? 0);
+            if ($uiId > 0) {
+                $this->input['message_id'] = $uiId;
+            }
             $this->clearPendingUserPortalReply($callback);
+            $this->userPortalDeleteUserMessage();
             if ($callback === 'userPortalImportLink') {
                 $this->userPortalImportLink($message);
 
@@ -90,8 +243,19 @@ trait UserPortalTrait
 
                 return;
             }
+            if ($callback === 'userPortalSavePassword') {
+                $this->userPortalSavePassword($message, ...$args);
+
+                return;
+            }
+            if ($callback === 'userPortalChangePasswordVerify') {
+                $this->userPortalChangePasswordVerify($message);
+
+                return;
+            }
         }
         if ($this->parseSubscriptionLink($message) !== null) {
+            $this->userPortalDeleteUserMessage();
             $this->userPortalImportLink($message);
         }
     }
@@ -142,7 +306,7 @@ trait UserPortalTrait
             return false;
         }
         $_SESSION['userPortal'] = [
-            'subId' => $resolved['subscription_id'],
+            'subId'       => $resolved['subscription_id'],
             'clientIndex' => $resolved['index'],
             'telegram_id' => (string) ($this->input['from'] ?? ''),
         ];
@@ -168,8 +332,8 @@ trait UserPortalTrait
 
         return array_merge($portal, [
             'subscription_id' => $resolved['subscription_id'],
-            'client' => $resolved['client'],
-            'clientIndex' => $resolved['index'],
+            'client'          => $resolved['client'],
+            'clientIndex'     => $resolved['index'],
         ]);
     }
 
@@ -247,8 +411,8 @@ trait UserPortalTrait
             }
 
             return [
-                'index' => $k,
-                'client' => $v,
+                'index'           => $k,
+                'client'          => $v,
                 'subscription_id' => $this->getClientSubscriptionId($v),
             ];
         }
@@ -265,7 +429,7 @@ trait UserPortalTrait
         $hash = $this->getHashBot();
 
         return [
-            'page' => $this->buildSubscriptionPageUrl($scheme, $domain, $hash, $subscriptionId),
+            'page'  => $this->buildSubscriptionPageUrl($scheme, $domain, $hash, $subscriptionId),
             'clash' => $this->buildPacUrl($scheme, $domain, $hash, [
                 'h' => $hash,
                 't' => 'cl',
@@ -274,15 +438,55 @@ trait UserPortalTrait
         ];
     }
 
+    protected function saveUserPortalDevicePassword(string $password, bool $change = false): array
+    {
+        $session = $this->getUserPortalSession();
+        if ($session === null) {
+            return ['ok' => false, 'message' => $this->i18n('user portal bind first')];
+        }
+        $password = trim($password);
+        if ($password === '') {
+            return ['ok' => false, 'message' => $this->i18n('user portal empty password')];
+        }
+
+        $ownerSubId = $session['subscription_id'];
+        if (!$this->checkSubscriptionActionRateLimit($ownerSubId, 'device_password_set', 5, 600)) {
+            return ['ok' => false, 'message' => $this->i18n('user portal rate limit')];
+        }
+
+        $xr = $this->getXray();
+        $idx = (int) $session['clientIndex'];
+        if (!isset($xr['inbounds'][0]['settings']['clients'][$idx])) {
+            return ['ok' => false, 'message' => $this->i18n('user portal link not found')];
+        }
+
+        $clientRef = &$xr['inbounds'][0]['settings']['clients'][$idx];
+        if ($change) {
+            if (empty($_SESSION['userPortal']['pw_change_ok'])) {
+                return ['ok' => false, 'message' => $this->i18n('user portal password verify first')];
+            }
+            unset($_SESSION['userPortal']['pw_change_ok']);
+        } elseif ($this->hasSubscriptionDevicePassword($clientRef)) {
+            return ['ok' => false, 'message' => $this->i18n('user portal password already set')];
+        }
+
+        $this->setSubscriptionDevicePassword($clientRef, $password);
+        $this->writeXrayConfig($xr);
+
+        return ['ok' => true];
+    }
+
     public function userPortalMenu()
     {
         $session = $this->getUserPortalSession();
         $text = [$this->i18n('user portal title')];
+        $flash = $this->userPortalTakeFlash();
+        if ($flash !== '') {
+            $text[] = $flash;
+            $text[] = '';
+        }
         if ($session !== null) {
-            $email = (string) ($session['client']['email'] ?? '');
-            if ($email !== '') {
-                $text[] = $this->i18n('user portal account') . ': <code>' . htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
-            }
+            $text = array_merge($text, $this->buildUserPortalAccountInfoLines($session));
         } else {
             $text[] = $this->i18n('user portal hint');
         }
@@ -290,13 +494,11 @@ trait UserPortalTrait
         $data = [
             [
                 [
-                    'text' => $this->i18n('user portal restore link'),
+                    'text'          => $this->i18n('user portal restore link'),
                     'callback_data' => '/userPortalImport',
                 ],
-            ],
-            [
                 [
-                    'text' => $this->i18n('user portal my devices'),
+                    'text'          => $this->i18n('user portal my devices'),
                     'callback_data' => '/userPortalDevices',
                 ],
             ],
@@ -309,42 +511,35 @@ trait UserPortalTrait
             $text[] = '';
             $text[] = $this->i18n('user portal new clash link') . ':';
             $text[] = $links['clash'];
+
+            $data[] = [[
+                'text'          => $this->hasSubscriptionDevicePassword($session['client'])
+                    ? $this->i18n('user portal change password')
+                    : $this->i18n('user portal set password'),
+                'callback_data' => '/userPortalPassword',
+            ]];
         }
 
-        if (!empty($this->input['message_id']) && !empty($this->input['callback'])) {
-            $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $text), $data);
-        } else {
-            $this->send($this->input['chat'], implode("\n", $text), $this->input['message_id'] ?? false, $data);
-        }
+        $this->userPortalShow(implode("\n", $text), $data);
     }
 
     public function userPortalImport()
     {
-        $r = $this->send(
-            $this->input['chat'],
-            $this->i18n('user portal send old link'),
-            $this->input['message_id'],
-            reply: $this->i18n('user portal send old link'),
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message' => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback' => 'userPortalImportLink',
-            'args' => [],
-        ];
+        $this->userPortalPromptInput($this->i18n('user portal send old link'), 'userPortalImportLink', []);
     }
 
     public function userPortalImportLink($text = '')
     {
         $text = trim((string) $text);
         if ($text === '') {
-            $this->answer($this->input['callback_id'] ?? '', $this->i18n('user portal link not found'), true);
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal link not found'));
+            $this->userPortalMenu();
 
             return;
         }
         $telegramId = (string) ($this->input['from'] ?? '');
         if (!$this->checkSubscriptionActionRateLimit('portal:' . $telegramId, 'import_link', 8, 600)) {
-            $this->send($this->input['chat'], $this->i18n('user portal rate limit'), $this->input['message_id'] ?? false);
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal rate limit'));
             $this->userPortalMenu();
 
             return;
@@ -352,7 +547,7 @@ trait UserPortalTrait
 
         $subscriptionId = $this->parseSubscriptionLink($text);
         if ($subscriptionId === null || $this->resolveSubscriptionClient($subscriptionId) === null) {
-            $this->send($this->input['chat'], $this->i18n('user portal link not found'), $this->input['message_id'] ?? false);
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal link not found'));
             $this->userPortalMenu();
 
             return;
@@ -361,23 +556,97 @@ trait UserPortalTrait
         $this->bindUserPortalSession($subscriptionId);
         $session = $this->getUserPortalSession();
         if ($session === null) {
-            $this->send($this->input['chat'], $this->i18n('user portal link not found'), $this->input['message_id'] ?? false);
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal link not found'));
             $this->userPortalMenu();
 
             return;
         }
 
-        $links = $this->buildUserSubscriptionLinks($session['subscription_id']);
-        $lines = [
-            $this->i18n('user portal link restored'),
-            '',
-            $this->i18n('user portal new page link') . ':',
-            $links['page'],
-            '',
-            $this->i18n('user portal new clash link') . ':',
-            $links['clash'],
-        ];
-        $this->send($this->input['chat'], implode("\n", $lines), $this->input['message_id'] ?? false);
+        $this->userPortalSetFlash('✅ ' . $this->i18n('user portal link restored'));
+        $this->userPortalMenu();
+    }
+
+    public function userPortalPassword()
+    {
+        $session = $this->getUserPortalSession();
+        if ($session === null) {
+            $this->ackCallback($this->i18n('user portal bind first'), true);
+            $this->userPortalImport();
+
+            return;
+        }
+        if ($this->hasSubscriptionDevicePassword($session['client'])) {
+            $this->userPortalChangePassword();
+
+            return;
+        }
+        $this->userPortalPromptInput($this->i18n('user portal enter new password'), 'userPortalSavePassword', []);
+    }
+
+    public function userPortalChangePassword()
+    {
+        $session = $this->getUserPortalSession();
+        if ($session === null) {
+            $this->ackCallback($this->i18n('user portal bind first'), true);
+            $this->userPortalMenu();
+
+            return;
+        }
+        if (!$this->hasSubscriptionDevicePassword($session['client'])) {
+            $this->userPortalPassword();
+
+            return;
+        }
+        unset($_SESSION['userPortal']['pw_change_ok']);
+        $this->userPortalPromptInput($this->i18n('user portal enter current password'), 'userPortalChangePasswordVerify', []);
+    }
+
+    public function userPortalChangePasswordVerify($password)
+    {
+        $session = $this->getUserPortalSession();
+        if ($session === null) {
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal bind first'));
+            $this->userPortalMenu();
+
+            return;
+        }
+
+        $xr = $this->getXray();
+        $idx = (int) $session['clientIndex'];
+        if (!isset($xr['inbounds'][0]['settings']['clients'][$idx])) {
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal link not found'));
+            $this->userPortalMenu();
+
+            return;
+        }
+
+        $clientRef = &$xr['inbounds'][0]['settings']['clients'][$idx];
+        if (!$this->isSubscriptionDevicePasswordValid($clientRef, trim((string) $password))) {
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal invalid password'));
+            $this->userPortalChangePassword();
+
+            return;
+        }
+
+        $_SESSION['userPortal']['pw_change_ok'] = 1;
+        $this->userPortalPromptInput($this->i18n('user portal enter new password'), 'userPortalSavePassword', ['change' => 1]);
+    }
+
+    public function userPortalSavePassword($password, $change = 0)
+    {
+        $result = $this->saveUserPortalDevicePassword((string) $password, !empty($change));
+        if (empty($result['ok'])) {
+            $this->userPortalSetFlash('⚠️ ' . (string) ($result['message'] ?? 'error'));
+            if (!empty($change)) {
+                $this->userPortalChangePassword();
+            } else {
+                $this->userPortalPassword();
+            }
+
+            return;
+        }
+
+        $this->userPortalSetFlash('✅ ' . $this->i18n('user portal password saved'));
         $this->userPortalMenu();
     }
 
@@ -386,7 +655,11 @@ trait UserPortalTrait
         $session = $this->getUserPortalSession();
         if ($session === null) {
             $this->ackCallback($this->i18n('user portal bind first'), true);
-            $this->userPortalImport();
+            $this->userPortalPromptInput(
+                $this->i18n('user portal bind first') . "\n\n" . $this->i18n('user portal send old link'),
+                'userPortalImportLink',
+                [],
+            );
 
             return;
         }
@@ -408,19 +681,24 @@ trait UserPortalTrait
         $page = min(max((int) $page, 0), $pages - 1);
         $hwidsPage = array_slice($hwids, $page * $perPage, $perPage);
 
-        $text = [
-            $this->i18n('user portal my devices'),
-            (string) ($client['email'] ?? ''),
-            $this->i18n('hwid devices') . ': ' . $total,
-        ];
-        if (!$this->hasSubscriptionDevicePassword($client)) {
-            $links = $this->buildUserSubscriptionLinks($ownerSubId);
-            $text[] = '';
-            $text[] = $this->i18n('user portal set password first');
-            $text[] = $links['page'];
+        $text = [$this->i18n('user portal my devices')];
+        $flash = $this->userPortalTakeFlash();
+        if ($flash !== '') {
+            $text[] = $flash;
         }
+        $text = array_merge($text, $this->buildUserPortalAccountInfoLines($session));
+        $text[] = '';
 
         $data = [];
+        if (!$this->hasSubscriptionDevicePassword($client)) {
+            $text[] = '';
+            $text[] = $this->i18n('user portal set password to delete');
+            $data[] = [[
+                'text'          => $this->i18n('user portal set password'),
+                'callback_data' => '/userPortalPassword',
+            ]];
+        }
+
         if ($total === 0) {
             $text[] = $this->i18n('no devices');
         } else {
@@ -447,41 +725,43 @@ trait UserPortalTrait
                 if ($this->hasSubscriptionDevicePassword($client)) {
                     $token = $this->rememberHwidToken($scope, $hwid);
                     $data[] = [[
-                        'text' => $this->i18n('delete') . ' ' . $number,
+                        'text'          => $this->i18n('delete') . ' ' . $number,
                         'callback_data' => "/userPortalDel {$page}_{$token}",
                     ]];
                 }
             }
         }
 
+        if ($this->hasSubscriptionDevicePassword($client)) {
+            $data[] = [[
+                'text'          => $this->i18n('user portal change password'),
+                'callback_data' => '/userPortalPassword',
+            ]];
+        }
+
         if ($pages > 1) {
             $data[] = [
                 [
-                    'text' => '<<',
+                    'text'          => '<<',
                     'callback_data' => '/userPortalDevices_' . ($page - 1 >= 0 ? $page - 1 : $pages - 1),
                 ],
                 [
-                    'text' => ($page + 1) . '/' . $pages,
+                    'text'          => ($page + 1) . '/' . $pages,
                     'callback_data' => "/userPortalDevices_{$page}",
                 ],
                 [
-                    'text' => '>>',
+                    'text'          => '>>',
                     'callback_data' => '/userPortalDevices_' . (($page + 1) % $pages),
                 ],
             ];
         }
 
         $data[] = [[
-            'text' => $this->i18n('back'),
+            'text'          => $this->i18n('back'),
             'callback_data' => '/userPortal',
         ]];
 
-        $this->update(
-            $this->input['chat'],
-            $this->input['message_id'],
-            implode("\n", $text),
-            $data ?: false,
-        );
+        $this->userPortalShow(implode("\n", $text), $data ?: false);
     }
 
     public function userPortalDel($pageToken, $token)
@@ -494,7 +774,7 @@ trait UserPortalTrait
             return;
         }
         if (!$this->hasSubscriptionDevicePassword($session['client'])) {
-            $this->ackCallback($this->i18n('user portal set password first'), true);
+            $this->ackCallback($this->i18n('user portal set password to delete'), true);
             $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
 
             return;
@@ -509,25 +789,22 @@ trait UserPortalTrait
             return;
         }
 
-        $r = $this->send(
-            $this->input['chat'],
-            $this->i18n('user portal enter delete password'),
-            $this->input['message_id'],
-            reply: $this->i18n('user portal enter delete password'),
+        $this->userPortalPromptInput(
+            $this->i18n('user portal enter delete password') . "\n\n<code>" . htmlspecialchars($hwid, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>',
+            'userPortalDeleteDevicePassword',
+            [$pageToken, $token],
+            [[
+                'text'          => $this->i18n('back'),
+                'callback_data' => '/userPortalDevices_' . (int) explode('_', (string) $pageToken)[0],
+            ]],
         );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message' => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback' => 'userPortalDeleteDevicePassword',
-            'args' => [$pageToken, $token],
-        ];
     }
 
     public function userPortalDeleteDevicePassword($password, $pageToken, $token)
     {
         $session = $this->getUserPortalSession();
         if ($session === null) {
-            $this->send($this->input['chat'], $this->i18n('user portal bind first'), $this->input['message_id'] ?? false);
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal bind first'));
             $this->userPortalMenu();
 
             return;
@@ -536,7 +813,7 @@ trait UserPortalTrait
         $scope = $this->getUserPortalTokenScope();
         $hwid = $this->resolveHwidToken($scope, $token);
         if ($hwid === '') {
-            $this->send($this->input['chat'], 'device not found', $this->input['message_id'] ?? false);
+            $this->userPortalSetFlash('⚠️ device not found');
             $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
 
             return;
@@ -544,7 +821,7 @@ trait UserPortalTrait
 
         $ownerSubId = $session['subscription_id'];
         if (!$this->checkSubscriptionActionRateLimit($ownerSubId, 'device_delete', 10, 600)) {
-            $this->send($this->input['chat'], $this->i18n('user portal rate limit'), $this->input['message_id'] ?? false);
+            $this->userPortalSetFlash('⚠️ ' . $this->i18n('user portal rate limit'));
             $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
 
             return;
@@ -552,13 +829,17 @@ trait UserPortalTrait
 
         $result = $this->performSubscriptionDeviceDelete($ownerSubId, $hwid, trim((string) $password));
         if (empty($result['ok'])) {
-            $this->send($this->input['chat'], (string) ($result['message'] ?? 'error'), $this->input['message_id'] ?? false);
+            $message = (string) ($result['message'] ?? 'error');
+            if ($message === 'invalid password') {
+                $message = $this->i18n('user portal invalid password');
+            }
+            $this->userPortalSetFlash('⚠️ ' . $message);
             $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
 
             return;
         }
 
-        $this->send($this->input['chat'], $this->i18n('user portal device deleted'), $this->input['message_id'] ?? false);
+        $this->userPortalSetFlash('✅ ' . $this->i18n('user portal device deleted'));
         $this->userPortalDevices((int) explode('_', (string) $pageToken)[0]);
     }
 
