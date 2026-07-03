@@ -14,6 +14,25 @@ pgrep_in() {
     docker exec "$cname" sh -c "pgrep $pattern" 2>/dev/null | grep -q .
 }
 
+resolve_container() {
+    want="$1"
+    if docker inspect -f '{{.State.Running}}' "$want" 2>/dev/null | grep -q true; then
+        printf '%s' "$want"
+        return 0
+    fi
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -F "$want" | head -n1
+}
+
+pgrep_in_resolved() {
+    base="$1"
+    pattern="$2"
+    cname="$(resolve_container "$base")"
+    if [ -z "$cname" ]; then
+        return 1
+    fi
+    pgrep_in "$cname" "$pattern"
+}
+
 wg1_cmd="wg"
 if [ "$WG1_AWG" = "1" ]; then
     wg1_cmd="awg"
@@ -26,19 +45,19 @@ tg=0
 cron=0
 warp="off"
 
-if pgrep_in "wireguard1-${VER}" "-x $wg1_cmd"; then
+if pgrep_in_resolved "wireguard1-${VER}" "-x $wg1_cmd"; then
     wg1=1
 fi
-if pgrep_in "xray-${VER}" "xray"; then
+if pgrep_in_resolved "xray-${VER}" "-f xray"; then
     xr=1
 fi
-if pgrep_in "hysteria-${VER}" "hysteria"; then
+if pgrep_in_resolved "hysteria-${VER}" "-f hysteria"; then
     hy=1
 fi
-if pgrep_in "mtproto-${VER}" "mtproto-proxy"; then
+if pgrep_in_resolved "mtproto-${VER}" "-f mtproto-proxy"; then
     tg=1
 fi
-if pgrep_in "service-${VER}" "cron.php"; then
+if pgrep_in_resolved "service-${VER}" "-f cron.php"; then
     cron=1
 fi
 

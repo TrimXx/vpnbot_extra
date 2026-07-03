@@ -1255,6 +1255,7 @@ class Bot
         ];
         yaml_emit_file('/config/hysteria.yaml', $c);
         $this->ssh('hysteria server -c /config/hysteria.yaml', 'hy', false, '/logs/hysteria');
+        @unlink('/tmp/vpnbot_menu_status.json');
     }
 
     public function chocdns($dns)
@@ -5088,6 +5089,19 @@ DNS-over-HTTPS with IP:
             'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
             'warp' => trim((string) ($batch['warp'] ?? 'off')) ?: 'off',
         ];
+        $global = $this->getTransportRegistryGlobal($conf);
+        if (empty($status['hy']) && !empty($global['hysteria']) && !empty($conf['hysteria_pass'])) {
+            $probe = trim((string) $this->ssh('pgrep -f hysteria 2>/dev/null || true', 'hy'));
+            if ($probe !== '') {
+                $status['hy'] = true;
+            }
+        }
+        if (empty($status['xr'])) {
+            $probe = trim((string) $this->ssh('pgrep -f xray 2>/dev/null || true', 'xr'));
+            if ($probe !== '') {
+                $status['xr'] = true;
+            }
+        }
         @file_put_contents($cacheFile, json_encode($status));
         return $status;
     }
@@ -5220,7 +5234,7 @@ DNS-over-HTTPS with IP:
             }
 
 
-            $hy_port = explode(':', $c['hy']['ports'][0] ?? '')[0] ?? '';
+            $hy_port = (string) $this->getHysteriaListenPort();
             $xrPort = (int) ($this->getTransportRegistryPorts($conf)['ws'] ?? 443);
             $main[]  = '';
 
@@ -6411,10 +6425,10 @@ DNS-over-HTTPS with IP:
     {
         $pac    = $this->getPacConf();
         $c      = $this->getDockerComposeServices();
-        $port   = explode(':', $c['hy']['ports'][0] ?? '')[0] ?? '';
+        $port   = (string) $this->getHysteriaListenPort();
         $domain = $this->getDomain();
         $text[] = "Menu -> Hysteria";
-        $text[] = "server: " . ($port? "<code>$domain:$port</code>" : 'port unavailable');
+        $text[] = "server: " . ($port !== '' ? "<code>$domain:$port</code>" : 'port unavailable');
         $text[] = "passwd: <code>" . ($pac['hysteria_pass'] ?: '-') . '</code>';
         $text[] = $this->i18n('hysteria menu hint');
         $data[] = [
