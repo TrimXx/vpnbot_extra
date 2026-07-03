@@ -10461,7 +10461,7 @@ DNS-over-HTTPS with IP:
         ]);
         $res = curl_exec($ch);
         $r   = json_decode($res, true);
-        if (!empty($res['description']) || is_null($res)) {
+        if (!is_array($r) || empty($r['ok'])) {
             file_put_contents('/logs/requests_error', var_export([
                 'r' => [
                     'method' => $method,
