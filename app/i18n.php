@@ -529,6 +529,10 @@ $i = [
         'en' => 'Set a password to start Hysteria. Managed here, not in Vless menu.',
         'ru' => 'Задайте пароль — Hysteria запустится. Управление здесь, не в меню Vless.',
     ],
+    'subscription transport' => [
+        'en' => 'in sub',
+        'ru' => 'в подписке',
+    ],
 ];
 
 if (file_exists(__DIR__ . '/i18n.override.php')) {

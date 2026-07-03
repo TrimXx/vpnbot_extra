@@ -556,6 +556,9 @@ class Bot
             case preg_match('~^/toggleGlobalTransport (\w+)$~', $this->input['callback'], $m):
                 $this->toggleGlobalTransport($m[1]);
                 break;
+            case preg_match('~^/toggleSubscriptionTransport (\w+)$~', $this->input['callback'], $m):
+                $this->toggleSubscriptionTransport($m[1]);
+                break;
             case preg_match('~^/toggleSubscriptionUrlSigned$~', $this->input['callback'], $m):
                 $this->toggleSubscriptionUrlSigned();
                 break;
@@ -1261,7 +1264,6 @@ class Bot
             unset($pac['hysteria_pass']);
         }
         $pac = $this->normalizeTransportRegistry($pac);
-        $pac['transport_registry']['global']['hysteria'] = !empty($pac['hysteria_pass']) ? 1 : 0;
         $this->setPacConf($pac);
         $this->restartHysteria();
         $this->menu('hy');
@@ -2031,10 +2033,6 @@ class Bot
             unset($c[$this->getInstanceWG(1) . 'amnezia_keys']);
             unset($c[$this->getInstanceWG(1) . 'presharedkey']);
         }
-        $this->setPacConf($c);
-        $c = $this->getPacConf();
-        $c = $this->normalizeTransportRegistry($c);
-        $c['transport_registry']['global']['awg'] = !empty($amnezia) ? 1 : 0;
         $this->setPacConf($c);
 
         $pk = $this->presharedKey();
@@ -7187,6 +7185,8 @@ DNS-over-HTTPS with IP:
         $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
             . ' WS=' . (int) !empty($globalTransports['ws'])
             . ' XHTTP=' . (int) !empty($globalTransports['xhttp']);
+        $text[] = 'subscription: HY=' . (int) !empty($globalTransports['hysteria'])
+            . ' AWG=' . (int) !empty($globalTransports['awg']);
         if (!empty($fake) && !empty($globalTransports['reality'])) {
             $text[] = "fake domain: <code>$fake</code>";
             $bridgeServer = trim((string) ($p['reality']['bridge_server'] ?? ''));
@@ -7225,6 +7225,16 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => 'XHTTP ' . $this->i18n(!empty($globalTransports['xhttp']) ? 'on' : 'off'),
                 'callback_data' => "/toggleGlobalTransport xhttp",
+            ],
+        ];
+        $data[] = [
+            [
+                'text'          => 'HY ' . $this->i18n('subscription transport') . ': ' . $this->i18n(!empty($globalTransports['hysteria']) ? 'on' : 'off'),
+                'callback_data' => '/toggleSubscriptionTransport hysteria',
+            ],
+            [
+                'text'          => 'AWG ' . $this->i18n('subscription transport') . ': ' . $this->i18n(!empty($globalTransports['awg']) ? 'on' : 'off'),
+                'callback_data' => '/toggleSubscriptionTransport awg',
             ],
         ];
         if (!empty($globalTransports['reality'])) {
@@ -7673,6 +7683,16 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => 'XHTTP: ' . $this->i18n(!empty($transportFlags['xhttp']) ? 'on' : 'off'),
                 'callback_data' => "/toggleUserTransport xhttp $i",
+            ],
+        ];
+        $data[] = [
+            [
+                'text'          => 'HY ' . $this->i18n('subscription transport') . ': ' . $this->i18n(!empty($transportFlags['hysteria']) ? 'on' : 'off'),
+                'callback_data' => "/toggleUserTransport hysteria $i",
+            ],
+            [
+                'text'          => 'AWG ' . $this->i18n('subscription transport') . ': ' . $this->i18n(!empty($transportFlags['awg']) ? 'on' : 'off'),
+                'callback_data' => "/toggleUserTransport awg $i",
             ],
         ];
         $data[] = [
@@ -8243,6 +8263,7 @@ DNS-over-HTTPS with IP:
         switch ($_GET['t']) {
             case 'cl':
                 $this->appendClashCompanionTransportProxy($c, $index, $client, $pac, $domain, $uid);
+                $this->appendClashSubscriptionTransportProxies($c, $index, $client, $pac, $domain);
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
                     $c = $this->clashRules($c, $subscriptionId, $domain);
@@ -9639,6 +9660,21 @@ DNS-over-HTTPS with IP:
         $this->xrayCore();
     }
 
+    public function toggleSubscriptionTransport($name)
+    {
+        $allowed = ['hysteria', 'awg'];
+        if (!in_array($name, $allowed, true)) {
+            $this->answer($this->input['callback_id'], 'unknown subscription transport', true);
+            return;
+        }
+        $this->ackCallback();
+        $pac = $this->getPacConf();
+        $pac = $this->normalizeTransportRegistry($pac);
+        $pac['transport_registry']['global'][$name] = !empty($pac['transport_registry']['global'][$name]) ? 0 : 1;
+        $this->setPacConf($pac);
+        $this->xrayCore();
+    }
+
     public function toggleUserTransport($name, $i)
     {
         $allowed = ['reality', 'ws', 'xhttp', 'hysteria', 'awg'];
@@ -9665,7 +9701,9 @@ DNS-over-HTTPS with IP:
         $current = $this->getClientTransportFlags($client, $pac);
         $pac['transport_registry']['users'][$subId][$name] = !empty($current[$name]) ? 0 : 1;
         $this->setPacConf($pac);
-        $this->applyTransportRegistryAndRuntime();
+        if (in_array($name, ['reality', 'ws', 'xhttp'], true)) {
+            $this->applyTransportRegistryAndRuntime();
+        }
         $this->userXr($i);
     }
 

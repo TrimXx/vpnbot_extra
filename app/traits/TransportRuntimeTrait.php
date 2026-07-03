@@ -142,6 +142,62 @@ trait TransportRuntimeTrait
         }
     }
 
+    protected function getHysteriaListenPort(): int
+    {
+        $services = $this->getDockerComposeServices();
+        $port = (int) explode(':', (string) ($services['hy']['ports'][0] ?? ''))[0];
+
+        return $port > 0 ? $port : 0;
+    }
+
+    protected function buildClashHysteria2Proxy(string $baseName, string $domain, array $pac): ?array
+    {
+        $password = (string) ($pac['hysteria_pass'] ?? '');
+        if ($password === '') {
+            return null;
+        }
+        $port = $this->getHysteriaListenPort();
+        if ($port <= 0) {
+            return null;
+        }
+
+        return [
+            'name' => $baseName . '-hy2',
+            'type' => 'hysteria2',
+            'server' => $domain,
+            'port' => $port,
+            'password' => $password,
+            'sni' => $domain,
+            'skip-cert-verify' => false,
+            'alpn' => ['h3'],
+        ];
+    }
+
+    protected function appendClashSubscriptionTransportProxies(array &$c, int $index, array $client, array $pac, string $domain): void
+    {
+        if (!isset($c['proxies'][$index]) || !is_array($c['proxies'][$index])) {
+            return;
+        }
+        $flags = $this->getClientTransportFlags($client, $pac);
+        $baseName = (string) ($c['proxies'][$index]['name'] ?? 'proxy');
+        $existingNames = [];
+        foreach ($c['proxies'] as $proxy) {
+            if (is_array($proxy) && !empty($proxy['name'])) {
+                $existingNames[(string) $proxy['name']] = true;
+            }
+        }
+        if (!empty($flags['hysteria'])) {
+            $hyProxy = $this->buildClashHysteria2Proxy($baseName, $domain, $pac);
+            if (is_array($hyProxy)) {
+                $hyName = (string) ($hyProxy['name'] ?? '');
+                if ($hyName !== '' && empty($existingNames[$hyName])) {
+                    $c['proxies'][] = $hyProxy;
+                    $this->linkClashTransportProxyToGroups($c, $baseName, $hyName);
+                }
+            }
+        }
+    }
+
     protected function stripNginxLocationPrefix(string $template, string $prefix): string
     {
         $pattern = '~\n\s*location\s+' . preg_quote($prefix, '~') . '[^\n]*\n.*?\n\s*}\s*~s';

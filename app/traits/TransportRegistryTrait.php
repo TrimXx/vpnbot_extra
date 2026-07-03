@@ -8,8 +8,8 @@ trait TransportRegistryTrait
             'reality' => 0,
             'ws' => 1,
             'xhttp' => 0,
-            'hysteria' => !empty($conf['hysteria_pass']) ? 1 : 0,
-            'awg' => (!empty($conf['wg1']) || !empty($conf['wg1_amnezia'])) ? 1 : 0,
+            'hysteria' => 0,
+            'awg' => 0,
         ];
         $legacy = (string) ($conf['transport'] ?? 'Websocket');
         if ($legacy === 'Reality') {
@@ -28,6 +28,14 @@ trait TransportRegistryTrait
         $registry = $conf['transport_registry'] ?? [];
         $global = is_array($registry['global'] ?? null) ? $registry['global'] : [];
         foreach ($fallback as $k => $v) {
+            if (in_array($k, ['hysteria', 'awg'], true)) {
+                if (array_key_exists($k, $global)) {
+                    $global[$k] = !empty($global[$k]) ? 1 : 0;
+                } else {
+                    $global[$k] = (int) $v;
+                }
+                continue;
+            }
             $global[$k] = !empty($global[$k]) ? 1 : (int) $v;
         }
         $users = is_array($registry['users'] ?? null) ? $registry['users'] : [];
