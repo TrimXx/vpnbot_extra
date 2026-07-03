@@ -65,6 +65,8 @@ backup:
 	docker compose exec php php backup.php > backup.json
 smoke:
 	bash ./scripts/smoke_check.sh
+diag:
+	bash ./scripts/diagnose_bot.sh
 cron: # установка задачи в cron для автозапуска при перезагрузке
 	@(crontab -l 2>/dev/null | grep -v "cd $(ROOT) && make r"; echo "@reboot cd $(ROOT) && make r") | crontab -
 uncron: # удаление задачи из cron

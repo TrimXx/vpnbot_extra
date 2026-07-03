@@ -96,27 +96,25 @@ class Bot
             'new_member_id'     => $input['my_chat_member']['new_chat_member']['user']['id'] ?? false,
             'new_member_status' => $input['my_chat_member']['new_chat_member']['status'] ?? false,
         ];
+        $this->logWebhook('parsed');
         $this->auth();
+        $this->session();
+        session_write_close();
         if (!empty($this->input['callback_id'])) {
             $this->answer($this->input['callback_id']);
         }
-        $this->session();
-        session_write_close();
-        $this->logWebhook();
+        $this->logWebhook('before action');
         $this->action();
+        $this->logWebhook('after action');
         $this->callbackCheck();
     }
 
-    protected function logWebhook(): void
+    protected function logWebhook(string $stage = 'event'): void
     {
         $kind = !empty($this->input['callback']) ? 'cb' : 'msg';
         $payload = (string) ($this->input['callback'] ?: $this->input['message']);
         $payload = preg_replace('~\s+~', ' ', substr($payload, 0, 120));
-        @file_put_contents(
-            '/logs/webhook',
-            date('c') . " {$kind} from={$this->input['from']} {$payload}\n",
-            FILE_APPEND | LOCK_EX
-        );
+        vpnbot_trace("{$stage} {$kind} from={$this->input['from']} chat={$this->input['chat']} {$payload}");
     }
 
     public function auth()
@@ -137,6 +135,11 @@ class Bot
         } elseif (!in_array($this->input['from'], $c['admin'])) {
             if ($this->isUserPortalEnabled() && $this->isUserPortalRequest()) {
                 return;
+            }
+            if (method_exists($this, 'logWebhook')) {
+                $this->logWebhook('auth denied');
+            } else {
+                vpnbot_trace('auth denied from=' . ($this->input['from'] ?? ''));
             }
             exit;
         } else {

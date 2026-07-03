@@ -2,6 +2,19 @@
 
 date_default_timezone_set(getenv('TZ'));
 
+function vpnbot_trace(string $line): void
+{
+    $dir = '/logs';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    file_put_contents(
+        $dir . '/webhook',
+        date('c') . ' ' . $line . "\n",
+        FILE_APPEND | LOCK_EX
+    );
+}
+
 // Production: only fatals in log. php.ini also has error_reporting = E_ERROR.
 // E_WARNING (incl. Undefined array key in PHP 8+) floods /logs/php_error on large bot.php.
 ini_set('log_errors', '1');

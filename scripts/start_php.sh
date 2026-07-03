@@ -12,6 +12,9 @@ if [ ! -s /certs/self_private ] || [ ! -s /certs/self_public ]; then
         -subj "/C=NN/ST=N/L=N/O=N/CN=$IP"
 fi
 
+mkdir -p /logs
+chmod 777 /logs
+
 php init.php
 if [[ -f "/start" && -f "/ssh/key.pub" && -s "/ssh/key.pub" ]]; then
     unitd --log /logs/unit_error

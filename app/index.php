@@ -28,6 +28,7 @@ if (!empty($_GET['hash'])) {
 switch (true) {
     // tlgrm
     case 'POST' == $_SERVER['REQUEST_METHOD'] && preg_match('~^/tlgrm~', $_SERVER['REQUEST_URI']) && $_GET['k'] == $c['key']:
+        vpnbot_trace('hit index.php uri=' . ($_SERVER['REQUEST_URI'] ?? ''));
         $bot->input();
         break;
 
