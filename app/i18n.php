@@ -517,9 +517,17 @@ $i = [
         'en' => 'Enable AWG in Vless -> core/network, then tap "update status" or run: docker compose restart wg1',
         'ru' => 'Включите AWG в Vless -> core/network, затем «обновить статус» или: docker compose restart wg1',
     ],
+    'wg status enable service' => [
+        'en' => 'Enable Amnezia/WG in the main menu, add a peer, then tap "update status".',
+        'ru' => 'Включите Amnezia/WG в главном меню, добавьте клиента, затем «обновить статус».',
+    ],
     'wg status restart hint' => [
         'en' => 'AWG is enabled but interface is down. Tap "update status" or run: docker compose restart wg1',
         'ru' => 'AWG включён, но интерфейс не поднят. Нажмите «обновить статус» или: docker compose restart wg1',
+    ],
+    'hysteria menu hint' => [
+        'en' => 'Set a password to start Hysteria. Managed here, not in Vless menu.',
+        'ru' => 'Задайте пароль — Hysteria запустится. Управление здесь, не в меню Vless.',
     ],
 ];
 

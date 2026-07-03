@@ -8,8 +8,8 @@ trait TransportRegistryTrait
             'reality' => 0,
             'ws' => 1,
             'xhttp' => 0,
-            'hysteria' => !empty($conf['hysteria']) ? 1 : 0,
-            'awg' => !empty($conf['wg1']) ? 1 : 0,
+            'hysteria' => !empty($conf['hysteria_pass']) ? 1 : 0,
+            'awg' => (!empty($conf['wg1']) || !empty($conf['wg1_amnezia'])) ? 1 : 0,
         ];
         $legacy = (string) ($conf['transport'] ?? 'Websocket');
         if ($legacy === 'Reality') {
@@ -236,21 +236,5 @@ trait TransportRegistryTrait
         $this->restartXray($x);
         $this->cloakNginx();
         $this->restartHysteria();
-        if (empty($global['awg'])) {
-            $this->ssh('wg-quick down wg0 || true; awg-quick down wg0 || true', $this->getInstanceWG());
-        } else {
-            $prevWg = $this->wg ?? null;
-            $this->wg = 1;
-            try {
-                $conf = $this->createConfig($this->readConfig());
-                $this->restartWG($conf, true);
-            } finally {
-                if ($prevWg === null) {
-                    unset($this->wg);
-                } else {
-                    $this->wg = $prevWg;
-                }
-            }
-        }
     }
 }

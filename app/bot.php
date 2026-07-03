@@ -1217,10 +1217,8 @@ class Bot
     public function restartHysteria()
     {
         $pac = $this->getPacConf();
-        $pac = $this->normalizeTransportRegistry($pac);
-        $global = $this->getTransportRegistryGlobal($pac);
         $this->ssh('pkill hysteria || true', 'hy');
-        if (empty($global['hysteria']) || empty($pac['hysteria_pass'])) {
+        if (empty($pac['hysteria_pass'])) {
             return;
         }
         $c = yaml_parse_file('/config/hysteria.yaml');
@@ -1262,6 +1260,8 @@ class Bot
         } else {
             unset($pac['hysteria_pass']);
         }
+        $pac = $this->normalizeTransportRegistry($pac);
+        $pac['transport_registry']['global']['hysteria'] = !empty($pac['hysteria_pass']) ? 1 : 0;
         $this->setPacConf($pac);
         $this->restartHysteria();
         $this->menu('hy');
@@ -2031,6 +2031,10 @@ class Bot
             unset($c[$this->getInstanceWG(1) . 'amnezia_keys']);
             unset($c[$this->getInstanceWG(1) . 'presharedkey']);
         }
+        $this->setPacConf($c);
+        $c = $this->getPacConf();
+        $c = $this->normalizeTransportRegistry($c);
+        $c['transport_registry']['global']['awg'] = !empty($amnezia) ? 1 : 0;
         $this->setPacConf($c);
 
         $pk = $this->presharedKey();
@@ -6397,7 +6401,8 @@ DNS-over-HTTPS with IP:
         $domain = $this->getDomain();
         $text[] = "Menu -> Hysteria";
         $text[] = "server: " . ($port? "<code>$domain:$port</code>" : 'port unavailable');
-        $text[] = "passwd: <code>{$pac['hysteria_pass']}</code>";
+        $text[] = "passwd: <code>" . ($pac['hysteria_pass'] ?: '-') . '</code>';
+        $text[] = $this->i18n('hysteria menu hint');
         $data[] = [
             [
                 'text'          => $this->i18n('change password'),
@@ -7064,9 +7069,7 @@ DNS-over-HTTPS with IP:
         }
         $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
             . ' WS=' . (int) !empty($globalTransports['ws'])
-            . ' XHTTP=' . (int) !empty($globalTransports['xhttp'])
-            . ' Hysteria=' . (int) !empty($globalTransports['hysteria'])
-            . ' AWG=' . (int) !empty($globalTransports['awg']);
+            . ' XHTTP=' . (int) !empty($globalTransports['xhttp']);
         $st = $this->getXrayStats();
         $td = $this->getBytes($st['global']['download'] + $st['session']['download']);
         $tu = $this->getBytes($st['global']['upload'] + $st['session']['upload']);
@@ -7183,9 +7186,7 @@ DNS-over-HTTPS with IP:
         $globalTransports = $this->getTransportRegistryGlobal($p);
         $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
             . ' WS=' . (int) !empty($globalTransports['ws'])
-            . ' XHTTP=' . (int) !empty($globalTransports['xhttp'])
-            . ' Hysteria=' . (int) !empty($globalTransports['hysteria'])
-            . ' AWG=' . (int) !empty($globalTransports['awg']);
+            . ' XHTTP=' . (int) !empty($globalTransports['xhttp']);
         if (!empty($fake) && !empty($globalTransports['reality'])) {
             $text[] = "fake domain: <code>$fake</code>";
             $bridgeServer = trim((string) ($p['reality']['bridge_server'] ?? ''));
@@ -7224,16 +7225,6 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => 'XHTTP ' . $this->i18n(!empty($globalTransports['xhttp']) ? 'on' : 'off'),
                 'callback_data' => "/toggleGlobalTransport xhttp",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => 'Hysteria ' . $this->i18n(!empty($globalTransports['hysteria']) ? 'on' : 'off'),
-                'callback_data' => "/toggleGlobalTransport hysteria",
-            ],
-            [
-                'text'          => 'AWG ' . $this->i18n(!empty($globalTransports['awg']) ? 'on' : 'off'),
-                'callback_data' => "/toggleGlobalTransport awg",
             ],
         ];
         if (!empty($globalTransports['reality'])) {
@@ -9634,7 +9625,7 @@ DNS-over-HTTPS with IP:
 
     public function toggleGlobalTransport($name)
     {
-        $allowed = ['reality', 'ws', 'xhttp', 'hysteria', 'awg'];
+        $allowed = ['reality', 'ws', 'xhttp'];
         if (!in_array($name, $allowed, true)) {
             $this->answer($this->input['callback_id'], 'unknown transport', true);
             return;
@@ -10057,10 +10048,9 @@ DNS-over-HTTPS with IP:
     protected function getWgStatusErrorText(): string
     {
         $pac = $this->getPacConf();
-        $global = $this->getTransportRegistryGlobal($pac);
         $lines = [$this->i18n('wg status unavailable')];
-        if (empty($global['awg'])) {
-            $lines[] = $this->i18n('wg status enable awg');
+        if (empty($pac['wg1_amnezia']) && empty($pac['wg1'])) {
+            $lines[] = $this->i18n('wg status enable service');
         } else {
             $lines[] = $this->i18n('wg status restart hint');
         }
