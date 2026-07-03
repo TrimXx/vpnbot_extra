@@ -101,8 +101,22 @@ class Bot
             $this->answer($this->input['callback_id']);
         }
         $this->session();
+        session_write_close();
+        $this->logWebhook();
         $this->action();
         $this->callbackCheck();
+    }
+
+    protected function logWebhook(): void
+    {
+        $kind = !empty($this->input['callback']) ? 'cb' : 'msg';
+        $payload = (string) ($this->input['callback'] ?: $this->input['message']);
+        $payload = preg_replace('~\s+~', ' ', substr($payload, 0, 120));
+        @file_put_contents(
+            '/logs/webhook',
+            date('c') . " {$kind} from={$this->input['from']} {$payload}\n",
+            FILE_APPEND | LOCK_EX
+        );
     }
 
     public function auth()
@@ -1421,6 +1435,8 @@ class Bot
         $this->menu('client', implode('_', $_SESSION['reply'][$this->input['reply']]['args']));
     }
 
+    protected $menuStatusRefreshAt = 0;
+
     public function cron()
     {
         $period = 10;
@@ -1435,6 +1451,10 @@ class Bot
             $this->checkCert();
             $this->autoAnalyzeLogs();
             $this->xrayStatsUser();
+            if (time() - $this->menuStatusRefreshAt >= 60) {
+                $this->menuStatusRefreshAt = time();
+                $this->refreshMenuServiceStatus();
+            }
             sleep($period);
         }
     }
@@ -2267,6 +2287,7 @@ class Bot
 
     public function reply()
     {
+        $this->touchSession();
         if (!empty($_SESSION['reply'][$this->input['reply']])) {
             $this->delete($this->input['chat'], $this->input['reply']);
             $this->delete($this->input['chat'], $this->input['message_id']);
@@ -2275,6 +2296,7 @@ class Bot
             $this->{$callback}($this->input['message'], ...$_SESSION['reply'][$this->input['reply']]['args']);
             $this->answer($_SESSION['reply'][$this->input['reply']]['start_message']);
             unset($_SESSION['reply'][$this->input['reply']]);
+            session_write_close();
         }
     }
 
@@ -2387,6 +2409,7 @@ class Bot
         $this->input['chat']        = $c['admin'][0];
         $this->input['message_id']  = $r['result']['message_id'];
         $this->input['callback_id'] = false;
+        $this->refreshMenuServiceStatus();
         if (empty($p)) {
             $this->addDomain(str_replace('.', '-', $this->ip) . '.nip.io', 1);
             $this->setSSL('letsencrypt');
@@ -5061,38 +5084,16 @@ DNS-over-HTTPS with IP:
     {
         $cacheFile = '/tmp/vpnbot_menu_status.json';
         if (!$forceRefresh && is_readable($cacheFile)) {
-            $age = time() - (int) filemtime($cacheFile);
-            if ($age >= 0 && $age < 60) {
-                $cached = json_decode((string) file_get_contents($cacheFile), true);
-                if (is_array($cached)) {
-                    return $cached;
-                }
+            $cached = json_decode((string) file_get_contents($cacheFile), true);
+            if (is_array($cached)) {
+                return $cached;
             }
         }
-        $conf = $this->getPacConf();
-        $wg1Amnezia = !empty($conf['wg1_amnezia']) ? '1' : '0';
-        $this->releaseSessionLock();
-        $raw = trim((string) $this->ssh(
-            "WG1_AWG='{$wg1Amnezia}' sh /scripts/menu_status.sh",
-            'service'
-        ));
-        $this->resumeSessionLock();
-        $batch = json_decode($raw, true);
-        if (!is_array($batch)) {
-            $batch = [];
+        if ($forceRefresh) {
+            return $this->refreshMenuServiceStatus();
         }
-        $status = [
-            'wg1'  => !empty($batch['wg1']),
-            'xr'   => !empty($batch['xr']),
-            'hy'   => !empty($batch['hy']),
-            'tg'   => !empty($batch['tg']),
-            'cron' => !empty($batch['cron']),
-            'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
-            'warp' => trim((string) ($batch['warp'] ?? 'off')) ?: 'off',
-        ];
-        @file_put_contents($cacheFile, json_encode($status));
 
-        return $status;
+        return $this->defaultMenuServiceStatus();
     }
 
     public function alignColumns(array $columns): string
@@ -5176,9 +5177,6 @@ DNS-over-HTTPS with IP:
 
     public function menu($type = false, $arg = false, $return = false)
     {
-        if ($type === false && !empty($this->input['callback_id'])) {
-            $this->ackCallback();
-        }
         if ($type === 'wg') {
             $this->wg = 1;
         }
@@ -10422,10 +10420,14 @@ DNS-over-HTTPS with IP:
 
             $data = "";
             if ($wait) {
-                // ?????? ??? ?????????? ?????? ?????? ?????
                 stream_set_blocking($s, true);
+                stream_set_timeout($s, 10);
                 while ($buf = fread($s, 4096)) {
                     $data .= $buf;
+                    $meta = stream_get_meta_data($s);
+                    if (!empty($meta['timed_out'])) {
+                        break;
+                    }
                 }
             } else {
                 // ??? ??????? ?????? ?????? ???? ????? ???????????
@@ -10453,6 +10455,8 @@ DNS-over-HTTPS with IP:
             CURLOPT_URL            => $this->api . $method,
             CURLOPT_CUSTOMREQUEST  => 'POST',
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT        => 20,
             CURLOPT_HTTPHEADER => $json_header ? [
                 'Content-Type: application/json'
             ] : [],

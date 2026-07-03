@@ -10,7 +10,8 @@
 			"root": "/app",
 			"script": "index.php",
 			"user": "root",
-			"group": "root"
+			"group": "root",
+			"processes": 4
 		}
 	}
 }

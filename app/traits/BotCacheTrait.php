@@ -40,19 +40,61 @@ trait BotCacheTrait
         return is_array($ports) && $ports !== [];
     }
 
-    protected function releaseSessionLock(): void
-    {
-        if (session_status() === PHP_SESSION_ACTIVE) {
-            session_write_close();
-        }
-    }
-
-    protected function resumeSessionLock(): void
+    protected function touchSession(): void
     {
         if (session_status() !== PHP_SESSION_ACTIVE && !empty($this->input['from'])) {
             session_id((string) $this->input['from']);
             session_start();
         }
+    }
+
+    protected function stashReplyMessage(int $messageId, array $state): void
+    {
+        if ($messageId <= 0) {
+            return;
+        }
+        $this->touchSession();
+        $_SESSION['reply'][$messageId] = $state;
+        session_write_close();
+    }
+
+    protected function defaultMenuServiceStatus(): array
+    {
+        return [
+            'wg1'  => false,
+            'xr'   => true,
+            'hy'   => false,
+            'tg'   => false,
+            'cron' => false,
+            'ad'   => true,
+            'warp' => 'off',
+        ];
+    }
+
+    public function refreshMenuServiceStatus(): array
+    {
+        $conf = $this->getPacConf();
+        $wg1Amnezia = !empty($conf['wg1_amnezia']) ? '1' : '0';
+        $raw = trim((string) $this->ssh(
+            "WG1_AWG='{$wg1Amnezia}' sh /scripts/menu_status.sh",
+            'service'
+        ));
+        $batch = json_decode($raw, true);
+        if (!is_array($batch)) {
+            return $this->defaultMenuServiceStatus();
+        }
+        $status = [
+            'wg1'  => !empty($batch['wg1']),
+            'xr'   => !empty($batch['xr']),
+            'hy'   => !empty($batch['hy']),
+            'tg'   => !empty($batch['tg']),
+            'cron' => !empty($batch['cron']),
+            'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
+            'warp' => trim((string) ($batch['warp'] ?? 'off')) ?: 'off',
+        ];
+        @file_put_contents('/tmp/vpnbot_menu_status.json', json_encode($status));
+
+        return $status;
     }
 
     protected function telegramRequestOk(?array $response): bool
@@ -83,6 +125,7 @@ trait BotCacheTrait
                     return;
                 }
             }
+            $this->send($chat, $text, 0, $markup, $reply !== false ? $reply : false);
 
             return;
         }

@@ -121,6 +121,12 @@ if [ -d "$CONFIG" ]; then
     done
 fi
 
+if [ -f "$TEMPLATES/unit.json" ]; then
+    cp "$TEMPLATES/unit.json" "$CONFIG/unit.json"
+    strip_utf8_bom "$CONFIG/unit.json"
+    echo "[bootstrap] synced unit.json from template"
+fi
+
 # v3: keep nginx template current; reset live config if broken or still references removed ss container
 if [ -f "$TEMPLATES/nginx_default.conf" ]; then
     cp "$TEMPLATES/nginx_default.conf" "$CONFIG/nginx_default.conf"
