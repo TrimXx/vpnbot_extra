@@ -225,4 +225,43 @@ trait SubscriptionSecurityTrait
 
         return (int) $pac['subscription_url_epoch'];
     }
+
+    protected function performSubscriptionDeviceDelete(string $ownerSubId, string $hwid, string $password): array
+    {
+        $hwid = trim($hwid);
+        if ($hwid === '') {
+            return ['ok' => false, 'message' => 'empty hwid'];
+        }
+
+        $resolved = $this->resolveSubscriptionClient($ownerSubId);
+        if ($resolved === null) {
+            return ['ok' => false, 'message' => 'subscription not found'];
+        }
+
+        $client = $resolved['client'];
+        if (!$this->isSubscriptionDevicePasswordValid($client, $password)) {
+            return ['ok' => false, 'message' => 'invalid password'];
+        }
+
+        $xr = $this->getXray();
+        $devices = $this->getHwidDevicesByUser($ownerSubId);
+        $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
+        $this->deleteHwidDevice($ownerSubId, $hwid);
+        if ($deviceUuid !== '') {
+            $idx = $this->findXrayClientIndexById($xr, $deviceUuid);
+            if ($idx !== null) {
+                unset($xr['inbounds'][0]['settings']['clients'][$idx]);
+                $this->restartXray($xr);
+            } else {
+                $this->writeXrayConfig($xr);
+            }
+            $this->runInRuntimeWgContext(function () use ($deviceUuid) {
+                $this->deleteDeviceWgProfileByUuid($deviceUuid);
+            });
+        } else {
+            $this->writeXrayConfig($xr);
+        }
+
+        return ['ok' => true];
+    }
 }

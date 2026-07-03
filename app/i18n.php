@@ -441,6 +441,74 @@ $i = [
         'en' => 'Both Reality',
         'ru' => 'Both Reality',
     ],
+    'user portal title' => [
+        'en' => 'VPN subscription',
+        'ru' => 'VPN подписка',
+    ],
+    'user portal hint' => [
+        'en' => 'Paste your old subscription link to get updated links and manage devices.',
+        'ru' => 'Вставьте старую ссылку подписки, чтобы получить новые ссылки и управлять устройствами.',
+    ],
+    'user portal account' => [
+        'en' => 'Account',
+        'ru' => 'Аккаунт',
+    ],
+    'user portal restore link' => [
+        'en' => 'Restore subscription link',
+        'ru' => 'Обновить ссылку подписки',
+    ],
+    'user portal my devices' => [
+        'en' => 'My devices',
+        'ru' => 'Мои устройства',
+    ],
+    'user portal logout' => [
+        'en' => 'Unlink account',
+        'ru' => 'Отвязать аккаунт',
+    ],
+    'user portal logout done' => [
+        'en' => 'Account unlinked',
+        'ru' => 'Аккаунт отвязан',
+    ],
+    'user portal send old link' => [
+        'en' => 'Send your old subscription link (page or Mihomo/Clash URL)',
+        'ru' => 'Пришлите старую ссылку подписки (страница или Mihomo/Clash)',
+    ],
+    'user portal link not found' => [
+        'en' => 'Subscription not found. Check the link and try again.',
+        'ru' => 'Подписка не найдена. Проверьте ссылку и попробуйте снова.',
+    ],
+    'user portal link restored' => [
+        'en' => 'New links generated:',
+        'ru' => 'Новые ссылки:',
+    ],
+    'user portal new page link' => [
+        'en' => 'Subscription page',
+        'ru' => 'Страница подписки',
+    ],
+    'user portal new clash link' => [
+        'en' => 'Mihomo/Clash subscription',
+        'ru' => 'Подписка Mihomo/Clash',
+    ],
+    'user portal bind first' => [
+        'en' => 'Link your subscription first',
+        'ru' => 'Сначала привяжите подписку',
+    ],
+    'user portal set password first' => [
+        'en' => 'Set a device deletion password on the subscription page first:',
+        'ru' => 'Сначала задайте пароль удаления устройств на странице подписки:',
+    ],
+    'user portal enter delete password' => [
+        'en' => 'Enter device deletion password',
+        'ru' => 'Введите пароль удаления устройства',
+    ],
+    'user portal device deleted' => [
+        'en' => 'Device deleted',
+        'ru' => 'Устройство удалено',
+    ],
+    'user portal rate limit' => [
+        'en' => 'Too many attempts. Try again later.',
+        'ru' => 'Слишком много попыток. Попробуйте позже.',
+    ],
 ];
 
 if (file_exists(__DIR__ . '/i18n.override.php')) {

@@ -7,6 +7,7 @@ require_once __DIR__ . '/traits/PacUrlTrait.php';
 require_once __DIR__ . '/traits/BotCacheTrait.php';
 require_once __DIR__ . '/traits/HwidTrait.php';
 require_once __DIR__ . '/traits/LegacyRemovedTrait.php';
+require_once __DIR__ . '/traits/UserPortalTrait.php';
 
 class Bot
 {
@@ -17,8 +18,10 @@ class Bot
     use BotCacheTrait;
     use HwidTrait;
     use LegacyRemovedTrait;
+    use UserPortalTrait;
 
     public $input;
+    public $admin = false;
     public $adguard;
     public $update;
     public $ip;
@@ -112,12 +115,18 @@ class Bot
         if (empty($c['admin'])) {
             $c['admin'] = [$this->input['from']];
             file_put_contents($file, "<?php\n\n\$c = " . var_export($c, true) . ";\n");
+            $this->admin = true;
         } elseif (!is_array($c['admin'])) {
             $c['admin'] = [$c['admin']];
             file_put_contents($file, "<?php\n\n\$c = " . var_export($c, true) . ";\n");
+            $this->admin = in_array($this->input['from'], $c['admin']);
         } elseif (!in_array($this->input['from'], $c['admin'])) {
-            // $this->send($this->input['chat'], 'you are not authorized', $this->input['message_id']);
+            if ($this->isUserPortalEnabled() && $this->isUserPortalRequest()) {
+                return;
+            }
             exit;
+        } else {
+            $this->admin = true;
         }
     }
 
@@ -161,9 +170,29 @@ class Bot
     public function action()
     {
         switch (true) {
+            case preg_match('~^/(?:start|menu)$~', $this->input['message'], $m):
+                if (!$this->admin && $this->isUserPortalEnabled()) {
+                    $this->userPortalMenu();
+                    break;
+                }
+                $this->menu();
+                break;
+            case preg_match('~^/userPortal$~', $this->input['callback'], $m):
+                $this->userPortalMenu();
+                break;
+            case preg_match('~^/userPortalImport$~', $this->input['callback'], $m):
+                $this->userPortalImport();
+                break;
+            case preg_match('~^/userPortalDevices(?:_(\d+))?$~', $this->input['callback'], $m):
+                $this->userPortalDevices((int) ($m[1] ?? 0));
+                break;
+            case preg_match('~^/userPortalDel (\d+)_(\w+)$~', $this->input['callback'], $m):
+                $this->userPortalDel($m[1] . '_' . $m[2], $m[2]);
+                break;
+            case preg_match('~^/toggleUserPortal$~', $this->input['callback'], $m):
+                $this->toggleUserPortal();
+                break;
             // ????? ???? ???????
-            case preg_match('~^/menu$~', $this->input['message'], $m):
-            case preg_match('~^/start$~', $this->input['message'], $m):
             case preg_match('~^/menu$~', $this->input['callback'], $m):
             case preg_match('~^/menu (?P<type>addpeer) (?P<arg>(?:-)?\d+)$~', $this->input['callback'], $m):
             case preg_match('~^/menu (?P<type>wg) (?P<arg>(?:-)?\d+)$~', $this->input['callback'], $m):
@@ -2571,6 +2600,7 @@ class Bot
             ],
             'subscription_url_signed' => 0,
             'subscription_url_epoch' => 1,
+            'user_portal_enabled' => 1,
         ];
         $conf = array_replace_recursive($defaults, $raw);
         $conf = $this->normalizeTransportRegistry($conf);
@@ -7922,32 +7952,13 @@ DNS-over-HTTPS with IP:
                     $this->requireSubscriptionActionToken($ownerSubId);
                     $password = trim((string) ($_POST['password'] ?? ''));
                     $hwid = trim((string) ($_POST['hwid'] ?? ''));
-                    if ($hwid === '') {
-                        http_response_code(400);
-                        echo json_encode(['ok' => false, 'message' => 'empty hwid']);
+                    $result = $this->performSubscriptionDeviceDelete($ownerSubId, $hwid, $password);
+                    if (empty($result['ok'])) {
+                        $message = (string) ($result['message'] ?? 'error');
+                        $status = $message === 'invalid password' ? 403 : 400;
+                        http_response_code($status);
+                        echo json_encode(['ok' => false, 'message' => $message]);
                         exit;
-                    }
-                    if (!$this->isSubscriptionDevicePasswordValid($client, $password)) {
-                        http_response_code(403);
-                        echo json_encode(['ok' => false, 'message' => 'invalid password']);
-                        exit;
-                    }
-                    $devices = $this->getHwidDevicesByUser($ownerSubId);
-                    $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
-                    $this->deleteHwidDevice($ownerSubId, $hwid);
-                    if ($deviceUuid !== '') {
-                        $idx = $this->findXrayClientIndexById($xr, $deviceUuid);
-                        if ($idx !== null) {
-                            unset($xr['inbounds'][0]['settings']['clients'][$idx]);
-                            $this->restartXray($xr);
-                        } else {
-                            $this->writeXrayConfig($xr);
-                        }
-                        $this->runInRuntimeWgContext(function () use ($deviceUuid) {
-                            $this->deleteDeviceWgProfileByUuid($deviceUuid);
-                        });
-                    } else {
-                        $this->writeXrayConfig($xr);
                     }
                     echo json_encode(['ok' => true]);
                     exit;
@@ -9084,6 +9095,12 @@ DNS-over-HTTPS with IP:
             [
                 'text'          => 'rotate subscription URLs',
                 'callback_data' => '/rotateSubscriptionUrls',
+            ],
+        ];
+        $data[] = [
+            [
+                'text'          => 'user portal: ' . $this->i18n(!empty($conf['user_portal_enabled']) ? 'on' : 'off'),
+                'callback_data' => '/toggleUserPortal',
             ],
         ];
 
