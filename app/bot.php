@@ -2441,9 +2441,6 @@ class Bot
                 $certDomains = [];
                 foreach ($domains as $domainName) {
                     $certDomains[] = $domainName;
-                    if (!empty($conf['adguardkey'])) {
-                        $certDomains[] = "{$conf['adguardkey']}.$domainName";
-                    }
                 }
                 $certDomains = array_values(array_unique($certDomains));
                 $domainArgs = implode(' ', array_map(fn($d) => '-d ' . escapeshellarg($d), $certDomains));
