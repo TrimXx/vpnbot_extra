@@ -29,7 +29,11 @@ if command -v nc >/dev/null 2>&1; then
 else
     echo "nc not installed, skip host :443 probe"
 fi
-docker compose exec -T up sh -c 'tail -15 /logs/upstream_error 2>/dev/null' 2>/dev/null || echo "cannot read upstream_error (up down?)"
+docker compose exec -T up sh -c 'tail -15 /logs/upstream_error 2>/dev/null' 2>/dev/null || {
+    echo "cannot read upstream_error (up down?)"
+    docker compose logs up --tail 15 2>/dev/null || true
+    tail -10 logs/upstream_error 2>/dev/null || true
+}
 docker compose exec -T ng sh -c 'nc -z 10.10.0.2 443 && echo ng:443 listening || echo ng:443 NOT listening' 2>/dev/null || echo "cannot probe ng:443"
 
 echo ""

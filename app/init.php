@@ -10,6 +10,7 @@ if (!empty($c['debug'] ?? false)) {
 }
 
 $bot = new Bot($c['key'], $i);
+$bot->applyHysteriaUpstreamRuntime($bot->getPacConf());
 $bot->cleanQueue();
 $bot->setwebhook();
 $bot->syncPortClients();

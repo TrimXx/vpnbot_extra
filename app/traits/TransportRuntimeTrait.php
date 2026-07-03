@@ -242,13 +242,37 @@ trait TransportRuntimeTrait
             return;
         }
         $nginx = (string) file_get_contents($path);
-        if (!str_contains($nginx, 'upstream hysteria')) {
-            $insert = "    upstream hysteria {\n        server hy:443;\n    }\n\n";
-            $replaced = preg_replace('~(upstream\s+reality\s*\{[^}]*\}\s*)~s', '$1' . "\n" . $insert, $nginx, 1, $count);
-            if ($count > 0 && $replaced !== null) {
-                $nginx = $replaced;
+        $changed = false;
+
+        if ($enabled) {
+            $hysteriaBlock = "    upstream hysteria {\n        server 10.10.0.17:443;\n    }\n\n";
+            if (!str_contains($nginx, 'upstream hysteria')) {
+                $replaced = preg_replace('~(upstream\s+reality\s*\{[^}]*\}\s*)~s', '$1' . "\n" . $hysteriaBlock, $nginx, 1, $count);
+                if ($count > 0 && $replaced !== null) {
+                    $nginx = $replaced;
+                    $changed = true;
+                }
+            } else {
+                $normalized = preg_replace(
+                    '~upstream\s+hysteria\s*\{[^}]*\}~s',
+                    trim($hysteriaBlock),
+                    $nginx,
+                    1,
+                    $count
+                );
+                if ($count > 0 && $normalized !== null && $normalized !== $nginx) {
+                    $nginx = $normalized;
+                    $changed = true;
+                }
+            }
+        } else {
+            $stripped = preg_replace('~\n\s*upstream\s+hysteria\s*\{[^}]*\}\s*~s', "\n", $nginx, 1, $count);
+            if ($count > 0 && $stripped !== null) {
+                $nginx = $stripped;
+                $changed = true;
             }
         }
+
         $hysteriaUdp = <<<'NGINX'
 
     server {
@@ -261,18 +285,23 @@ NGINX;
 
     server {
         listen          443 udp reuseport;
-        proxy_pass      other;
+        proxy_pass      $sni_name;
         proxy_protocol  on;
         ssl_preread     on;
     }
 NGINX;
         $pattern = '~\n\s*server\s*\{[^{}]*listen\s+443\s+udp[^{}]*\}\s*~s';
         $replacement = $enabled ? $hysteriaUdp : $fallbackUdp;
-        $updated = preg_replace($pattern, $replacement, $nginx, 1);
-        if ($updated === null || $updated === $nginx) {
+        $updated = preg_replace($pattern, $replacement, $nginx, 1, $udpCount);
+        if ($udpCount > 0 && $updated !== null && $updated !== $nginx) {
+            $nginx = $updated;
+            $changed = true;
+        }
+
+        if (!$changed) {
             return;
         }
-        file_put_contents($path, $updated);
-        $this->ssh('nginx -s reload 2>&1', 'upstream');
+        file_put_contents($path, $nginx);
+        $this->ssh('nginx -s reload 2>&1', 'up');
     }
 }

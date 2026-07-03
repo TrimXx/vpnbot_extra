@@ -44,12 +44,21 @@ services:
                 condition: service_healthy
             xr:
                 condition: service_started
+            hy:
+                condition: service_started
         env_file:
             - path: ./.env
               required: true # default
             - path: ./override.env
               required: false
         stop_grace_period: 1s
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD-SHELL", "nc -z 127.0.0.1 443"]
+            interval: 15s
+            timeout: 3s
+            retries: 3
+            start_period: 10s
         command: ["/bin/sh", "/start_upstream.sh"]
         networks:
             default:
