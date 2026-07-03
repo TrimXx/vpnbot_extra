@@ -79,10 +79,13 @@ trait UserPortalTrait
         }
 
         if ($messageId > 0) {
-            $this->update($chat, $messageId, $text, $buttons ?: false, $replyPlaceholder !== false ? $replyPlaceholder : false);
-            $this->setUserPortalUiMessageId($messageId);
+            $r = $this->update($chat, $messageId, $text, $buttons ?: false, $replyPlaceholder !== false ? $replyPlaceholder : false);
+            if (!empty($r['ok'])) {
+                $this->setUserPortalUiMessageId($messageId);
 
-            return;
+                return;
+            }
+            unset($_SESSION['userPortalUi']['message_id'], $_SESSION['reply'][$messageId]);
         }
 
         $r = $this->send($chat, $text, false, $buttons ?: false, $replyPlaceholder !== false ? $replyPlaceholder : false);
@@ -478,6 +481,10 @@ trait UserPortalTrait
 
     public function userPortalMenu()
     {
+        if (preg_match('~^/(?:start|menu)$~', (string) ($this->input['message'] ?? ''))) {
+            unset($_SESSION['userPortalUi']['message_id']);
+        }
+
         $session = $this->getUserPortalSession();
         $text = [$this->i18n('user portal title')];
         $flash = $this->userPortalTakeFlash();
