@@ -9146,6 +9146,7 @@ DNS-over-HTTPS with IP:
         $template = preg_replace('~(location /adguard.+?})\s*location~s', $r, $template);
         $template = $this->injectNginxPacProxyBypass($template);
         $template = $this->applyTransportAwareNginxTemplate($template, $conf);
+        $this->ensurePacLocationConf();
         $this->writeAndReloadNginx($template);
         $x = $this->getXray();
         if ($this->patchXrayInboundTransportPaths($x)) {

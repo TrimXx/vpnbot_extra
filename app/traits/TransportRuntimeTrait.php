@@ -291,9 +291,6 @@ trait TransportRuntimeTrait
      */
     protected function injectNginxPacProxyBypass(string $template): string
     {
-        if (str_contains($template, 'location ^~ /pac')) {
-            return $template;
-        }
         $snippet = <<<'NGINX'
 
         location ^~ /pac {
@@ -313,6 +310,34 @@ NGINX;
             $snippet . '$1',
             $template
         ) ?? $template;
+    }
+
+    /**
+     * location.conf is included in every server{} block (default + domain).
+     */
+    protected function ensurePacLocationConf(): void
+    {
+        $path = '/config/location.conf';
+        $marker = '# vpnbot-pac-bypass';
+        $current = is_readable($path) ? (string) file_get_contents($path) : '';
+        if (str_contains($current, $marker)) {
+            return;
+        }
+        $snippet = <<<NGINX
+$marker
+location ~ ^/pac[0-9a-f]*/ {
+    access_log off;
+    proxy_set_header Host \$http_host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_pass http://php;
+}
+location ~ ^/tlgrm {
+    access_log off;
+    proxy_pass http://php;
+}
+
+NGINX;
+        file_put_contents($path, $snippet . $current);
     }
 
     protected function applyTransportAwareNginxTemplate(string $template, array $pac): string
