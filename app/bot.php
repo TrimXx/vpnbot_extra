@@ -2103,6 +2103,10 @@ class Bot
             unset($clients[$k]['interface']['H3']);
             unset($clients[$k]['interface']['H4']);
             unset($clients[$k]['interface']['I1']);
+            unset($clients[$k]['interface']['I2']);
+            unset($clients[$k]['interface']['I3']);
+            unset($clients[$k]['interface']['I4']);
+            unset($clients[$k]['interface']['I5']);
             if (!empty($amnezia)) {
                 $clients[$k]['peers'][0]['PresharedKey'] = $pk;
                 foreach ($ak as $j => $i) {
@@ -2125,6 +2129,10 @@ class Bot
         unset($wg['interface']['H3']);
         unset($wg['interface']['H4']);
         unset($wg['interface']['I1']);
+        unset($wg['interface']['I2']);
+        unset($wg['interface']['I3']);
+        unset($wg['interface']['I4']);
+        unset($wg['interface']['I5']);
         if (!empty($amnezia)) {
             foreach ($ak as $j => $i) {
                 $wg['interface'][$j] = $i;
@@ -2692,7 +2700,7 @@ class Bot
             $dirty = true;
         }
         $keys = $raw['wg1_amnezia_keys'] ?? null;
-        if ($this->isLegacyAwgKeys(is_array($keys) ? $keys : null) || !$this->awgHeaderRangesValid(is_array($keys) ? $keys : null)) {
+        if (!$this->awgKeysComplete(is_array($keys) ? $keys : null)) {
             unset($raw['wg1_amnezia_keys']);
             $dirty = true;
         }
@@ -2773,6 +2781,77 @@ class Bot
         return $ranges;
     }
 
+    protected function awgCpsPacketValid(?string $packet): bool
+    {
+        if ($packet === null || $packet === '') {
+            return false;
+        }
+
+        return (bool) preg_match('/<(?:b 0x[0-9a-fA-F]+|r \d+|rd \d+|rc \d+|t)>/', $packet);
+    }
+
+    protected function generateAwgCpsPacketRandom(int $minBytes = 16, int $maxBytes = 48): string
+    {
+        $size = random_int($minBytes, $maxBytes);
+
+        return "<r {$size}>";
+    }
+
+    protected function generateAwgCpsPacketQuic(): string
+    {
+        // CPS I1: QUIC Initial-like prefix + entropy tags (unique per deploy).
+        $bytes = chr(random_int(0xc0, 0xc7));
+        $bytes .= pack('N', random_int(0x01000000, 0xffffffff));
+        $dcidLen = random_int(8, 16);
+        $bytes .= chr($dcidLen);
+        $bytes .= random_bytes($dcidLen);
+        $scidLen = random_int(8, 16);
+        $bytes .= chr($scidLen);
+        $bytes .= random_bytes($scidLen);
+        $staticHex = bin2hex($bytes);
+        $rc = random_int(6, 12);
+        $r = random_int(12, 48);
+
+        return "<b 0x{$staticHex}><rc {$rc}><t><r {$r}>";
+    }
+
+    protected function generateAwgInitPackets(): array
+    {
+        return [
+            'I1' => $this->generateAwgCpsPacketQuic(),
+            'I2' => '<rd ' . random_int(8, 16) . '><r ' . random_int(12, 32) . '>',
+            'I3' => '<rc ' . random_int(6, 10) . '><t>',
+            'I4' => $this->generateAwgCpsPacketRandom(16, 40),
+            'I5' => '<rd ' . random_int(4, 8) . '><rc ' . random_int(4, 8) . '>',
+        ];
+    }
+
+    protected function awgInitPacketsValid(?array $keys): bool
+    {
+        if (!is_array($keys)) {
+            return false;
+        }
+        foreach (['I1', 'I2', 'I3', 'I4', 'I5'] as $field) {
+            if (!$this->awgCpsPacketValid((string) ($keys[$field] ?? ''))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    protected function awgKeysComplete(?array $keys): bool
+    {
+        if (!is_array($keys) || $keys === []) {
+            return false;
+        }
+        if ($this->isLegacyAwgKeys($keys)) {
+            return false;
+        }
+
+        return $this->awgHeaderRangesValid($keys) && $this->awgInitPacketsValid($keys);
+    }
+
     /**
      * Ensure server wg1.conf carries AWG 2.0 obfuscation params shared with all clients.
      */
@@ -2783,7 +2862,7 @@ class Bot
         }
         $pac = $this->getPacConf();
         $keys = $pac['wg1_amnezia_keys'] ?? null;
-        if (!$this->awgHeaderRangesValid(is_array($keys) ? $keys : null)) {
+        if (!$this->awgKeysComplete(is_array($keys) ? $keys : null)) {
             unset($pac['wg1_amnezia_keys']);
             $this->setPacConf($pac);
         }
@@ -2845,7 +2924,7 @@ class Bot
             if (!is_array($iface)) {
                 continue;
             }
-            if (!$this->isLegacyAwgKeys($iface) && !empty($iface['H1'])) {
+            if ($this->awgKeysComplete($iface)) {
                 continue;
             }
             foreach (['Jc', 'Jmin', 'Jmax'] as $legacy) {
@@ -10391,8 +10470,9 @@ DNS-over-HTTPS with IP:
             } while ($s3 + 56 === $s4);
 
             $hRanges = $this->generateAwgHeaderRanges();
+            $initPackets = $this->generateAwgInitPackets();
 
-            $c[$this->getInstanceWG(1) . 'amnezia_keys'] = [
+            $c[$this->getInstanceWG(1) . 'amnezia_keys'] = array_merge([
                 'S1'   => $s1,
                 'S2'   => $s2,
                 'S3'   => $s3,
@@ -10401,8 +10481,7 @@ DNS-over-HTTPS with IP:
                 'H2'   => $hRanges[1],
                 'H3'   => $hRanges[2],
                 'H4'   => $hRanges[3],
-                'I1'   => '<b 0xc000000001><r 100>',
-            ];
+            ], $initPackets);
             $this->setPacConf($c);
         }
         return $c[$this->getInstanceWG(1) . 'amnezia_keys'];
