@@ -382,8 +382,8 @@ $i = [
         'ru' => 'ноды',
     ],
     'nodes_help' => [
-        'en' => 'Child VPS with own domain and TLS. Full stack synced from parent (push). Subscription stays on parent; child nodes appear as separate proxies in Clash.',
-        'ru' => 'Дочерний VPS со своим доменом и TLS. Полный стек синхронизируется с родителя (push). Подписка только на родителе; ноды — отдельные прокси в Clash.',
+        'en' => 'Child VPS with own domain and TLS. Push sync from parent. Use "update all" or parent make u to upgrade nodes without SSH.',
+        'ru' => 'Дочерний VPS со своим доменом и TLS. Push-синхронизация с родителя. «Обновить все» или make u на родителе — обновление нод без SSH.',
     ],
     'nodes_add_prompt' => [
         'en' => 'send name:domain (example: EU:eu.trimx.ru)',
@@ -436,6 +436,14 @@ $i = [
     'nodes_update_result' => [
         'en' => 'update result',
         'ru' => 'результат обновления',
+    ],
+    'nodes_update_one' => [
+        'en' => 'update',
+        'ru' => 'обновить',
+    ],
+    'nodes_upgrade_queued' => [
+        'en' => 'update + config sync queued for all nodes (~1 min)',
+        'ru' => 'обновление + синхронизация конфига поставлены в очередь для всех нод (~1 мин)',
     ],
     'download'  => [
         'en' => 'download',

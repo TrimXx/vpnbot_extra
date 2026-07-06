@@ -18,31 +18,34 @@ do
     branch=$(cat $pwd/update/branch 2>/dev/null)
     if [[ -n "$cmd" ]]
     then
-        key=$(cat $pwd/update/key)
-        curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "stopping the bot"/')"
-        docker compose down --remove-orphans
-        if [[ "$cmd" == "1" ]]
-        then
-            curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "clearing the directory"/')"
-            curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "downloading the update"/')"
-            git fetch
-            if [[ -n "$branch" ]]
-            then
-                curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "changing branch"/')"
-                git checkout -t origin/$branch || git checkout $branch
-            fi
-            curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "applying updates"/')"
-            git checkout origin/$(git rev-parse --abbrev-ref HEAD) -- app update makefile version > ./update/message 2>&1
-        elif [[ "$cmd" == "node" ]]
+        > $pwd/update/pipe
+        if [[ "$cmd" == "node" ]]
         then
             node_branch=$(cat $pwd/update/node_pull_branch 2>/dev/null)
             if [[ -z "$node_branch" ]]
             then
                 node_branch="v2"
             fi
-            git fetch origin "$node_branch" --quiet
-            git checkout "origin/$node_branch" -- app update makefile version scripts/join_node.sh 2>&1 | tee ./update/message
+            bash "$pwd/scripts/node_remote_update.sh" "$node_branch" > "$pwd/update/message" 2>&1
             > $pwd/update/node_pull_branch
+            bash $pwd/update/update.sh &
+            exit 0
+        fi
+        key=$(cat $pwd/update/key)
+        curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "stopping the bot"/')" 2>/dev/null || true
+        docker compose down --remove-orphans
+        if [[ "$cmd" == "1" ]]
+        then
+            curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "clearing the directory"/')" 2>/dev/null || true
+            curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "downloading the update"/')" 2>/dev/null || true
+            git fetch
+            if [[ -n "$branch" ]]
+            then
+                curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "changing branch"/')" 2>/dev/null || true
+                git checkout -t origin/$branch || git checkout $branch
+            fi
+            curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "applying updates"/')" 2>/dev/null || true
+            git checkout origin/$(git rev-parse --abbrev-ref HEAD) -- app update makefile version > ./update/message 2>&1
         fi
         curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "launching the bot"/')" 2>/dev/null || true
         > $pwd/update/key

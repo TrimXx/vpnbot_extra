@@ -774,6 +774,10 @@ class Bot
             case preg_match('~^/nodeUpdateAll$~', $this->input['callback']):
                 $this->nodeUpdateAll();
                 break;
+
+            case preg_match('~^/nodeUpdateOne (\S+)(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->nodeUpdateOne($m[1], (int) ($m[2] ?? 0));
+                break;
             case preg_match('~^/getMirror$~', $this->input['callback'], $m):
                 $this->getMirror();
                 break;

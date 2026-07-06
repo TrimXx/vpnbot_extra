@@ -578,11 +578,99 @@ trait NodeTrait
       echo json_encode(['ok' => false, 'error' => 'bad branch']);
       exit;
     }
-    file_put_contents('/update/node_pull_branch', $branch);
-    file_put_contents('/update/pipe', 'node');
+    $this->triggerNodeRemoteUpdate($branch);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['ok' => true, 'started' => true, 'branch' => $branch]);
     exit;
+  }
+
+  protected function getNodeUpdateBranch(): string
+  {
+    $branch = 'v2';
+    foreach ([dirname(__DIR__, 2) . '/version', '/repo/version', '/version'] as $path) {
+      if (!is_readable($path)) {
+        continue;
+      }
+      $ver = trim((string) file_get_contents($path));
+      if (preg_match('~^v\d~', $ver)) {
+        return $ver;
+      }
+    }
+
+    return $branch;
+  }
+
+  protected function triggerNodeRemoteUpdate(string $branch): void
+  {
+    $branch = preg_replace('~[^a-zA-Z0-9._-]+~', '', $branch) ?: 'v2';
+    file_put_contents('/update/node_pull_branch', $branch);
+    file_put_contents('/update/pipe', 'node');
+    foreach (['/repo/scripts/node_remote_update.sh', dirname(__DIR__, 2) . '/scripts/node_remote_update.sh'] as $script) {
+      if (!is_readable($script)) {
+        continue;
+      }
+      $dir = str_starts_with($script, '/repo/') ? '/repo' : dirname($script, 2);
+      exec(sprintf(
+        'sh -c %s',
+        escapeshellarg('cd ' . escapeshellarg($dir) . ' && nohup sh scripts/node_remote_update.sh ' . escapeshellarg($branch) . ' >> logs/node_remote_update.log 2>&1 &')
+      ));
+      break;
+    }
+  }
+
+  public function pushNodeUpdateToNode(string $nodeId, ?string $branch = null): array
+  {
+    $pac = $this->getPacConf();
+    $nodes = $pac['child_nodes'] ?? [];
+    if (!is_array($nodes) || empty($nodes[$nodeId]) || !is_array($nodes[$nodeId])) {
+      return ['code' => 0, 'body' => '', 'error' => 'node not found'];
+    }
+    $node = $nodes[$nodeId];
+    $domain = trim((string) ($node['domain'] ?? ''));
+    $token = trim((string) ($node['token'] ?? ''));
+    if ($domain === '' || $token === '') {
+      return ['code' => 0, 'body' => '', 'error' => 'node incomplete'];
+    }
+    $branch = $branch ?? $this->getNodeUpdateBranch();
+    $body = json_encode(['branch' => $branch], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $hash = $this->getHashBot();
+    $domain = preg_replace('~^\w+://~', '', $domain);
+    $url = 'https://' . $domain . '/pac' . $hash . '/node-update';
+
+    return $this->httpNodeJsonRequest($url, 'POST', $body, $token);
+  }
+
+  public function nodePushUpdateToAll(): array
+  {
+    if (!$this->isParentNode()) {
+      return [];
+    }
+    $branch = $this->getNodeUpdateBranch();
+    $results = [];
+    foreach ($this->getChildNodesRaw() as $nodeId => $node) {
+      if (empty($node['enabled']) || empty($node['registered'])) {
+        continue;
+      }
+      $results[$nodeId] = $this->pushNodeUpdateToNode((string) $nodeId, $branch);
+    }
+
+    return $results;
+  }
+
+  public function queueParentNodeMaintenance(string $mode = 'both', int $wait = 30): void
+  {
+    if (!$this->isParentNode()) {
+      return;
+    }
+    $mode = in_array($mode, ['update', 'sync', 'both'], true) ? $mode : 'both';
+    $wait = max(0, min(120, $wait));
+    $cmd = sprintf(
+      'php %s %s %d >> /logs/push_nodes.log 2>&1 &',
+      escapeshellarg('/app/push_nodes.php'),
+      escapeshellarg($mode),
+      $wait
+    );
+    exec($cmd);
   }
 
   protected function rewriteClashProxyForChildNode(array $proxy, string $childDomain): array
@@ -807,7 +895,7 @@ trait NodeTrait
     $this->nodeJoinCommand($nodeId);
   }
 
-  public function nodeView(string $nodeId, int $page = 0, ?array $syncResult = null)
+  public function nodeView(string $nodeId, int $page = 0, ?array $syncResult = null, string $resultLabel = 'nodes_sync_result')
   {
     $pac = $this->getPacConf();
     $node = $pac['child_nodes'][$nodeId] ?? null;
@@ -817,7 +905,7 @@ trait NodeTrait
     }
     $text[] = 'Menu -> ' . $this->i18n('nodes') . ' -> ' . ($node['name'] ?? $nodeId);
     if ($syncResult !== null) {
-      $line = $this->i18n('nodes_sync_result') . ': ' . (!empty($syncResult['ok']) ? $this->i18n('success') : $this->sanitizeNodeError((string) ($syncResult['error'] ?? $this->i18n('error'))));
+      $line = $this->i18n($resultLabel) . ': ' . (!empty($syncResult['ok']) ? $this->i18n('success') : $this->sanitizeNodeError((string) ($syncResult['error'] ?? $this->i18n('error'))));
       $text[] = htmlspecialchars($line, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
     $text[] = 'id: <code>' . htmlspecialchars($nodeId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
@@ -845,6 +933,12 @@ trait NodeTrait
         'text'          => $this->i18n('nodes_sync_one'),
         'callback_data' => "/nodeSyncOne $nodeId $page",
       ],
+      [
+        'text'          => $this->i18n('nodes_update_one'),
+        'callback_data' => "/nodeUpdateOne $nodeId $page",
+      ],
+    ];
+    $data[] = [
       [
         'text'          => 'delete',
         'callback_data' => "/nodeDelete $nodeId $page",
@@ -950,52 +1044,25 @@ trait NodeTrait
     $this->nodeView($nodeId, $page, $r);
   }
 
-    public function nodePushUpdateToAll(): array
+  public function nodeUpdateOne(string $nodeId, int $page = 0)
   {
-    if (!$this->isParentNode()) {
-      return [];
-    }
-    $branch = 'v2';
-    if (is_readable(dirname(__DIR__, 2) . '/version')) {
-      $ver = trim((string) file_get_contents(dirname(__DIR__, 2) . '/version'));
-      if (preg_match('~^v\d~', $ver)) {
-        $branch = $ver;
-      }
-    }
-    $body = json_encode(['branch' => $branch], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    $results = [];
-    foreach ($this->getChildNodesRaw() as $nodeId => $node) {
-      if (empty($node['enabled']) || empty($node['registered'])) {
-        continue;
-      }
-      $domain = trim((string) ($node['domain'] ?? ''));
-      $token = trim((string) ($node['token'] ?? ''));
-      if ($domain === '' || $token === '') {
-        continue;
-      }
-      $hash = $this->getHashBot();
-      $domain = preg_replace('~^\w+://~', '', $domain);
-      $url = 'https://' . $domain . '/pac' . $hash . '/node-update';
-      $results[$nodeId] = $this->httpNodeJsonRequest($url, 'POST', $body, $token);
-    }
-
-    return $results;
+    $this->releaseSessionLock();
+    $r = $this->pushNodeUpdateToNode($nodeId);
+    $ok = ($r['code'] ?? 0) >= 200 && ($r['code'] ?? 0) < 300;
+    $this->nodeView($nodeId, $page, [
+      'ok' => $ok,
+      'error' => $ok ? '' : $this->sanitizeNodeError((string) ($r['error'] ?: ('HTTP ' . ($r['code'] ?? 0)))),
+    ], 'nodes_update_result');
   }
 
   public function nodeUpdateAll()
   {
-    $this->answer($this->input['callback_id'], $this->i18n('nodes_updating'), true);
-    $results = $this->nodePushUpdateToAll();
-    $ok = 0;
-    foreach ($results as $r) {
-      if (($r['code'] ?? 0) >= 200 && ($r['code'] ?? 0) < 300) {
-        $ok++;
-      }
-    }
+    $this->releaseSessionLock();
+    $this->queueParentNodeMaintenance('both', 35);
     $this->update(
       $this->input['chat'],
       $this->input['message_id'],
-      $this->i18n('nodes_update_result') . ": OK=$ok/" . count($results),
+      $this->i18n('nodes_upgrade_queued'),
       [[['text' => $this->i18n('back'), 'callback_data' => '/nodes']]],
     );
   }

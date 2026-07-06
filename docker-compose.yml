@@ -130,6 +130,7 @@ services:
             - ./ssh:/ssh
             - ./app:/app
             - ./logs/:/logs/
+            - .:/repo:rw
             - ./scripts/start_php.sh:/start_php.sh
             - ./scripts/check_file.sh:/check_file.sh
             - ./version:/version
