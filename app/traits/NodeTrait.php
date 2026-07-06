@@ -283,7 +283,26 @@ trait NodeTrait
     return hash_equals($expected, $signature);
   }
 
-  protected function httpNodeJsonRequest(string $url, string $method, string $body, string $token, int $timeout = 90): array
+  protected function releaseSessionLock(): void
+  {
+    if (session_status() === PHP_SESSION_ACTIVE) {
+      session_write_close();
+    }
+  }
+
+  protected function sanitizeNodeError(string $error): string
+  {
+    $error = strip_tags($error);
+    $error = preg_replace('~\s+~', ' ', $error) ?? $error;
+    $error = trim($error);
+    if (function_exists('mb_substr')) {
+      return mb_substr($error, 0, 160, 'UTF-8');
+    }
+
+    return substr($error, 0, 160);
+  }
+
+  protected function httpNodeJsonRequest(string $url, string $method, string $body, string $token, int $timeout = 20): array
   {
     $timestamp = (string) time();
     $signature = $this->signNodeSyncRequest($token, $timestamp, $body);
@@ -350,7 +369,7 @@ trait NodeTrait
       $this->setPacConf($pac);
       return ['ok' => true, 'response' => $res['body']];
     }
-    $nodes[$nodeId]['last_error'] = $res['error'] ?: ('HTTP ' . $res['code'] . ': ' . substr($res['body'], 0, 200));
+    $nodes[$nodeId]['last_error'] = $this->sanitizeNodeError($res['error'] ?: ('HTTP ' . $res['code'] . ': ' . substr((string) $res['body'], 0, 200)));
     $pac['child_nodes'] = $nodes;
     $this->setPacConf($pac);
 
@@ -798,7 +817,7 @@ trait NodeTrait
     }
     $text[] = 'Menu -> ' . $this->i18n('nodes') . ' -> ' . ($node['name'] ?? $nodeId);
     if ($syncResult !== null) {
-      $line = $this->i18n('nodes_sync_result') . ': ' . (!empty($syncResult['ok']) ? $this->i18n('success') : (string) ($syncResult['error'] ?? $this->i18n('error')));
+      $line = $this->i18n('nodes_sync_result') . ': ' . (!empty($syncResult['ok']) ? $this->i18n('success') : $this->sanitizeNodeError((string) ($syncResult['error'] ?? $this->i18n('error'))));
       $text[] = htmlspecialchars($line, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
     $text[] = 'id: <code>' . htmlspecialchars($nodeId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
@@ -808,7 +827,7 @@ trait NodeTrait
       $text[] = $this->i18n('nodes_last_ok') . ': ' . date('Y-m-d H:i:s', (int) $node['last_ok']);
     }
     if (!empty($node['last_error'])) {
-      $text[] = $this->i18n('error') . ': ' . htmlspecialchars((string) $node['last_error'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+      $text[] = $this->i18n('error') . ': ' . htmlspecialchars($this->sanitizeNodeError((string) $node['last_error']), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
     $data[] = [
@@ -837,12 +856,16 @@ trait NodeTrait
         'callback_data' => "/nodes $page",
       ],
     ];
-    $this->update(
+    $body = implode("\n", $text);
+    $r = $this->update(
       $this->input['chat'],
       $this->input['message_id'],
-      implode("\n", $text),
+      $body,
       $data,
     );
+    if (empty($r['ok'])) {
+      $this->send($this->input['chat'], $body, $this->input['message_id'], $data);
+    }
   }
 
   public function nodeJoinCommand(string $nodeId)
@@ -901,7 +924,7 @@ trait NodeTrait
 
   public function nodeSyncAll()
   {
-    $this->answer($this->input['callback_id'], $this->i18n('nodes_syncing'), true);
+    $this->releaseSessionLock();
     $results = $this->pushSyncToAllNodes();
     $ok = 0;
     $fail = 0;
@@ -922,6 +945,7 @@ trait NodeTrait
 
   public function nodeSyncOne(string $nodeId, int $page = 0)
   {
+    $this->releaseSessionLock();
     $r = $this->pushSyncToNode($nodeId);
     $this->nodeView($nodeId, $page, $r);
   }
