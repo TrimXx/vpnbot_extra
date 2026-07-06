@@ -48,6 +48,33 @@ trait BotCacheTrait
         }
     }
 
+    protected function resolvePendingAdminReplyMessageId(): ?int
+    {
+        if (!$this->admin || empty($_SESSION['reply']) || !is_array($_SESSION['reply'])) {
+            return null;
+        }
+        $message = trim((string) ($this->input['message'] ?? ''));
+        if ($message === '' || preg_match('~^/~', $message)) {
+            return null;
+        }
+        $pending = [];
+        foreach ($_SESSION['reply'] as $messageId => $reply) {
+            if (!is_array($reply)) {
+                continue;
+            }
+            $callback = (string) ($reply['callback'] ?? '');
+            if ($callback === '' || $this->isUserPortalReplyCallback($callback)) {
+                continue;
+            }
+            $pending[(int) $messageId] = $reply;
+        }
+        if (count($pending) !== 1) {
+            return null;
+        }
+
+        return (int) array_key_first($pending);
+    }
+
     protected function stashReplyMessage(int $messageId, array $state): void
     {
         if ($messageId <= 0) {

@@ -167,13 +167,15 @@ class Bot
             if (empty($this->input['reply']) && empty($this->input['callback'])) {
                 $keep = [];
                 foreach ($_SESSION['reply'] as $k => $v) {
-                    if (is_array($v) && in_array($v['callback'] ?? '', [
-                        'userPortalImportLink',
-                        'userPortalDeleteDevicePassword',
-                        'userPortalSavePassword',
-                        'userPortalChangePasswordVerify',
-                        'userPortalRenameDeviceSave',
-                    ], true)) {
+                    if (!is_array($v)) {
+                        continue;
+                    }
+                    $callback = (string) ($v['callback'] ?? '');
+                    if ($this->isUserPortalReplyCallback($callback)) {
+                        $keep[$k] = $v;
+                        continue;
+                    }
+                    if ($this->admin && $callback !== '') {
                         $keep[$k] = $v;
                         continue;
                     }
@@ -205,6 +207,13 @@ class Bot
             $this->handleUserPortalTextInput();
 
             return;
+        }
+
+        if (empty($this->input['reply']) && empty($this->input['callback'])) {
+            $pendingReplyId = $this->resolvePendingAdminReplyMessageId();
+            if ($pendingReplyId !== null) {
+                $this->input['reply'] = $pendingReplyId;
+            }
         }
 
         switch (true) {
