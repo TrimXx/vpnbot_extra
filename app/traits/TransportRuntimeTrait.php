@@ -308,11 +308,27 @@ NGINX;
 
     public function syncUpstreamRuntime(?array $xray = null, bool $reload = true): void
     {
+        $this->normalizeUpstreamComposeIps();
         $pac = $this->getPacConf();
         $x = $xray ?? $this->getXray();
         $global = $this->getTransportRegistryGlobal($pac);
         $this->applyHysteriaUpstreamRuntime($pac, $reload);
         $this->setUpstreamDomain($this->getUpstreamRealityDomain($pac, $x), $reload);
         $this->setUpstreamRealityPort(!empty($global['reality']) ? $this->getRealityInboundPort($pac) : $this->getWsInboundPort($pac), $reload);
+    }
+
+    protected function normalizeUpstreamComposeIps(): void
+    {
+        $path = '/config/upstream.conf';
+        if (!is_readable($path)) {
+            return;
+        }
+        $nginx = (string) file_get_contents($path);
+        $normalized = str_replace('server ng:443;', 'server 10.10.0.2:443;', $nginx);
+        $normalized = preg_replace('~server xr:(\d+);~', 'server 10.10.0.9:$1;', $normalized) ?? $normalized;
+        $normalized = str_replace('server hy:443;', 'server 10.10.0.17:443;', $normalized);
+        if ($normalized !== $nginx) {
+            file_put_contents($path, $normalized);
+        }
     }
 }
