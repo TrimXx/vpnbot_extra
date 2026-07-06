@@ -66,6 +66,12 @@ inbounds = data.get("inbounds") or []
 tags = [i.get("tag") for i in inbounds if isinstance(i, dict)]
 if not tags:
     raise SystemExit("no inbounds")
+levels = (data.get("policy") or {}).get("levels")
+if levels is not None and not isinstance(levels, dict):
+    raise SystemExit("policy.levels must be a JSON object, not array")
+stats = data.get("stats")
+if stats is not None and not isinstance(stats, dict):
+    raise SystemExit("stats must be a JSON object, not array")
 print("inbounds:", ", ".join(str(t) for t in tags if t))
 PY
     pass "xray.json is valid JSON"

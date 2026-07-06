@@ -930,23 +930,17 @@ class Bot
                 "type"        => "field"
             ];
         }
-        $c['stats'] = new stdClass();
         $c['api'] = [
             'services' => ['StatsService'],
             'tag'      => 'api'
         ];
-        $l = new stdClass();
-        $l->{'0'} = [
-            "statsUserUplink"   => true,
-            "statsUserDownlink" => true
-        ];
-        $c['policy']['levels'] = $l;
         $c['policy']['system'] = [
             "statsInboundUplink"    => true,
             "statsInboundDownlink"  => true,
             "statsOutboundUplink"   => true,
             "statsOutboundDownlink" => true
         ];
+        $this->normalizeXrayStatsPolicyLevels($c);
         if (empty($norestart)) {
             $this->collectSession();
             $this->writeXrayConfig($c);
@@ -5967,15 +5961,36 @@ DNS-over-HTTPS with IP:
         ];
     }
 
-    protected function normalizeXrayConfigBeforeWrite(array &$c): void
+    protected function normalizeXrayStatsPolicyLevels(array &$c): void
     {
         if (!isset($c['stats']) || is_array($c['stats'])) {
             $c['stats'] = new stdClass();
         }
         $levels = $c['policy']['levels'] ?? null;
-        if (is_array($levels) && array_is_list($levels) && !empty($levels[0]) && is_array($levels[0])) {
-            $c['policy']['levels'] = ['0' => $levels[0]];
+        $level0 = null;
+        if ($levels instanceof stdClass) {
+            $level0 = $levels->{'0'} ?? null;
+        } elseif (is_array($levels)) {
+            $level0 = $levels[0] ?? $levels['0'] ?? null;
         }
+        if (!is_array($level0)) {
+            $level0 = [
+                'statsUserUplink'   => true,
+                'statsUserDownlink' => true,
+            ];
+        }
+        // Must be stdClass: PHP casts array key "0" to int 0 and json_encode emits a JSON array.
+        $levelsObj = new stdClass();
+        $levelsObj->{'0'} = $level0;
+        if (!isset($c['policy']) || !is_array($c['policy'])) {
+            $c['policy'] = [];
+        }
+        $c['policy']['levels'] = $levelsObj;
+    }
+
+    protected function normalizeXrayConfigBeforeWrite(array &$c): void
+    {
+        $this->normalizeXrayStatsPolicyLevels($c);
     }
 
     protected function writeXrayConfig(array $c): void
