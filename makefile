@@ -14,6 +14,7 @@ u: # запуск контейнеров
 	bash ./scripts/bootstrap_config.sh
 	touch ./override.env ./docker-compose.override.yml ./config/location.conf ./config/override.conf
 	IP=$(IP) VER=$(VER) docker compose --env-file ./.env --env-file ./override.env up -d --force-recreate
+	@(sleep 8; docker compose exec -T php php /app/push_nodes.php) >/dev/null 2>&1 &
 d: # остановка контейнеров
 	-kill -9 $(shell cat ./update/update_pid) > /dev/null
 	docker compose down --remove-orphans

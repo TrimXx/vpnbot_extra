@@ -33,8 +33,18 @@ do
             fi
             curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "applying updates"/')"
             git checkout origin/$(git rev-parse --abbrev-ref HEAD) -- app update makefile version > ./update/message 2>&1
+        elif [[ "$cmd" == "node" ]]
+        then
+            node_branch=$(cat $pwd/update/node_pull_branch 2>/dev/null)
+            if [[ -z "$node_branch" ]]
+            then
+                node_branch="v2"
+            fi
+            git fetch origin "$node_branch" --quiet
+            git checkout "origin/$node_branch" -- app update makefile version scripts/join_node.sh 2>&1 | tee ./update/message
+            > $pwd/update/node_pull_branch
         fi
-        curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "launching the bot"/')"
+        curl -H "Content-Type: application/json" -X POST https://api.telegram.org/bot$key/editMessageText -d "$(cat $pwd/update/curl | sed 's/"text":"~t~"/"text": "launching the bot"/')" 2>/dev/null || true
         > $pwd/update/key
         > $pwd/update/curl
         VER=$(awk 'NR==1{for(i=1;i<=NF;i++) if($$i ~ /^v[0-9]/){print $$i; exit}}' version)

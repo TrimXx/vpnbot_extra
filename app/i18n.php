@@ -377,6 +377,66 @@ $i = [
         'en' => 'enabled',
         'ru' => 'включено',
     ],
+    'nodes' => [
+        'en' => 'nodes',
+        'ru' => 'ноды',
+    ],
+    'nodes_help' => [
+        'en' => 'Child VPS with own domain and TLS. Full stack synced from parent (push). Subscription stays on parent; child nodes appear as separate proxies in Clash.',
+        'ru' => 'Дочерний VPS со своим доменом и TLS. Полный стек синхронизируется с родителя (push). Подписка только на родителе; ноды — отдельные прокси в Clash.',
+    ],
+    'nodes_add_prompt' => [
+        'en' => 'send name:domain (example: EU:eu.trimx.ru)',
+        'ru' => 'отправьте имя:домен (пример: EU:eu.trimx.ru)',
+    ],
+    'nodes_pending' => [
+        'en' => 'pending',
+        'ru' => 'ожидает',
+    ],
+    'nodes_registered' => [
+        'en' => 'registered',
+        'ru' => 'зарегистрирована',
+    ],
+    'nodes_last_ok' => [
+        'en' => 'last sync ok',
+        'ru' => 'последняя удачная синхронизация',
+    ],
+    'nodes_join_cmd' => [
+        'en' => 'join command',
+        'ru' => 'команда подключения',
+    ],
+    'nodes_join_help' => [
+        'en' => 'Run on a fresh Ubuntu VPS as root. DNS for the domain must point to that VPS before join.',
+        'ru' => 'Запустите на чистом Ubuntu VPS от root. DNS домена должен указывать на этот VPS до join.',
+    ],
+    'nodes_sync_all' => [
+        'en' => 'sync all nodes',
+        'ru' => 'синхронизировать все ноды',
+    ],
+    'nodes_sync_one' => [
+        'en' => 'sync',
+        'ru' => 'синхронизировать',
+    ],
+    'nodes_syncing' => [
+        'en' => 'syncing...',
+        'ru' => 'синхронизация...',
+    ],
+    'nodes_sync_result' => [
+        'en' => 'sync result',
+        'ru' => 'результат синхронизации',
+    ],
+    'nodes_update_all' => [
+        'en' => 'update all nodes',
+        'ru' => 'обновить все ноды',
+    ],
+    'nodes_updating' => [
+        'en' => 'updating...',
+        'ru' => 'обновление...',
+    ],
+    'nodes_update_result' => [
+        'en' => 'update result',
+        'ru' => 'результат обновления',
+    ],
     'download'  => [
         'en' => 'download',
         'ru' => 'скачать',

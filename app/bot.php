@@ -10,6 +10,7 @@ require_once __DIR__ . '/traits/LegacyRemovedTrait.php';
 require_once __DIR__ . '/traits/ClashTemplateTrait.php';
 require_once __DIR__ . '/traits/UserPortalTrait.php';
 require_once __DIR__ . '/traits/MirrorTrait.php';
+require_once __DIR__ . '/traits/NodeTrait.php';
 
 class Bot
 {
@@ -23,6 +24,7 @@ class Bot
     use ClashTemplateTrait;
     use UserPortalTrait;
     use MirrorTrait;
+    use NodeTrait;
 
     public $input;
     public $admin = false;
@@ -125,6 +127,9 @@ class Bot
 
     public function auth()
     {
+        if ($this->isChildNode()) {
+            exit;
+        }
         if (preg_match('~^/id$~', $this->input['message'])) {
             return;
         }
@@ -733,6 +738,42 @@ class Bot
             case preg_match('~^/mirrors(?: (\d+))?$~', $this->input['callback'], $m):
                 $this->mirrors((int) ($m[1] ?? 0));
                 break;
+
+            case preg_match('~^/nodes(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->nodes((int) ($m[1] ?? 0));
+                break;
+
+            case preg_match('~^/nodeAdd$~', $this->input['callback']):
+                $this->nodeAdd();
+                break;
+
+            case preg_match('~^/nodeView (\S+)(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->nodeView($m[1], (int) ($m[2] ?? 0));
+                break;
+
+            case preg_match('~^/nodeJoin (\S+)$~', $this->input['callback'], $m):
+                $this->nodeJoinCommand($m[1]);
+                break;
+
+            case preg_match('~^/nodeToggle (\S+)(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->nodeToggle($m[1], (int) ($m[2] ?? 0));
+                break;
+
+            case preg_match('~^/nodeDelete (\S+)(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->nodeDelete($m[1], (int) ($m[2] ?? 0));
+                break;
+
+            case preg_match('~^/nodeSyncAll$~', $this->input['callback']):
+                $this->nodeSyncAll();
+                break;
+
+            case preg_match('~^/nodeSyncOne (\S+)(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->nodeSyncOne($m[1], (int) ($m[2] ?? 0));
+                break;
+
+            case preg_match('~^/nodeUpdateAll$~', $this->input['callback']):
+                $this->nodeUpdateAll();
+                break;
             case preg_match('~^/getMirror$~', $this->input['callback'], $m):
                 $this->getMirror();
                 break;
@@ -971,6 +1012,7 @@ class Bot
             $this->writeXrayConfig($c);
             $this->ssh('pkill xray', 'xr');
             $this->ssh('xray run -config /xray.json > /dev/null 2>&1 &', 'xr');
+            $this->scheduleNodeSync();
         } else {
             $this->writeXrayConfig($c);
         }
@@ -2047,6 +2089,7 @@ class Bot
 
             $out[] = "end import";
             $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
+            $this->scheduleNodeSync();
             $this->language = $this->getPacConf()['language'] ?: 'en';
             $this->limit    = $this->getPacConf()['limitpage'] ?: 5;
             if (empty($file)) {
@@ -7576,6 +7619,13 @@ DNS-over-HTTPS with IP:
             'text' => $this->i18n('mirrors') . ': ' . $mirrorCount,
             'callback_data' => '/mirrors',
         ]];
+        if ($this->isParentNode()) {
+            $nodeCount = count($this->getEnabledChildNodes($p));
+            $data[] = [[
+                'text' => $this->i18n('nodes') . ': ' . $nodeCount,
+                'callback_data' => '/nodes',
+            ]];
+        }
         $data[] = [[
             'text' => $p['linkdomain'] ?: $this->i18n('cdn'),
             'callback_data' => '/addLinkDomain',
@@ -8628,6 +8678,7 @@ DNS-over-HTTPS with IP:
                     $this->appendClashSubscriptionTransportProxies($c, $index, $client, $pac, $domain);
                 }
                 $this->appendClashMirrorProxies($c, $pac);
+                $this->appendClashChildNodeProxies($c, $pac);
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
                     $c = $this->clashRules($c, $subscriptionId, $domain);
@@ -10716,6 +10767,9 @@ DNS-over-HTTPS with IP:
                 $this->ssh("{$wgType}-quick up wg0", $instance, true, '/dev/null', true);
             } else {
                 $this->ssh("$wgType-quick strip wg0 | $wgType syncconf wg0 /dev/stdin", $instance, true, '/dev/null', true);
+            }
+            if ($this->getInstanceWG(1)) {
+                $this->scheduleNodeSync();
             }
             return true;
         } catch (Exception | Error $e) {

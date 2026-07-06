@@ -28,8 +28,30 @@ if (!empty($_GET['hash'])) {
 switch (true) {
     // tlgrm
     case 'POST' == $_SERVER['REQUEST_METHOD'] && preg_match('~^/tlgrm~', $_SERVER['REQUEST_URI']) && $_GET['k'] == $c['key']:
+        if ($bot->isChildNode()) {
+            http_response_code(403);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'child node';
+            exit;
+        }
         vpnbot_trace('hit index.php uri=' . ($_SERVER['REQUEST_URI'] ?? ''));
         $bot->input();
+        break;
+
+    case preg_match('~^' . preg_quote("/pac$hash/node-bootstrap/") . '([^/?]+)~', $_SERVER['REQUEST_URI'], $m):
+        $bot->handleNodeBootstrap($m[1]);
+        break;
+
+    case preg_match('~^' . preg_quote("/pac$hash/node-register") . '~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
+        $bot->handleNodeRegister();
+        break;
+
+    case preg_match('~^' . preg_quote("/pac$hash/node-sync") . '~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
+        $bot->handleNodeSyncReceive();
+        break;
+
+    case preg_match('~^' . preg_quote("/pac$hash/node-update") . '~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
+        $bot->handleNodeUpdateReceive();
         break;
 
     // save template

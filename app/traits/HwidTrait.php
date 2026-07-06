@@ -214,6 +214,9 @@ trait HwidTrait
     {
         $normalized = $this->normalizeHwidStorage($storage);
         file_put_contents($this->hwid, json_encode($normalized, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        if (method_exists($this, 'scheduleNodeSync')) {
+            $this->scheduleNodeSync();
+        }
     }
 
     protected function normalizeHwidStorage(array $storage)

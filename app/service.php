@@ -14,8 +14,10 @@ $bot = new Bot($c['key'], $i);
 
 $bot->migratePacConf();
 $bot->selfUpdate();
+if (!$bot->isChildNode()) {
+    $bot->restartTG();
+}
 $bot->ssPswdCheck();
-$bot->restartTG();
 if (!empty($bot->selfupdate)) {
     $bot->offWarp();
 }
@@ -23,7 +25,10 @@ $bot->dontshowcron = 1;
 $bot->ensureAwgServerConfig();
 $bot->syncRuntimeWgServerOnStartup();
 $bot->sslip();
-$bot->adguardSync();
+$pac = $bot->getPacConf();
+if (!$bot->isChildNode() || !empty($pac['child_adguard'])) {
+    $bot->adguardSync();
+}
 $bot->cloakNginx();
 $bot->syncUpstreamRuntime();
 $bot->syncDeny();
