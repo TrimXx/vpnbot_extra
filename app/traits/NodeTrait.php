@@ -294,6 +294,8 @@ trait NodeTrait
       CURLOPT_RETURNTRANSFER => true,
       CURLOPT_CONNECTTIMEOUT => 10,
       CURLOPT_TIMEOUT        => $timeout,
+      CURLOPT_SSL_VERIFYPEER => false,
+      CURLOPT_SSL_VERIFYHOST => 0,
       CURLOPT_HTTPHEADER     => [
         'Content-Type: application/json',
         'X-Node-Sync-Timestamp: ' . $timestamp,
