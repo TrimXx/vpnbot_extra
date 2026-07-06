@@ -271,7 +271,7 @@ trait NodeTrait
     if ($token === '' || $timestamp === '' || $signature === '') {
       return false;
     }
-    if (!ctype_digit($timestamp)) {
+    if ($timestamp === '' || !preg_match('~^\d+$~', $timestamp)) {
       return false;
     }
     $ts = (int) $timestamp;
