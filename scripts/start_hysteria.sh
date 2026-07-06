@@ -37,4 +37,6 @@ if [ ! -f /config/hysteria.yaml ]; then
     exit 0
 fi
 
-exec hysteria server -c /config/hysteria.yaml
+# Run in background so restartHysteria() can pkill/restart without stopping the container (PID 1 stays alive).
+hysteria server -c /config/hysteria.yaml >>/logs/hysteria 2>&1 &
+exec tail -f /dev/null

@@ -404,6 +404,7 @@ services:
             - path: ./override.env
               required: false
         stop_grace_period: 1s
+        restart: unless-stopped
         command: ["/bin/sh", "/start_hysteria.sh"]
         networks:
             default:

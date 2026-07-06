@@ -1250,7 +1250,7 @@ class Bot
     {
         $pac = $this->getPacConf();
         $global = $this->getTransportRegistryGlobal($pac);
-        $this->ssh('pkill hysteria || true', 'hy');
+        $this->ssh('pkill -f "[h]ysteria server" || true', 'hy');
         if (empty($global['hysteria']) || empty($pac['hysteria_pass'])) {
             return;
         }
