@@ -21,10 +21,11 @@ if (!empty($bot->selfupdate)) {
 }
 $bot->dontshowcron = 1;
 $bot->ensureAwgServerConfig();
+$bot->syncRuntimeWgServerOnStartup();
 $bot->sslip();
 $bot->adguardSync();
 $bot->cloakNginx();
 $bot->syncUpstreamRuntime();
 $bot->syncDeny();
 $bot->cleanDocker();
-$bot->restartHysteria();
+$bot->restartHysteriaWithRetry();

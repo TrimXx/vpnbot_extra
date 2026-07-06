@@ -1870,4 +1870,28 @@ trait HwidTrait
         }
         $this->hwidUser($i, $page);
     }
+
+    /**
+     * Re-apply wg1.conf to the live AWG interface after wg1 container restart.
+     * Without this, peers exist on disk but amneziawg-go may not accept handshakes
+     * until a subscription fetch runs ensureDeviceWgProfile() → syncconf.
+     */
+    public function syncRuntimeWgServerOnStartup(): void
+    {
+        $pac = $this->getPacConf();
+        if (empty($pac['hwid_runtime_wg_profile_enabled'])) {
+            return;
+        }
+        try {
+            $this->runInRuntimeWgContext(function () {
+                $server = $this->readConfig();
+                if (!is_array($server) || empty($server['interface']['PrivateKey'])) {
+                    return;
+                }
+                $this->restartWG($this->createConfig($server));
+            });
+        } catch (Throwable $e) {
+            error_log('syncRuntimeWgServerOnStartup: ' . $e->getMessage());
+        }
+    }
 }

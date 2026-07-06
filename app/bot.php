@@ -1277,6 +1277,21 @@ class Bot
         $this->invalidateMenuServiceStatusCache();
     }
 
+    public function restartHysteriaWithRetry(int $attempts = 3, int $sleepSeconds = 2): void
+    {
+        for ($i = 1; $i <= $attempts; $i++) {
+            try {
+                $this->restartHysteria();
+                return;
+            } catch (Throwable $e) {
+                error_log("restartHysteria attempt $i/$attempts: " . $e->getMessage());
+                if ($i < $attempts) {
+                    sleep($sleepSeconds);
+                }
+            }
+        }
+    }
+
     public function chocdns($dns)
     {
         $this->legacyRemovedMenu('OpenConnect');
