@@ -337,6 +337,46 @@ $i = [
         'en' => 'mirror',
         'ru' => 'зеркало',
     ],
+    'mirrors' => [
+        'en' => 'mirrors',
+        'ru' => 'зеркала',
+    ],
+    'mirrors_help' => [
+        'en' => 'Dedicated forwarder VPS (iptables DNAT). Each enabled mirror clones transport + AWG proxies in subscription. SNI stays on the main domain; AWG uses UDP WG1 port on the mirror.',
+        'ru' => 'Отдельный VPS-форвардер (iptables DNAT). Каждое зеркало клонирует transport- и AWG-узлы в подписке. SNI — основной домен; AWG — UDP-порт WG1 на зеркале.',
+    ],
+    'mirrors_add_prompt' => [
+        'en' => 'send mirror hosts (domain or IP, optional :port), comma-separated',
+        'ru' => 'отправьте адреса зеркал (домен или IP, опционально :порт) через запятую',
+    ],
+    'mirror_iptables_script' => [
+        'en' => 'iptables mirror script',
+        'ru' => 'скрипт iptables для зеркала',
+    ],
+    'clash_proxy_names' => [
+        'en' => 'proxy names',
+        'ru' => 'имена прокси',
+    ],
+    'clash_proxy_names_help' => [
+        'en' => 'Main outbound name is used in templates (~outbound~) and auto-transports. Suffixes are appended for WS/XHTTP/HY2 nodes.',
+        'ru' => 'Имя основного прокси — в шаблоне (~outbound~) и auto-transports. Суффиксы добавляются к узлам WS/XHTTP/HY2.',
+    ],
+    'edit_transport_suffixes' => [
+        'en' => 'edit transport suffixes',
+        'ru' => 'суффиксы транспортов',
+    ],
+    'clash_proxy_suffixes_prompt' => [
+        'en' => 'send suffixes (0 to reset). Example:',
+        'ru' => 'суффиксы (0 — сброс). Пример:',
+    ],
+    'main outbound name: ' => [
+        'en' => 'main outbound name',
+        'ru' => 'имя основного прокси',
+    ],
+    'enabled' => [
+        'en' => 'enabled',
+        'ru' => 'включено',
+    ],
     'download'  => [
         'en' => 'download',
         'ru' => 'скачать',

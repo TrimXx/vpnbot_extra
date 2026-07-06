@@ -9,6 +9,7 @@ require_once __DIR__ . '/traits/HwidTrait.php';
 require_once __DIR__ . '/traits/LegacyRemovedTrait.php';
 require_once __DIR__ . '/traits/ClashTemplateTrait.php';
 require_once __DIR__ . '/traits/UserPortalTrait.php';
+require_once __DIR__ . '/traits/MirrorTrait.php';
 
 class Bot
 {
@@ -21,6 +22,7 @@ class Bot
     use LegacyRemovedTrait;
     use ClashTemplateTrait;
     use UserPortalTrait;
+    use MirrorTrait;
 
     public $input;
     public $admin = false;
@@ -716,6 +718,18 @@ class Bot
                 break;
             case preg_match('~^/xrayTemplates$~', $this->input['callback'], $m):
                 $this->xrayTemplates();
+                break;
+            case preg_match('~^/mirrors(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->mirrors((int) ($m[1] ?? 0));
+                break;
+            case preg_match('~^/getMirror$~', $this->input['callback'], $m):
+                $this->getMirror();
+                break;
+            case preg_match('~^/clashProxyNames$~', $this->input['callback'], $m):
+                $this->clashProxyNames();
+                break;
+            case preg_match('~^/clashProxySuffixes$~', $this->input['callback'], $m):
+                $this->clashProxySuffixes();
                 break;
             case preg_match('~^/xtlsblock(?: (\d+))?$~', $this->input['callback'], $m):
                 $this->xtlsblock($m[1] ?: 0);
@@ -2638,6 +2652,13 @@ class Bot
             'reset_monthly' => 0,
             'outbound' => 'proxy',
             'linkdomain' => '',
+            'mirrorlist' => [],
+            'mirror_labels' => [],
+            'clash_proxy_suffixes' => [
+                'ws' => '-ws',
+                'xhttp' => '-xhttp',
+                'hy2' => '-hy2',
+            ],
             'includelist' => [],
             'blocklist' => [],
             'warplist' => [],
@@ -3735,6 +3756,15 @@ DNS-over-HTTPS with IP:
                 break;
 
             default:
+                if ($type === 'mirrorlist') {
+                    $r = $this->send(
+                        $this->input['chat'],
+                        "@{$this->input['username']} " . $this->i18n('mirrors_add_prompt'),
+                        $this->input['message_id'],
+                        reply: 'mirror1.example.com, 1.2.3.4:443',
+                    );
+                    break;
+                }
                 $r = $this->send(
                     $this->input['chat'],
                     "@{$this->input['username']} list separated by commas",
@@ -3764,7 +3794,7 @@ DNS-over-HTTPS with IP:
                 if (in_array($type, ['white', 'deny'])) {
                     $conf[$type][] = $v;
                 } else {
-                    $conf[$type][in_array($type, ['rulessetlist', 'packagelist', 'processlist']) ? trim($v) : idn_to_ascii(trim($v))] = true;
+                    $conf[$type][in_array($type, ['rulessetlist', 'packagelist', 'processlist', 'mirrorlist']) ? trim($v) : idn_to_ascii(trim($v))] = true;
                 }
             }
             ksort($conf[$type]);
@@ -3803,6 +3833,9 @@ DNS-over-HTTPS with IP:
                 break;
             case 'rulessetlist':
                 $this->xtlsrulesset($page);
+                break;
+            case 'mirrorlist':
+                $this->mirrors($page);
                 break;
             case 'white':
             case 'deny':
@@ -6742,15 +6775,7 @@ DNS-over-HTTPS with IP:
 
     public function mirrorMenu()
     {
-        return [
-            'text' => 'removed',
-            'data' => [[['text' => $this->i18n('back'), 'callback_data' => '/menu']]],
-        ];
-    }
-
-    public function getMirror()
-    {
-        $this->send($this->input['chat'], 'removed', $this->input['message_id']);
+        $this->mirrors();
     }
 
     public function ocMenu()
@@ -7510,6 +7535,11 @@ DNS-over-HTTPS with IP:
         $data[] = [[
             'text' => $this->i18n('main outbound name: ') . ($p['outbound'] ?: 'proxy'),
             'callback_data' => '/mainOutbound',
+        ]];
+        $mirrorCount = count($this->getEnabledMirrors($p));
+        $data[] = [[
+            'text' => $this->i18n('mirrors') . ': ' . $mirrorCount,
+            'callback_data' => '/mirrors',
         ]];
         $data[] = [[
             'text' => $p['linkdomain'] ?: $this->i18n('cdn'),
@@ -8466,7 +8496,7 @@ DNS-over-HTTPS with IP:
                 break;
         }
 
-        $outbound = ($pac['outbound'] ?? '') ?: 'proxy';
+        $outbound = $this->getMainClashOutboundName($pac);
         $autoTransports = $this->isClashAutoTransportsEnabled($c);
         $realityMeta = $this->resolveClashRealityMeta($xr, $pac, $domain);
         $c = json_decode($this->replaceTags(json_encode($c), $this->buildClashTemplateTags(
@@ -8562,6 +8592,7 @@ DNS-over-HTTPS with IP:
                     $this->appendClashCompanionTransportProxy($c, $index, $client, $pac, $domain, $uid);
                     $this->appendClashSubscriptionTransportProxies($c, $index, $client, $pac, $domain);
                 }
+                $this->appendClashMirrorProxies($c, $pac);
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
                     $c = $this->clashRules($c, $subscriptionId, $domain);

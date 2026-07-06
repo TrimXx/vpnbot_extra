@@ -24,12 +24,12 @@ trait TransportRuntimeTrait
             }
         }
         if (!empty($flags['ws']) && !isset($existingNetworks['ws'])) {
-            $wsProxy = $this->buildClashWsTransportProxy($baseName, $domain, $uid, $hash);
+            $wsProxy = $this->buildClashWsTransportProxy($baseName, $domain, $uid, $hash, $pac);
             $c['proxies'][] = $wsProxy;
             $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($wsProxy['name'] ?? ''));
         }
         if (!empty($flags['xhttp']) && !isset($existingNetworks['xhttp'])) {
-            $xhttpProxy = $this->buildClashXhttpTransportProxy($baseName, $domain, $uid, $hash);
+            $xhttpProxy = $this->buildClashXhttpTransportProxy($baseName, $domain, $uid, $hash, $pac);
             $c['proxies'][] = $xhttpProxy;
             $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($xhttpProxy['name'] ?? ''));
         }
@@ -77,7 +77,7 @@ trait TransportRuntimeTrait
         }
         if (!empty($flags['ws'])) {
             $c['proxies'][$index] = array_merge(
-                $this->buildClashWsTransportProxy($name, $domain, $uid, $hash),
+                $this->buildClashWsTransportProxy($name, $domain, $uid, $hash, $pac),
                 ['name' => $name]
             );
 
@@ -85,7 +85,7 @@ trait TransportRuntimeTrait
         }
         if (!empty($flags['xhttp'])) {
             $c['proxies'][$index] = array_merge(
-                $this->buildClashXhttpTransportProxy($name, $domain, $uid, $hash),
+                $this->buildClashXhttpTransportProxy($name, $domain, $uid, $hash, $pac),
                 ['name' => $name]
             );
         }
@@ -162,10 +162,10 @@ trait TransportRuntimeTrait
         return true;
     }
 
-    protected function buildClashWsTransportProxy(string $baseName, string $domain, string $uid, string $hash): array
+    protected function buildClashWsTransportProxy(string $baseName, string $domain, string $uid, string $hash, ?array $pac = null): array
     {
         return [
-            'name' => $baseName . '-ws',
+            'name' => $baseName . $this->getClashTransportSuffix('ws', $pac),
             'type' => 'vless',
             'server' => $domain,
             'port' => 443,
@@ -181,10 +181,10 @@ trait TransportRuntimeTrait
         ];
     }
 
-    protected function buildClashXhttpTransportProxy(string $baseName, string $domain, string $uid, string $hash): array
+    protected function buildClashXhttpTransportProxy(string $baseName, string $domain, string $uid, string $hash, ?array $pac = null): array
     {
         return [
-            'name' => $baseName . '-xhttp',
+            'name' => $baseName . $this->getClashTransportSuffix('xhttp', $pac),
             'type' => 'vless',
             'server' => $domain,
             'port' => 443,
@@ -243,7 +243,7 @@ trait TransportRuntimeTrait
         }
 
         return [
-            'name' => $baseName . '-hy2',
+            'name' => $baseName . $this->getClashTransportSuffix('hy2', $pac),
             'type' => 'hysteria2',
             'server' => $domain,
             'port' => $port,

@@ -153,6 +153,12 @@ trait ClashTemplateTrait
             '"~transport_reality~"' => !empty($flags['reality']) ? 1 : 0,
             '"~transport_hy~"' => !empty($flags['hysteria']) ? 1 : 0,
             '"~transport_awg~"' => ($this->isRuntimeDeviceWgEnabled($client) ? 1 : 0),
+            '"~mirror_hosts~"' => json_encode(array_values(array_map(static function (array $mirror): string {
+                return $mirror['port'] ? $mirror['host'] . ':' . $mirror['port'] : $mirror['host'];
+            }, $this->getEnabledMirrors($pac))), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            '~proxy_suffix_ws~' => $this->getClashTransportSuffix('ws', $pac),
+            '~proxy_suffix_xhttp~' => $this->getClashTransportSuffix('xhttp', $pac),
+            '~proxy_suffix_hy2~' => $this->getClashTransportSuffix('hy2', $pac),
         ];
 
         return $tags;

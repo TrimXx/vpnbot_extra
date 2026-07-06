@@ -10,7 +10,7 @@ final class ClashTemplatePlaceholders
         '~outbound~' => [
             'group' => 'client',
             'type' => 'string',
-            'ru' => 'Имя основного proxy в шаблоне (обычно proxy).',
+            'ru' => 'Имя основного proxy (pac.outbound, меню proxy names). Подставляется в шаблон и auto-transports.',
         ],
         '~uid~' => [
             'group' => 'client',
@@ -212,6 +212,26 @@ final class ClashTemplatePlaceholders
             'type' => 'json-array',
             'ru' => 'Список subnetlist.',
         ],
+        '~mirror_hosts~' => [
+            'group' => 'mirrors',
+            'type' => 'json-array',
+            'ru' => 'JSON-массив включённых зеркал (host или host:port).',
+        ],
+        '~proxy_suffix_ws~' => [
+            'group' => 'mirrors',
+            'type' => 'string',
+            'ru' => 'Суффикс имени WS-прокси (по умолчанию -ws).',
+        ],
+        '~proxy_suffix_xhttp~' => [
+            'group' => 'mirrors',
+            'type' => 'string',
+            'ru' => 'Суффикс имени xHTTP-прокси (по умолчанию -xhttp).',
+        ],
+        '~proxy_suffix_hy2~' => [
+            'group' => 'mirrors',
+            'type' => 'string',
+            'ru' => 'Суффикс имени HY2-прокси (по умолчанию -hy2).',
+        ],
     ];
 
     public static function names(): array
@@ -230,6 +250,7 @@ final class ClashTemplatePlaceholders
             'ports' => 'Порты',
             'transports' => 'Транспорты',
             'flags' => 'Флаги транспортов',
+            'mirrors' => 'Зеркала и имена',
             'rules' => 'Списки правил',
         ];
         $byGroup = [];
@@ -249,7 +270,7 @@ final class ClashTemplatePlaceholders
             $lines[] = '';
         }
         $lines[] = '<b>Мета</b>';
-        $lines[] = '<code>auto-transports</code> — true (по умолчанию): бот дописывает proxy-ws/xhttp/hy2, правит основной VLESS и AWG runtime. false: только то, что в шаблоне.';
+        $lines[] = '<code>auto-transports</code> — true (по умолчанию): бот дописывает proxy-ws/xhttp/hy2, правит основной VLESS, зеркала и AWG runtime. false: только шаблон + зеркала (если заданы).';
 
         return implode("\n", $lines);
     }
