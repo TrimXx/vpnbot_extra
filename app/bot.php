@@ -7,6 +7,7 @@ require_once __DIR__ . '/traits/PacUrlTrait.php';
 require_once __DIR__ . '/traits/BotCacheTrait.php';
 require_once __DIR__ . '/traits/HwidTrait.php';
 require_once __DIR__ . '/traits/LegacyRemovedTrait.php';
+require_once __DIR__ . '/traits/ClashTemplateTrait.php';
 require_once __DIR__ . '/traits/UserPortalTrait.php';
 
 class Bot
@@ -18,6 +19,7 @@ class Bot
     use BotCacheTrait;
     use HwidTrait;
     use LegacyRemovedTrait;
+    use ClashTemplateTrait;
     use UserPortalTrait;
 
     public $input;
@@ -5950,9 +5952,21 @@ DNS-over-HTTPS with IP:
         ];
     }
 
+    protected function normalizeXrayConfigBeforeWrite(array &$c): void
+    {
+        if (!isset($c['stats']) || is_array($c['stats'])) {
+            $c['stats'] = new stdClass();
+        }
+        $levels = $c['policy']['levels'] ?? null;
+        if (is_array($levels) && array_is_list($levels) && !empty($levels[0]) && is_array($levels[0])) {
+            $c['policy']['levels'] = ['0' => $levels[0]];
+        }
+    }
+
     protected function writeXrayConfig(array $c): void
     {
         $this->applyBothTransportInboundClients($c);
+        $this->normalizeXrayConfigBeforeWrite($c);
         $this->invalidateXrayConfigCache();
         file_put_contents('/config/xray.json', json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
@@ -7196,26 +7210,7 @@ DNS-over-HTTPS with IP:
         $domain = $this->getDomain();
         $hash   = $this->getHashBot();
         $text[] = "Menu -> " . $this->i18n('xray') . " -> " . $this->i18n($type) . " templates";
-        $text[] = <<<TEXT
-            <code>~outbound~</code>
-            <code>~pac~</code>
-            <code>~package~</code>
-            <code>~process~</code>
-            <code>~subnet~</code>
-            <code>~block~</code>
-            <code>~warp~</code>
-            <code>~dns~</code>
-            <code>~dnspath~</code>
-            <code>~uid~</code>
-            <code>~domain~</code>
-            <code>~directdomain~</code>
-            <code>~cdndomain~</code>
-            <code>~short_id~</code>
-            <code>~email~</code>
-            <code>~public_key~</code>
-            <code>~server_name~</code>
-            <code>~ip~</code>
-            TEXT;
+        $text[] = $this->getClashTemplateHelpHtml();
         $templates = $pac["{$type}templates"];
 
         $data[] = [
@@ -8340,11 +8335,16 @@ DNS-over-HTTPS with IP:
             exit;
         }
 
-        if (!$return && !$this->processHwidRequest($client, $clientIndex)) {
+        if (($_GET['t'] ?? '') === 'cl') {
+            $this->tryServeClashRuleProviderRequest($pac);
+        }
+
+        $ruleProviderRequest = $this->isClashRuleProviderRequest((string) ($_GET['r'] ?? ''));
+        if (!$return && !$ruleProviderRequest && !$this->processHwidRequest($client, $clientIndex)) {
             exit;
         }
         $runtimeModeEnabled = $this->isPermanentHwidRuntime($client);
-        if ($runtimeModeEnabled) {
+        if ($runtimeModeEnabled && !$ruleProviderRequest) {
             $deviceUuid = (string) ($_SERVER['VPNBOT_DEVICE_UUID'] ?? '');
             if ($deviceUuid === '') {
                 if (!empty($_SERVER['VPNBOT_SUBSCRIPTION_BROWSER']) && $return) {
@@ -8359,7 +8359,7 @@ DNS-over-HTTPS with IP:
         }
         $subscriptionId = $subscriptionId ?? $this->getClientSubscriptionId($client);
 
-        if (!empty($_GET['r'])) {
+        if (!empty($_GET['r']) && !$ruleProviderRequest) {
             $cl = $this->buildPacUrl($scheme, $domain, $hash, [
                 'h' => $hash,
                 't' => 'cl',
@@ -8437,9 +8437,18 @@ DNS-over-HTTPS with IP:
         }
 
         $outbound = ($pac['outbound'] ?? '') ?: 'proxy';
-        $c = json_decode($this->replaceTags(json_encode($c), [
-            '~outbound~' => $outbound,
-        ]), true);
+        $autoTransports = $this->isClashAutoTransportsEnabled($c);
+        $realityMeta = $this->resolveClashRealityMeta($xr, $pac, $domain);
+        $c = json_decode($this->replaceTags(json_encode($c), $this->buildClashTemplateTags(
+            $pac,
+            $client,
+            $domain,
+            $uid,
+            $email,
+            $subscriptionId,
+            $outbound,
+            $realityMeta
+        )), true);
         if (!is_array($c)) {
             $c = [];
         }
@@ -8504,58 +8513,25 @@ DNS-over-HTTPS with IP:
                 }
                 break;
         }
-        $realityInbound = null;
-        foreach (($xr['inbounds'] ?? []) as $inbound) {
-            if (($inbound['streamSettings']['security'] ?? '') === 'reality') {
-                $realityInbound = $inbound;
-                break;
-            }
-        }
-        $realitySettings = $realityInbound['streamSettings']['realitySettings'] ?? [];
-        $fallbackRealitySettings = $xr['inbounds'][0]['streamSettings']['realitySettings'] ?? [];
-        $realityShortId = $realitySettings['shortIds'][0]
-            ?? $fallbackRealitySettings['shortIds'][0]
-            ?? '';
-        $realityServerName = $realitySettings['serverNames'][0]
-            ?? $fallbackRealitySettings['serverNames'][0]
-            ?? $domain;
-        $realityBridgeServer = $this->normalizeRealityTarget((string) ($pac['reality']['bridge_server'] ?? ''));
-        if ($realityBridgeServer === '') {
-            $realityBridgeServer = $this->normalizeRealityTarget($domain . ':443');
-        }
-        [$realityServerHost, $realityServerPort] = $this->splitEndpointHostPort($realityBridgeServer);
-        if ($realityServerHost === '') {
-            $realityServerHost = $domain;
-        }
-        if ($realityServerPort <= 0) {
-            $realityServerPort = 443;
-        }
-        $c = json_decode($this->replaceTags(json_encode($c), [
-            '"~pac~"'        => json_encode(array_keys(array_filter($pac['includelist'] ?? []))),
-            '"~block~"'      => json_encode(array_keys(array_filter($pac['blocklist'] ?? []))),
-            '"~warp~"'       => json_encode(array_keys(array_filter($pac['warplist'] ?? []))),
-            '"~process~"'    => json_encode(array_keys(array_filter($pac['processlist'] ?? []))),
-            '"~package~"'    => json_encode(array_keys(array_filter($pac['packagelist'] ?? []))),
-            '"~subnet~"'     => json_encode(array_keys(array_filter($pac['subnetlist'] ?? []))),
-            '~dns~'          => "https://$domain/dns-query$hash/$uid",
-            '~dnspath~'      => "/dns-query$hash/$uid",
-            '~uid~'          => $uid,
-            '~domain~'       => $domain,
-            '~directdomain~' => $pac['domain'],
-            '~cdndomain~'    => $pac['linkdomain'] ?? '',
-            '~short_id~'     => $realityShortId,
-            '~email~'        => $email,
-            '~public_key~'   => $pac['xray'],
-            '~server_name~'  => $realityServerName,
-            '~reality_server_host~' => $realityServerHost,
-            '"~reality_server_port~"' => $realityServerPort,
-            '~ip~'           => $this->ip,
-        ]), true);
-
         switch ($_GET['t']) {
             case 'cl':
-                $this->appendClashCompanionTransportProxy($c, $index, $client, $pac, $domain, $uid);
-                $this->appendClashSubscriptionTransportProxies($c, $index, $client, $pac, $domain);
+                if ($autoTransports) {
+                    $this->adaptClashMainProxyForTransportFlags(
+                        $c,
+                        $index,
+                        $client,
+                        $pac,
+                        $domain,
+                        $uid,
+                        (string) ($realityMeta['server_host'] ?? $domain),
+                        (int) ($realityMeta['server_port'] ?? 443),
+                        (string) ($realityMeta['short_id'] ?? ''),
+                        (string) ($realityMeta['server_name'] ?? $domain),
+                        (string) ($pac['xray'] ?? '')
+                    );
+                    $this->appendClashCompanionTransportProxy($c, $index, $client, $pac, $domain, $uid);
+                    $this->appendClashSubscriptionTransportProxies($c, $index, $client, $pac, $domain);
+                }
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
                     $c = $this->clashRules($c, $subscriptionId, $domain);
@@ -8586,6 +8562,7 @@ DNS-over-HTTPS with IP:
                     }
                     $c['dns']['nameserver'] = $mergedNameserver;
                 }
+                $c = $this->finalizeClashSubscriptionConfig($c);
                 break;
         }
         if (!empty($return)) {
@@ -8645,6 +8622,58 @@ DNS-over-HTTPS with IP:
         return $c;
     }
 
+    protected function getClashRuleProviderLists(array $pac): array
+    {
+        return [
+            'block'   => array_keys(array_filter($pac['blocklist'] ?? [])),
+            'process' => array_keys(array_filter($pac['processlist'] ?? [])),
+            'package' => array_keys(array_filter($pac['packagelist'] ?? [])),
+            'warp'    => array_keys(array_filter($pac['warplist'] ?? [])),
+            'pac'     => array_keys(array_filter($pac['includelist'] ?? [])),
+            'subnet'  => array_keys(array_filter($pac['subnetlist'] ?? [])),
+        ];
+    }
+
+    protected function emitClashRuleProviderYaml(string $ruleName, array $list): void
+    {
+        header("Content-Disposition: attachment; filename={$ruleName}.yaml");
+        header('Content-Type: text/yaml');
+        switch ($ruleName) {
+            case 'process':
+            case 'package':
+                $payload = array_map(static fn($e) => "PROCESS-NAME,$e", $list);
+                break;
+
+            default:
+                $payload = array_map(static function ($e) {
+                    if (preg_match('~^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/\d{1,2})?$~', $e, $m)) {
+                        return "IP-CIDR,$e" . (empty($m[1]) ? '/32' : '');
+                    }
+
+                    return "DOMAIN-SUFFIX,$e";
+                }, $list);
+                break;
+        }
+        echo yaml_emit(['payload' => $payload]);
+        exit;
+    }
+
+    protected function tryServeClashRuleProviderRequest(array $pac): void
+    {
+        $ruleName = (string) ($_GET['r'] ?? '');
+        if (!$this->isClashRuleProviderRequest($ruleName)) {
+            return;
+        }
+        $lists = $this->getClashRuleProviderLists($pac);
+        if (!array_key_exists($ruleName, $lists)) {
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo 'Rule provider not found';
+            exit;
+        }
+        $this->emitClashRuleProviderYaml($ruleName, $lists[$ruleName]);
+    }
+
     public function clashRules($c, $subscriptionId, $domain)
     {
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
@@ -8653,26 +8682,7 @@ DNS-over-HTTPS with IP:
             if (array_key_exists('list', $v)) {
                 if ($v['type'] == 'RULE-SET') {
                     if (!empty($_GET['r']) && $v['name'] == $_GET['r']) {
-                        header("Content-Disposition: attachment; filename={$v['name']}.yaml");
-                        header('Content-Type: text/yaml');
-                        switch ($v['name']) {
-                            case 'process':
-                            case 'package':
-                                echo yaml_emit(['payload' => array_map(fn($e) => "PROCESS-NAME,$e", $v['list'])]);
-                                break;
-
-                            default:
-                                echo yaml_emit(['payload' => array_map(function($e) {
-                                    if (preg_match('~^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(/\d{1,2})?$~', $e, $m)) {
-                                        return "IP-CIDR,$e" . (empty($m[1]) ? '/32' : '');
-                                    } else {
-                                        return "DOMAIN-SUFFIX,$e";
-                                    }
-                                }, $v['list'])]);
-                                break;
-
-                        }
-                        exit;
+                        $this->emitClashRuleProviderYaml((string) $v['name'], $v['list'] ?? []);
                     }
                     $c['rule-providers'][$v['name']] = [
                         'type'     => 'http',

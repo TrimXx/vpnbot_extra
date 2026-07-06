@@ -71,4 +71,16 @@ trait PacUrlTrait
     {
         return "{$scheme}://{$domain}/pac{$hash}/" . $this->encodePacUrlPayload($params);
     }
+
+    protected function getClashRuleProviderNames(): array
+    {
+        return ['block', 'process', 'package', 'warp', 'pac', 'subnet'];
+    }
+
+    protected function isClashRuleProviderRequest(?string $ruleName): bool
+    {
+        $ruleName = trim((string) $ruleName);
+
+        return $ruleName !== '' && in_array($ruleName, $this->getClashRuleProviderNames(), true);
+    }
 }

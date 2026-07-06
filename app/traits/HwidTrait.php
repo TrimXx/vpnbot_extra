@@ -1449,11 +1449,17 @@ trait HwidTrait
         $devices   = $this->getHwidDevicesByUser($ownerSubId);
         $hwid      = trim($_SERVER['HTTP_X_HWID'] ?? '');
         $isBrowser = $this->isBrowserRequest();
-	$path      = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-	$segments  = explode('/', trim($path, '/'));
-        $token     = end($segments);
-        $params    = $this->decodePacUrlPayload((string) $token);
-        $isRuleRequest = is_array($params) && !empty($params['r']);
+        $ruleName  = (string) ($_GET['r'] ?? '');
+        if ($ruleName === '') {
+            $path     = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+            $segments = explode('/', trim((string) $path, '/'));
+            $token    = end($segments);
+            $params   = $this->decodePacUrlPayload((string) $token);
+            if (is_array($params)) {
+                $ruleName = (string) ($params['r'] ?? '');
+            }
+        }
+        $isRuleRequest = $this->isClashRuleProviderRequest($ruleName);
 
         $hwidNotSupported = !$isRuleRequest && !$isBrowser && $hwid === '';
         $hwidMaxReached = count($devices) >= $limit;
@@ -1477,9 +1483,9 @@ trait HwidTrait
 
             return false;
         }
-	if ($isRuleRequest) {
-  return true;
-}
+        if ($isRuleRequest) {
+            return true;
+        }
         $isNew = !isset($devices[$hwid]);
 
         if ($isNew && count($devices) >= $limit) {

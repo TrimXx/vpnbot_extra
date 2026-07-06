@@ -1,4 +1,5 @@
 {
+    "auto-transports": false,
     "mixed-port": 2080,
     "allow-lan": true,
     "tcp-concurrent": true,
@@ -55,6 +56,8 @@
         "enhanced-mode": "fake-ip",
         "fake-ip-filter": [
             "~domain~",
+            "~directdomain~",
+            "~domain_alt~",
             "+.lan",
             "+.local"
         ],
@@ -66,8 +69,8 @@
         {
             "name": "~outbound~",
             "type": "vless",
-            "server": "~domain~",
-            "port": 443,
+            "server": "~reality_server_host~",
+            "port": "~port_reality~",
             "uuid": "~uid~",
             "network": "tcp",
             "flow": "xtls-rprx-vision",
@@ -78,52 +81,50 @@
                 "short-id": "~short_id~"
             },
             "servername": "~server_name~",
-            "client-fingerprint": "random"
+            "client-fingerprint": "chrome"
         },
         {
             "name": "WS1",
             "type": "vless",
-            "server": "ru.trimx.ru",
-            "port": 443,
+            "server": "~directdomain~",
+            "port": "~port_ws~",
             "uuid": "~uid~",
             "network": "ws",
             "udp": true,
             "tls": true,
-            "servername": "~domain~",
-            "skip-cert-verify": false,
-            "client-fingerprint": "random",
+            "servername": "~directdomain~",
+            "client-fingerprint": "chrome",
             "ws-opts": {
-                "path": "/ws7bab2561"
+                "path": "~ws_path~"
             }
         },
         {
             "name": "WS2",
             "type": "vless",
-            "server": "ru2.trimx.ru",
-            "port": 443,
+            "server": "~domain_alt~",
+            "port": "~port_ws~",
             "uuid": "~uid~",
             "network": "ws",
             "udp": true,
             "tls": true,
-            "servername": "~domain~",
-            "skip-cert-verify": false,
-            "client-fingerprint": "random",
+            "servername": "~directdomain~",
+            "client-fingerprint": "chrome",
             "ws-opts": {
-                "path": "/ws7bab2561"
+                "path": "~ws_path~"
             }
         },
         {
             "name": "Reality1",
             "type": "vless",
-            "server": "ru.trimx.ru",
-            "port": 443,
+            "server": "~reality_server_host~",
+            "port": "~port_reality~",
             "uuid": "~uid~",
             "network": "tcp",
             "flow": "xtls-rprx-vision",
             "udp": true,
             "tls": true,
             "servername": "~server_name~",
-            "client-fingerprint": "random",
+            "client-fingerprint": "chrome",
             "reality-opts": {
                 "public-key": "~public_key~",
                 "short-id": "~short_id~"
@@ -132,19 +133,30 @@
         {
             "name": "Reality2",
             "type": "vless",
-            "server": "ru2.trimx.ru",
-            "port": 443,
+            "server": "~domain_alt~",
+            "port": "~port_reality~",
             "uuid": "~uid~",
             "network": "tcp",
             "flow": "xtls-rprx-vision",
             "udp": true,
             "tls": true,
             "servername": "~server_name~",
-            "client-fingerprint": "random",
+            "client-fingerprint": "chrome",
             "reality-opts": {
                 "public-key": "~public_key~",
                 "short-id": "~short_id~"
             }
+        },
+        {
+            "name": "HY2",
+            "type": "hysteria2",
+            "server": "~domain~",
+            "port": "~port_hy~",
+            "password": "~hy_password~",
+            "sni": "~directdomain~",
+            "alpn": [
+                "h3"
+            ]
         }
     ],
     "proxy-groups": [
@@ -158,12 +170,13 @@
                 "WS1",
                 "WS2",
                 "Reality1",
-                "Reality2"
+                "Reality2",
+                "HY2"
             ]
         }
     ],
     "add-rule-providers": true,
-    "rule-providers": [],
+    "rule-providers": {},
     "rules": [
         {
             "type": "RULE-SET",

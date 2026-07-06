@@ -4,7 +4,6 @@
     "tcp-concurrent": true,
     "enable-process": true,
     "find-process-mode": "strict",
-    "global-client-fingerprint": "chrome",
     "mode": "rule",
     "log-level": "info",
     "ipv6": false,
@@ -67,8 +66,8 @@
         {
             "name": "~outbound~",
             "type": "vless",
-            "server": "~domain~",
-            "port": 443,
+            "server": "~reality_server_host~",
+            "port": "~port_reality~",
             "uuid": "~uid~",
             "network": "tcp",
             "flow": "xtls-rprx-vision",

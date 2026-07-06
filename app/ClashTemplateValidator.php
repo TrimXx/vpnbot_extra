@@ -1,13 +1,10 @@
 <?php
 
+require_once __DIR__ . '/ClashTemplatePlaceholders.php';
+
 class ClashTemplateValidator
 {
-  private const KNOWN_PLACEHOLDERS = [
-    '~uid~', '~domain~', '~directdomain~', '~cdndomain~', '~short_id~', '~email~',
-    '~public_key~', '~server_name~', '~reality_server_host~', '~reality_server_port~',
-    '~ip~', '~dns~', '~dnspath~', '~outbound~', '~pac~', '~block~', '~warp~',
-    '~process~', '~package~', '~subnet~',
-  ];
+  private const KNOWN_PLACEHOLDERS = ClashTemplatePlaceholders::CATALOG;
 
   public static function validateClashTemplate(array $template): array
   {
@@ -122,7 +119,7 @@ class ClashTemplateValidator
     if (preg_match_all('~(~[a-z_]+~|"[~[a-z_]+~]")~i', $value, $m)) {
       foreach ($m[1] as $ph) {
         $ph = trim($ph, '"');
-        if (!in_array($ph, self::KNOWN_PLACEHOLDERS, true)) {
+        if (!in_array($ph, array_keys(self::KNOWN_PLACEHOLDERS), true)) {
           $warnings[] = "$path: unknown placeholder $ph";
         }
       }

@@ -8,6 +8,8 @@ Telegram-бот для управления VPN-сервером из Telegram.
 
 **Руководство пользователя (RU):** [docs/USER_GUIDE_RU.md](docs/USER_GUIDE_RU.md) — как выдавать доступ, HWID, подписки, WG/AWG и типовые сценарии без технических деталей.
 
+**Переменные Clash-шаблонов:** [docs/CLASH_TEMPLATE_RU.md](docs/CLASH_TEMPLATE_RU.md) — плейсхолдеры `~domain~`, `~ws_path~`, порты, `auto-transports`, примеры.
+
 ### Что поддерживается
 
 - VLESS transport registry (`Reality` / `Websocket` / `XHTTP` flags) + Mihomo/Clash подписки

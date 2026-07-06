@@ -5,7 +5,7 @@ trait TransportRuntimeTrait
     protected function appendClashCompanionTransportProxy(array &$c, int $index, array $client, array $pac, string $domain, string $uid): void
     {
         $flags = $this->getClientTransportFlags($client, $pac);
-        if (empty($flags['ws']) || empty($flags['xhttp'])) {
+        if (empty($flags['ws']) && empty($flags['xhttp'])) {
             return;
         }
         if (!isset($c['proxies'][$index]) || !is_array($c['proxies'][$index])) {
@@ -23,16 +23,90 @@ trait TransportRuntimeTrait
                 $existingNetworks[$network] = (string) ($proxy['name'] ?? '');
             }
         }
-        if (!isset($existingNetworks['ws'])) {
+        if (!empty($flags['ws']) && !isset($existingNetworks['ws'])) {
             $wsProxy = $this->buildClashWsTransportProxy($baseName, $domain, $uid, $hash);
             $c['proxies'][] = $wsProxy;
             $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($wsProxy['name'] ?? ''));
         }
-        if (!isset($existingNetworks['xhttp'])) {
+        if (!empty($flags['xhttp']) && !isset($existingNetworks['xhttp'])) {
             $xhttpProxy = $this->buildClashXhttpTransportProxy($baseName, $domain, $uid, $hash);
             $c['proxies'][] = $xhttpProxy;
             $this->linkClashTransportProxyToGroups($c, $baseName, (string) ($xhttpProxy['name'] ?? ''));
         }
+    }
+
+    protected function adaptClashMainProxyForTransportFlags(
+        array &$c,
+        int $index,
+        array $client,
+        array $pac,
+        string $domain,
+        string $uid,
+        string $realityServerHost,
+        int $realityServerPort,
+        string $realityShortId,
+        string $realityServerName,
+        string $publicKey
+    ): void {
+        if (!isset($c['proxies'][$index]) || !is_array($c['proxies'][$index])) {
+            return;
+        }
+        $flags = $this->getClientTransportFlags($client, $pac);
+        $hash = $this->getHashBot();
+        $name = (string) ($c['proxies'][$index]['name'] ?? 'proxy');
+        if (!empty($flags['reality'])) {
+            $c['proxies'][$index] = array_merge($c['proxies'][$index], [
+                'type' => 'vless',
+                'server' => $realityServerHost !== '' ? $realityServerHost : $domain,
+                'port' => $realityServerPort > 0 ? $realityServerPort : 443,
+                'uuid' => $uid,
+                'network' => 'tcp',
+                'flow' => 'xtls-rprx-vision',
+                'udp' => true,
+                'tls' => true,
+                'servername' => $realityServerName,
+                'client-fingerprint' => $c['proxies'][$index]['client-fingerprint'] ?? 'chrome',
+                'reality-opts' => [
+                    'public-key' => $publicKey,
+                    'short-id' => $realityShortId,
+                ],
+            ]);
+            unset($c['proxies'][$index]['ws-opts'], $c['proxies'][$index]['xhttp-opts']);
+
+            return;
+        }
+        if (!empty($flags['ws'])) {
+            $c['proxies'][$index] = array_merge(
+                $this->buildClashWsTransportProxy($name, $domain, $uid, $hash),
+                ['name' => $name]
+            );
+
+            return;
+        }
+        if (!empty($flags['xhttp'])) {
+            $c['proxies'][$index] = array_merge(
+                $this->buildClashXhttpTransportProxy($name, $domain, $uid, $hash),
+                ['name' => $name]
+            );
+        }
+    }
+
+    protected function finalizeClashSubscriptionConfig(array $c): array
+    {
+        unset($c['global-client-fingerprint']);
+        $this->stripClashTemplateMetaKeys($c);
+        if (!empty($c['proxies']) && is_array($c['proxies'])) {
+            foreach ($c['proxies'] as $idx => $proxy) {
+                if (!is_array($proxy) || (($proxy['type'] ?? '') !== 'vless')) {
+                    continue;
+                }
+                if (empty($proxy['client-fingerprint'])) {
+                    $c['proxies'][$idx]['client-fingerprint'] = 'chrome';
+                }
+            }
+        }
+
+        return $c;
     }
 
     protected function patchXrayInboundTransportPaths(array &$xray, ?string $hash = null): bool
