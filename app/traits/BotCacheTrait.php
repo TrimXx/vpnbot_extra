@@ -71,6 +71,33 @@ trait BotCacheTrait
         ];
     }
 
+    protected function menuStatusCacheFile(): string
+    {
+        return '/config/.menu_status.json';
+    }
+
+    protected function invalidateMenuServiceStatusCache(): void
+    {
+        @unlink($this->menuStatusCacheFile());
+    }
+
+    protected function readMenuServiceStatusCache(?int $maxAgeSec = null): ?array
+    {
+        $cacheFile = $this->menuStatusCacheFile();
+        if (!is_readable($cacheFile)) {
+            return null;
+        }
+        if ($maxAgeSec !== null) {
+            $mtime = filemtime($cacheFile);
+            if ($mtime === false || (time() - $mtime) > $maxAgeSec) {
+                return null;
+            }
+        }
+        $cached = json_decode((string) file_get_contents($cacheFile), true);
+
+        return is_array($cached) ? $cached : null;
+    }
+
     public function refreshMenuServiceStatus(): array
     {
         $raw = trim((string) $this->ssh(
@@ -79,7 +106,7 @@ trait BotCacheTrait
         ));
         $batch = json_decode($raw, true);
         if (!is_array($batch)) {
-            return $this->defaultMenuServiceStatus();
+            return $this->readMenuServiceStatusCache() ?? $this->defaultMenuServiceStatus();
         }
         $status = [
             'wg1'  => !empty($batch['wg1']),
@@ -90,7 +117,7 @@ trait BotCacheTrait
             'ad'   => (bool) exec('JSON=1 timeout 2 dnslookup google.com ad'),
             'warp' => trim((string) ($batch['warp'] ?? 'off')) ?: 'off',
         ];
-        @file_put_contents('/tmp/vpnbot_menu_status.json', json_encode($status));
+        @file_put_contents($this->menuStatusCacheFile(), json_encode($status));
 
         return $status;
     }

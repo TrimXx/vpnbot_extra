@@ -1272,7 +1272,7 @@ class Bot
         ];
         yaml_emit_file('/config/hysteria.yaml', $c);
         $this->ssh('hysteria server -c /config/hysteria.yaml', 'hy', false, '/logs/hysteria');
-        @unlink('/tmp/vpnbot_menu_status.json');
+        $this->invalidateMenuServiceStatusCache();
     }
 
     public function chocdns($dns)
@@ -5276,18 +5276,14 @@ DNS-over-HTTPS with IP:
 
     public function getMenuServiceStatus(bool $forceRefresh = false): array
     {
-        $cacheFile = '/tmp/vpnbot_menu_status.json';
-        if (!$forceRefresh && is_readable($cacheFile)) {
-            $cached = json_decode((string) file_get_contents($cacheFile), true);
-            if (is_array($cached)) {
+        if (!$forceRefresh) {
+            $cached = $this->readMenuServiceStatusCache(60);
+            if ($cached !== null) {
                 return $cached;
             }
         }
-        if ($forceRefresh) {
-            return $this->refreshMenuServiceStatus();
-        }
 
-        return $this->defaultMenuServiceStatus();
+        return $this->refreshMenuServiceStatus();
     }
 
     public function alignColumns(array $columns): string

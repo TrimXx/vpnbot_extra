@@ -249,6 +249,6 @@ trait TransportRegistryTrait
         $this->restartXray($x);
         $this->cloakNginx();
         $this->restartHysteria();
-        @unlink('/tmp/vpnbot_menu_status.json');
+        $this->invalidateMenuServiceStatusCache();
     }
 }
