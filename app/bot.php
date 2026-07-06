@@ -2692,7 +2692,7 @@ class Bot
             $dirty = true;
         }
         $keys = $raw['wg1_amnezia_keys'] ?? null;
-        if ($this->isLegacyAwgKeys(is_array($keys) ? $keys : null)) {
+        if ($this->isLegacyAwgKeys(is_array($keys) ? $keys : null) || !$this->awgHeaderRangesValid(is_array($keys) ? $keys : null)) {
             unset($raw['wg1_amnezia_keys']);
             $dirty = true;
         }
@@ -2714,6 +2714,65 @@ class Bot
         return isset($keys['Jc']) || isset($keys['Jmin']) || isset($keys['Jmax']);
     }
 
+    protected function awgHeaderRangesOverlap(string $a, string $b): bool
+    {
+        if (!preg_match('/^(\d+)-(\d+)$/', $a, $ma) || !preg_match('/^(\d+)-(\d+)$/', $b, $mb)) {
+            return true;
+        }
+        $aMin = (int) $ma[1];
+        $aMax = (int) $ma[2];
+        $bMin = (int) $mb[1];
+        $bMax = (int) $mb[2];
+
+        return $aMin <= $bMax && $bMin <= $aMax;
+    }
+
+    protected function awgHeaderRangesValid(?array $keys): bool
+    {
+        if (!is_array($keys) || $keys === []) {
+            return false;
+        }
+        $ranges = [];
+        foreach (['H1', 'H2', 'H3', 'H4'] as $header) {
+            $range = (string) ($keys[$header] ?? '');
+            if (!preg_match('/^\d+-\d+$/', $range)) {
+                return false;
+            }
+            $ranges[] = $range;
+        }
+        for ($i = 0; $i < 4; $i++) {
+            for ($j = $i + 1; $j < 4; $j++) {
+                if ($this->awgHeaderRangesOverlap($ranges[$i], $ranges[$j])) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    protected function generateAwgHeaderRanges(): array
+    {
+        $zones = [
+            [1, 1000000000],
+            [1000000001, 2000000000],
+            [2000000001, 3000000000],
+            [3000000001, 4294967295],
+        ];
+        $ranges = [];
+        foreach ($zones as [$lo, $hi]) {
+            $width = $hi - $lo;
+            $min = $lo + random_int(0, max(0, intdiv($width, 4)));
+            $max = min($hi, $min + random_int(max(1000, intdiv($width, 8)), max(1001, intdiv($width, 2))));
+            if ($max <= $min) {
+                $max = min($hi, $min + 10000);
+            }
+            $ranges[] = "$min-$max";
+        }
+
+        return $ranges;
+    }
+
     /**
      * Ensure server wg1.conf carries AWG 2.0 obfuscation params shared with all clients.
      */
@@ -2721,6 +2780,12 @@ class Bot
     {
         if (empty($this->getPacConf()['wg1_amnezia'])) {
             return;
+        }
+        $pac = $this->getPacConf();
+        $keys = $pac['wg1_amnezia_keys'] ?? null;
+        if (!$this->awgHeaderRangesValid(is_array($keys) ? $keys : null)) {
+            unset($pac['wg1_amnezia_keys']);
+            $this->setPacConf($pac);
         }
         $this->migrateAwgClientsToV2();
         $ak = $this->amneziaKeys();
@@ -10329,15 +10394,7 @@ DNS-over-HTTPS with IP:
                 $s4 = random_int(0, 32);
             } while ($s3 + 56 === $s4);
 
-            $hRanges = [];
-            while (count($hRanges) < 4) {
-                $min = random_int(1, 1000);
-                $max = random_int($min + 1, 4294967295);
-                $range = "$min-$max";
-                if (!in_array($range, $hRanges, true)) {
-                    $hRanges[] = $range;
-                }
-            }
+            $hRanges = $this->generateAwgHeaderRanges();
 
             $c[$this->getInstanceWG(1) . 'amnezia_keys'] = [
                 'S1'   => $s1,
