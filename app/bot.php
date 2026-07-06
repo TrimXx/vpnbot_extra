@@ -103,7 +103,6 @@ class Bot
         $this->logWebhook('parsed');
         $this->auth();
         $this->session();
-        session_write_close();
         if (!empty($this->input['callback_id'])) {
             $this->answer($this->input['callback_id']);
         }
@@ -111,6 +110,9 @@ class Bot
         $this->action();
         $this->logWebhook('after action');
         $this->callbackCheck();
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
     }
 
     protected function logWebhook(string $stage = 'event'): void
@@ -2333,14 +2335,26 @@ class Bot
     public function reply()
     {
         $this->touchSession();
-        if (!empty($_SESSION['reply'][$this->input['reply']])) {
-            $this->delete($this->input['chat'], $this->input['reply']);
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $callback = $_SESSION['reply'][$this->input['reply']]['callback'];
-            $this->input['message_id']  = $this->input['callback_id'] = $_SESSION['reply'][$this->input['reply']]['start_message'];
-            $this->{$callback}($this->input['message'], ...$_SESSION['reply'][$this->input['reply']]['args']);
-            $this->answer($_SESSION['reply'][$this->input['reply']]['start_message']);
-            unset($_SESSION['reply'][$this->input['reply']]);
+        if (empty($_SESSION['reply'][$this->input['reply']])) {
+            if (trim((string) ($this->input['message'] ?? '')) !== '') {
+                $this->send($this->input['chat'], 'session expired, open menu and try again', $this->input['message_id']);
+            }
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+
+            return;
+        }
+        $this->delete($this->input['chat'], $this->input['reply']);
+        $this->delete($this->input['chat'], $this->input['message_id']);
+        $callback = $_SESSION['reply'][$this->input['reply']]['callback'];
+        $this->input['message_id']  = $this->input['callback_id'] = $_SESSION['reply'][$this->input['reply']]['start_message'];
+        $this->{$callback}($this->input['message'], ...$_SESSION['reply'][$this->input['reply']]['args']);
+        if (!empty($this->input['callback_id'])) {
+            $this->answer($this->input['callback_id']);
+        }
+        unset($_SESSION['reply'][$this->input['reply']]);
+        if (session_status() === PHP_SESSION_ACTIVE) {
             session_write_close();
         }
     }
@@ -3787,6 +3801,9 @@ DNS-over-HTTPS with IP:
             'callback'      => 'addInclude',
             'args'          => [$type],
         ];
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
     }
 
     public function addInclude(string $domains, $type)
@@ -3799,11 +3816,20 @@ DNS-over-HTTPS with IP:
         $domains = array_filter($domains, fn($x) => !empty(trim($x)));
         if (!empty($domains)) {
             $conf = $this->getPacConf();
+            if (!isset($conf[$type]) || !is_array($conf[$type])) {
+                $conf[$type] = [];
+            }
             foreach ($domains as $k => $v) {
                 if (in_array($type, ['white', 'deny'])) {
                     $conf[$type][] = $v;
                 } else {
-                    $conf[$type][in_array($type, ['rulessetlist', 'packagelist', 'processlist', 'mirrorlist']) ? trim($v) : idn_to_ascii(trim($v))] = true;
+                    $entry = trim($v);
+                    if ($type === 'mirrorlist') {
+                        $entry = preg_replace('~^\w+://~', '', $entry);
+                        $entry = preg_replace('~/.*$~', '', $entry);
+                        $entry = trim($entry);
+                    }
+                    $conf[$type][in_array($type, ['rulessetlist', 'packagelist', 'processlist', 'mirrorlist']) ? $entry : idn_to_ascii($entry)] = true;
                 }
             }
             ksort($conf[$type]);
