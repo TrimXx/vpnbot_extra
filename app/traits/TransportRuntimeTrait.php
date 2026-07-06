@@ -308,7 +308,11 @@ trait TransportRuntimeTrait
         }
 NGINX;
 
-        return preg_replace('~(\n        location / \{)~', $snippet . '$1', $template) ?? $template;
+        return preg_replace(
+            '~(\n\s+location / \{\s*\n\s+root /app;\s*\n\s+auth_basic)~',
+            $snippet . '$1',
+            $template
+        ) ?? $template;
     }
 
     protected function applyTransportAwareNginxTemplate(string $template, array $pac): string

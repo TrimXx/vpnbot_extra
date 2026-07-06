@@ -788,7 +788,7 @@ trait NodeTrait
     $this->nodeJoinCommand($nodeId);
   }
 
-  public function nodeView(string $nodeId, int $page = 0)
+  public function nodeView(string $nodeId, int $page = 0, ?array $syncResult = null)
   {
     $pac = $this->getPacConf();
     $node = $pac['child_nodes'][$nodeId] ?? null;
@@ -797,6 +797,10 @@ trait NodeTrait
       return;
     }
     $text[] = 'Menu -> ' . $this->i18n('nodes') . ' -> ' . ($node['name'] ?? $nodeId);
+    if ($syncResult !== null) {
+      $line = $this->i18n('nodes_sync_result') . ': ' . (!empty($syncResult['ok']) ? $this->i18n('success') : (string) ($syncResult['error'] ?? $this->i18n('error')));
+      $text[] = htmlspecialchars($line, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
     $text[] = 'id: <code>' . htmlspecialchars($nodeId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
     $text[] = 'domain: <code>' . htmlspecialchars((string) ($node['domain'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
     $text[] = $this->i18n('nodes_registered') . ': ' . $this->i18n(!empty($node['registered']) ? 'on' : 'off');
@@ -919,9 +923,7 @@ trait NodeTrait
   public function nodeSyncOne(string $nodeId, int $page = 0)
   {
     $r = $this->pushSyncToNode($nodeId);
-    $msg = !empty($r['ok']) ? $this->i18n('success') : ((string) ($r['error'] ?? $this->i18n('error')));
-    $this->answer($this->input['callback_id'], $msg, true);
-    $this->nodeView($nodeId, $page);
+    $this->nodeView($nodeId, $page, $r);
   }
 
     public function nodePushUpdateToAll(): array
