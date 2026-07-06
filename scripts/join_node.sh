@@ -34,13 +34,13 @@ if ! command -v docker >/dev/null 2>&1; then
   sh /tmp/get-docker.sh
 fi
 
-if [ -d "$APP_DIR/.git" ]; then
-  echo "[node] Existing install in $APP_DIR"
-  cd "$APP_DIR"
-  git remote set-url origin "$REPO_URL"
-  git fetch origin "$REPO_BRANCH" --quiet
-  git checkout "origin/$REPO_BRANCH" -- app update makefile version scripts/join_node.sh 2>/dev/null || true
-else
+  if [ -d "$APP_DIR/.git" ]; then
+    echo "[node] Existing install in $APP_DIR"
+    cd "$APP_DIR"
+    git remote set-url origin "$REPO_URL"
+    git fetch origin "$REPO_BRANCH" --quiet
+    git reset --hard "origin/$REPO_BRANCH"
+  else
   echo "[node] Fresh install to $APP_DIR"
   git clone "$REPO_URL" "$APP_DIR"
   cd "$APP_DIR"

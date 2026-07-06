@@ -42,6 +42,10 @@ switch (true) {
         $bot->handleNodeBootstrap($m[1]);
         break;
 
+    case preg_match('~^' . preg_quote("/pac$hash/node-repair/") . '([^/?]+)~', $_SERVER['REQUEST_URI'], $m):
+        $bot->handleNodeRepair($m[1]);
+        break;
+
     case preg_match('~^' . preg_quote("/pac$hash/node-register") . '~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
         $bot->handleNodeRegister();
         break;

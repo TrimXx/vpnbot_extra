@@ -441,6 +441,14 @@ $i = [
         'en' => 'update',
         'ru' => 'обновить',
     ],
+    'nodes_repair_cmd' => [
+        'en' => 'repair script',
+        'ru' => 'скрипт repair',
+    ],
+    'nodes_repair_help' => [
+        'en' => 'Run once on child VPS as root if sync returns 404 (old app). Then use sync/update from parent.',
+        'ru' => 'Один раз на дочерней VPS от root, если sync даёт 404 (старый app). Потом sync/update с родителя.',
+    ],
     'nodes_upgrade_queued' => [
         'en' => 'update + config sync queued for all nodes (~1 min)',
         'ru' => 'обновление + синхронизация конфига поставлены в очередь для всех нод (~1 мин)',

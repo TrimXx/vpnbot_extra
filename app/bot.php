@@ -755,6 +755,10 @@ class Bot
                 $this->nodeJoinCommand($m[1]);
                 break;
 
+            case preg_match('~^/nodeRepair (\S+)$~', $this->input['callback'], $m):
+                $this->nodeRepairCommand($m[1]);
+                break;
+
             case preg_match('~^/nodeToggle (\S+)(?: (\d+))?$~', $this->input['callback'], $m):
                 $this->nodeToggle($m[1], (int) ($m[2] ?? 0));
                 break;

@@ -554,6 +554,72 @@ trait NodeTrait
     exit;
   }
 
+  public function handleNodeRepair(string $nodeId): void
+  {
+    if (!$this->isParentNode()) {
+      http_response_code(403);
+      header('Content-Type: text/plain; charset=utf-8');
+      echo 'parent only';
+      exit;
+    }
+    $token = trim((string) ($_GET['token'] ?? ''));
+    $pac = $this->getPacConf();
+    $nodes = $pac['child_nodes'] ?? [];
+    if ($token === '' || !is_array($nodes) || empty($nodes[$nodeId]) || !hash_equals((string) ($nodes[$nodeId]['token'] ?? ''), $token)) {
+      http_response_code(403);
+      header('Content-Type: text/plain; charset=utf-8');
+      echo 'forbidden';
+      exit;
+    }
+    $branch = $this->getNodeUpdateBranch();
+    $script = '';
+    foreach ([dirname(__DIR__, 2) . '/scripts/node_repair.sh', '/repo/scripts/node_repair.sh'] as $scriptPath) {
+      if (is_readable($scriptPath)) {
+        $script = (string) file_get_contents($scriptPath);
+        break;
+      }
+    }
+    if ($script === '') {
+      http_response_code(500);
+      header('Content-Type: text/plain; charset=utf-8');
+      echo 'repair script missing';
+      exit;
+    }
+    $header = "#!/bin/sh\nexport REPO_BRANCH=" . escapeshellarg($branch) . "\nexport APP_DIR=/root/vpnbot_extra\n";
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Content-Disposition: inline; filename="node_repair.sh"');
+    echo $header . "\n" . $script;
+    exit;
+  }
+
+  public function nodeRepairCommand(string $nodeId)
+  {
+    $pac = $this->getPacConf();
+    $node = $pac['child_nodes'][$nodeId] ?? null;
+    if (!is_array($node)) {
+      $this->nodes();
+      return;
+    }
+    $hash = $this->getHashBot();
+    $token = urlencode((string) ($node['token'] ?? ''));
+    $parentUrl = $this->getParentPublicUrl($pac);
+    $cmd = "curl -fsSL \"{$parentUrl}/pac{$hash}/node-repair/{$nodeId}?token={$token}\" | bash";
+    $text[] = $this->i18n('nodes_repair_cmd');
+    $text[] = '<code>' . htmlspecialchars($cmd, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+    $text[] = $this->i18n('nodes_repair_help');
+    $data[] = [
+      [
+        'text'          => $this->i18n('back'),
+        'callback_data' => "/nodeView $nodeId",
+      ],
+    ];
+    $body = implode("\n", $text);
+    $r = $this->update($this->input['chat'], $this->input['message_id'], $body, $data);
+    if (empty($r['ok'])) {
+      $this->send($this->input['chat'], $body, $this->input['message_id'], $data);
+    }
+  }
+
   public function handleNodeUpdateReceive(): void
   {
     $raw = file_get_contents('php://input') ?: '';
@@ -926,6 +992,10 @@ trait NodeTrait
       [
         'text'          => $this->i18n('nodes_join_cmd'),
         'callback_data' => "/nodeJoin $nodeId",
+      ],
+      [
+        'text'          => $this->i18n('nodes_repair_cmd'),
+        'callback_data' => "/nodeRepair $nodeId",
       ],
     ];
     $data[] = [
