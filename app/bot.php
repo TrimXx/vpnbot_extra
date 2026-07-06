@@ -8645,7 +8645,7 @@ DNS-over-HTTPS with IP:
             $port = 443;
         }
         $nginx = file_get_contents('/config/upstream.conf');
-        $realityBlock = "upstream reality {\n        server xr:$port;\n    }";
+        $realityBlock = "upstream reality {\n        server 10.10.0.9:$port;\n    }";
         $t = preg_replace('~upstream\s+reality\s*\{[^}]*\}~s', $realityBlock, $nginx, 1, $replaced);
         if ($t === null) {
             $t = $nginx;
