@@ -860,15 +860,19 @@ trait NodeTrait
     $data[] = [
       [
         'text'          => $this->i18n('back'),
-        'callback_data' => "/nodeView $nodeId",
+        'callback_data' => '/nodes',
       ],
     ];
-    $this->update(
+    $body = implode("\n", $text);
+    $r = $this->update(
       $this->input['chat'],
       $this->input['message_id'],
-      implode("\n", $text),
+      $body,
       $data,
     );
+    if (empty($r['ok'])) {
+      $this->send($this->input['chat'], $body, $this->input['message_id'], button: $data);
+    }
   }
 
   public function nodeToggle(string $nodeId, int $page = 0)

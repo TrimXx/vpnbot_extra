@@ -286,6 +286,31 @@ trait TransportRuntimeTrait
         return preg_replace($pattern, "\n", $template) ?? $template;
     }
 
+    /**
+     * Ensure /pac and /tlgrm bypass basic auth even when location / is ordered first.
+     */
+    protected function injectNginxPacProxyBypass(string $template): string
+    {
+        if (str_contains($template, 'location ^~ /pac')) {
+            return $template;
+        }
+        $snippet = <<<'NGINX'
+
+        location ^~ /pac {
+            access_log off;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_pass http://php;
+        }
+        location ^~ /tlgrm {
+            access_log off;
+            proxy_pass http://php;
+        }
+NGINX;
+
+        return preg_replace('~(\n        location / \{)~', $snippet . '$1', $template) ?? $template;
+    }
+
     protected function applyTransportAwareNginxTemplate(string $template, array $pac): string
     {
         $global = $this->getTransportRegistryGlobal($pac);
