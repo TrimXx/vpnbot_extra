@@ -212,7 +212,7 @@ services:
             - xr
             - hy
     wg1:
-        image: mercurykd/vpnbot-wg:1.2
+        image: mercurykd/vpnbot-wg:1.3
         build:
             dockerfile: dockerfile/wireguard.dockerfile
             args:
@@ -222,6 +222,7 @@ services:
             - ./config/wg1.conf:/etc/wireguard/wg0.conf
             - ./config/pac.json:/pac.json
             - ./scripts/start_wg.sh:/start_wg.sh
+            - ./scripts/awg_up.sh:/awg_up.sh
             - ./scripts/reset_wg.sh:/reset_wg.sh
             - ./scripts/block_torrent.sh:/block_torrent.sh
             - ./scripts/block_exchange.sh:/block_exchange.sh

@@ -1,16 +1,16 @@
 ARG image
+FROM golang:1.24.4-alpine AS awg-build
+RUN apk add --no-cache git make build-base linux-headers
+RUN git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-go.git /src/amneziawg-go \
+    && cd /src/amneziawg-go \
+    && make \
+    && DESTDIR=/out make install
+RUN git clone --depth 1 --branch v1.0.20260223 https://github.com/amnezia-vpn/amneziawg-tools.git /src/amneziawg-tools \
+    && cd /src/amneziawg-tools/src \
+    && make \
+    && DESTDIR=/out WITH_WGQUICK=yes make install
+
 FROM $image
-COPY --from=golang:1.22.3-alpine /usr/local/go/ /usr/local/go/
-ENV PATH="/usr/local/go/bin:${PATH}"
-RUN apk add --no-cache --virtual .build-deps alpine-sdk git \
-    && apk add iproute2 linux-headers iptables xtables-addons openssh wireguard-tools jq bash htop \
-    && git clone --depth 1 --branch v0.2.16 https://github.com/amnezia-vpn/amneziawg-go \
-    && git clone --depth 1 https://github.com/amnezia-vpn/amneziawg-tools.git \
-    && cd /amneziawg-go \
-    && make install \
-    && cd /amneziawg-tools/src \
-    && make install WITH_WGQUICK=yes \
-    && apk del .build-deps \
-    && rm -rf /amneziawg-go \
-    && rm -rf /amneziawg-tools \
-    && mkdir /root/.ssh
+COPY --from=awg-build /out/usr/ /usr/
+RUN apk add --no-cache iproute2 iptables xtables-addons openssh wireguard-tools jq bash htop \
+    && mkdir -p /root/.ssh /etc/amnezia/amneziawg

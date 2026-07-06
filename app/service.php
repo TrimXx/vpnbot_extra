@@ -12,6 +12,7 @@ if (!empty($c['debug'] ?? false)) {
 
 $bot = new Bot($c['key'], $i);
 
+$bot->migratePacConf();
 $bot->selfUpdate();
 $bot->ssPswdCheck();
 $bot->restartTG();
@@ -19,6 +20,7 @@ if (!empty($bot->selfupdate)) {
     $bot->offWarp();
 }
 $bot->dontshowcron = 1;
+$bot->ensureAwgServerConfig();
 $bot->sslip();
 $bot->adguardSync();
 $bot->cloakNginx();

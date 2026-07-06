@@ -10,6 +10,7 @@ if (!empty($c['debug'] ?? false)) {
 }
 
 $bot = new Bot($c['key'], $i);
+$bot->migratePacConf();
 $bot->cleanQueue();
 $bot->setwebhook();
 $bot->syncUpstreamRuntime(null, false);

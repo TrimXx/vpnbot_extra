@@ -2601,7 +2601,7 @@ class Bot
             'wg1_show_runtime_clients' => 0,
             'subscription_template_mode' => 'template',
             'amnezia' => 0,
-            'wg1_amnezia' => 0,
+            'wg1_amnezia' => 1,
             'xray' => '',
             'ad' => 0,
             'ss' => 0,
@@ -2671,6 +2671,132 @@ class Bot
         $this->invalidatePacConfCache();
 
         return file_put_contents($this->pac, json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * WG1 (AmneziaWG 2.0) is always enabled as a core service.
+     * transport_registry.global.awg remains an optional VLESS runtime subscription flag.
+     */
+    public function migratePacConf(): void
+    {
+        if (!is_readable($this->pac)) {
+            return;
+        }
+        $raw = json_decode((string) file_get_contents($this->pac), true);
+        if (!is_array($raw)) {
+            $raw = [];
+        }
+        $dirty = false;
+        if (($raw['wg1_amnezia'] ?? 0) != 1) {
+            $raw['wg1_amnezia'] = 1;
+            $dirty = true;
+        }
+        $keys = $raw['wg1_amnezia_keys'] ?? null;
+        if ($this->isLegacyAwgKeys(is_array($keys) ? $keys : null)) {
+            unset($raw['wg1_amnezia_keys']);
+            $dirty = true;
+        }
+        if ($dirty) {
+            file_put_contents(
+                $this->pac,
+                json_encode($raw, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            );
+            $this->invalidatePacConfCache();
+        }
+    }
+
+    protected function isLegacyAwgKeys(?array $keys): bool
+    {
+        if (!is_array($keys) || $keys === []) {
+            return false;
+        }
+
+        return isset($keys['Jc']) || isset($keys['Jmin']) || isset($keys['Jmax']);
+    }
+
+    /**
+     * Ensure server wg1.conf carries AWG 2.0 obfuscation params shared with all clients.
+     */
+    public function ensureAwgServerConfig(): void
+    {
+        if (empty($this->getPacConf()['wg1_amnezia'])) {
+            return;
+        }
+        $this->migrateAwgClientsToV2();
+        $ak = $this->amneziaKeys();
+        $psk = $this->presharedKey();
+        try {
+            $wg = $this->readConfig();
+        } catch (Throwable $e) {
+            error_log('ensureAwgServerConfig: readConfig failed: ' . $e->getMessage());
+            return;
+        }
+        if (empty($wg['interface']['PrivateKey'])) {
+            return;
+        }
+        $changed = false;
+        foreach (['Jc', 'Jmin', 'Jmax'] as $legacy) {
+            if (isset($wg['interface'][$legacy])) {
+                unset($wg['interface'][$legacy]);
+                $changed = true;
+            }
+        }
+        foreach ($ak as $key => $value) {
+            $value = (string) $value;
+            if (($wg['interface'][$key] ?? '') !== $value) {
+                $wg['interface'][$key] = $value;
+                $changed = true;
+            }
+        }
+        if (!isset($wg['peers']) || !is_array($wg['peers'])) {
+            $wg['peers'] = [];
+        }
+        foreach ($wg['peers'] as $i => $peer) {
+            if (!is_array($peer)) {
+                continue;
+            }
+            if (($peer['PresharedKey'] ?? '') !== $psk) {
+                $wg['peers'][$i]['PresharedKey'] = $psk;
+                $changed = true;
+            }
+        }
+        if (!$changed) {
+            return;
+        }
+        $this->restartWG($this->createConfig($wg));
+    }
+
+    protected function migrateAwgClientsToV2(): void
+    {
+        $ak = $this->amneziaKeys();
+        $psk = $this->presharedKey();
+        $clients = $this->readClients();
+        $changed = false;
+        foreach ($clients as $k => $client) {
+            if (!is_array($client)) {
+                continue;
+            }
+            $iface = $client['interface'] ?? [];
+            if (!is_array($iface)) {
+                continue;
+            }
+            if (!$this->isLegacyAwgKeys($iface) && !empty($iface['H1'])) {
+                continue;
+            }
+            foreach (['Jc', 'Jmin', 'Jmax'] as $legacy) {
+                unset($clients[$k]['interface'][$legacy]);
+            }
+            foreach ($ak as $key => $value) {
+                $clients[$k]['interface'][$key] = $value;
+            }
+            if (!empty($clients[$k]['peers'][0]) && is_array($clients[$k]['peers'][0])) {
+                $clients[$k]['peers'][0]['PresharedKey'] = $psk;
+            }
+            $changed = true;
+        }
+        if ($changed) {
+            $this->saveClients($clients);
+        }
     }
 
 
@@ -10126,15 +10252,10 @@ DNS-over-HTTPS with IP:
 
     protected function getWgStatusErrorText(): string
     {
-        $pac = $this->getPacConf();
-        $lines = [$this->i18n('wg status unavailable')];
-        if (empty($pac['wg1_amnezia']) && empty($pac['wg1'])) {
-            $lines[] = $this->i18n('wg status enable service');
-        } else {
-            $lines[] = $this->i18n('wg status restart hint');
-        }
-
-        return implode("\n\n", $lines);
+        return implode("\n\n", [
+            $this->i18n('wg status unavailable'),
+            $this->i18n('wg status restart hint'),
+        ]);
     }
 
     public function getName(array $a): string
@@ -10219,9 +10340,6 @@ DNS-over-HTTPS with IP:
             }
 
             $c[$this->getInstanceWG(1) . 'amnezia_keys'] = [
-                'Jc'   => random_int(3, 10),
-                'Jmin' => 64,
-                'Jmax' => 1000,
                 'S1'   => $s1,
                 'S2'   => $s2,
                 'S3'   => $s3,
@@ -10348,11 +10466,18 @@ DNS-over-HTTPS with IP:
                 throw new Exception("failed to write $path");
             }
             $wgType = $this->getWGType();
-            if (!empty($switch)) {
-                $this->ssh("{$this->getWGType(1)}-quick down wg0", $this->getInstanceWG(), true, '/dev/null', true);
-                $this->ssh("{$wgType}-quick up wg0", $this->getInstanceWG(), true, '/dev/null', true);
+            $instance = $this->getInstanceWG();
+            if ($this->getInstanceWG(1) && $wgType === 'awg') {
+                if (!empty($switch)) {
+                    $this->ssh('sh /awg_up.sh wg0', $instance, true, '/dev/null', true);
+                } else {
+                    $this->ssh('awg-quick strip wg0 | awg syncconf wg0 /dev/stdin', $instance, true, '/dev/null', true);
+                }
+            } elseif (!empty($switch)) {
+                $this->ssh("{$this->getWGType(1)}-quick down wg0", $instance, true, '/dev/null', true);
+                $this->ssh("{$wgType}-quick up wg0", $instance, true, '/dev/null', true);
             } else {
-                $this->ssh("$wgType-quick strip wg0 | $wgType syncconf wg0 /dev/stdin", $this->getInstanceWG(), true, '/dev/null', true);
+                $this->ssh("$wgType-quick strip wg0 | $wgType syncconf wg0 /dev/stdin", $instance, true, '/dev/null', true);
             }
             return true;
         } catch (Exception | Error $e) {

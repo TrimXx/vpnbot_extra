@@ -2,11 +2,8 @@ cat /ssh/key.pub > /root/.ssh/authorized_keys
 ssh-keygen -A
 exec /usr/sbin/sshd -D -e "$@" &
 
-if [ "$(jq -r 'if (.transport_registry.global.awg // 0) == 1 then 1 elif (.wg1 // 0) == 1 then 1 elif (.wg1_amnezia // 0) == 1 then 1 else 0 end' /pac.json)" -ne 1 ]; then
-    tail -f /dev/null
-    exit 0
-fi
-
+# WG1 (wireguard1) always runs AmneziaWG. transport_registry.global.awg only gates
+# optional VLESS runtime device profiles in subscriptions — not this container.
 INTERFACE=$(route | grep '^default' | grep -o '[^ ]*$')
 if [ "$HOSTNAME" = "wireguard1" ]
 then
@@ -38,15 +35,11 @@ else
 fi
 iptables -t nat -A POSTROUTING --destination 10.10.0.5 -j ACCEPT
 iptables -t nat -A POSTROUTING -o $INTERFACE -j MASQUERADE
-ln -s /etc/wireguard/wg0.conf /etc/amnezia/amneziawg/wg0.conf
+mkdir -p /etc/amnezia/amneziawg
+ln -sf /etc/wireguard/wg0.conf /etc/amnezia/amneziawg/wg0.conf
 if [ "$HOSTNAME" = "wireguard1" ]
 then
-    if [ "$(cat /pac.json | jq -r '.wg1_amnezia // 0')" -eq 1 ]
-    then
-        awg-quick up wg0
-    else
-        wg-quick up wg0
-    fi
+    sh /awg_up.sh wg0
     if [ "$(cat /pac.json | jq -r '.wg1_blocktorrent // 0')" -eq 1 ]
     then
         sh /block_torrent.sh

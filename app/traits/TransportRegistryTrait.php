@@ -9,6 +9,7 @@ trait TransportRegistryTrait
             'ws' => 1,
             'xhttp' => 0,
             'hysteria' => 0,
+            // Optional VLESS runtime device WG profile in subscriptions (WG1 service is always on).
             'awg' => 0,
         ];
         $legacy = (string) ($conf['transport'] ?? 'Websocket');

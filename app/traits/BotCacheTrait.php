@@ -73,10 +73,8 @@ trait BotCacheTrait
 
     public function refreshMenuServiceStatus(): array
     {
-        $conf = $this->getPacConf();
-        $wg1Amnezia = !empty($conf['wg1_amnezia']) ? '1' : '0';
         $raw = trim((string) $this->ssh(
-            "WG1_AWG='{$wg1Amnezia}' sh /scripts/menu_status.sh",
+            'sh /scripts/menu_status.sh',
             'service'
         ));
         $batch = json_decode($raw, true);

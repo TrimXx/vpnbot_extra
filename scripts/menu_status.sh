@@ -2,8 +2,6 @@
 # One-shot service health for main menu (run inside svc container via docker.sock).
 set -u
 
-WG1_AWG="${WG1_AWG:-0}"
-
 proc_match_in() {
     cname="$1"
     pattern="$2"
@@ -23,20 +21,24 @@ proc_match_in() {
     return 0
 }
 
-hysteria_running() {
-    if ! docker inspect -f '{{.State.Running}}' hy 2>/dev/null | grep -q true; then
+wg1_interface_up() {
+    if ! docker inspect -f '{{.State.Running}}' wg1 2>/dev/null | grep -q true; then
         return 1
     fi
-    if docker exec hy sh -c 'grep -aq hysteria /proc/1/cmdline 2>/dev/null' 2>/dev/null; then
-        return 0
-    fi
-    proc_match_in hy hysteria
+    docker exec wg1 sh -c '
+        if command -v awg >/dev/null 2>&1 && awg show wg0 >/dev/null 2>&1; then
+            exit 0
+        fi
+        if command -v wg >/dev/null 2>&1 && wg show wg0 >/dev/null 2>&1; then
+            exit 0
+        fi
+        ip link show wg0 2>/dev/null | grep -q "wg0"
+    ' 2>/dev/null
 }
 
-wg1_cmd="wg"
-if [ "$WG1_AWG" = "1" ]; then
-    wg1_cmd="awg"
-fi
+hysteria_running() {
+    proc_match_in hy '[h]ysteria'
+}
 
 wg1=0
 xr=0
@@ -45,19 +47,19 @@ tg=0
 cron=0
 warp="off"
 
-if proc_match_in wg1 "$wg1_cmd"; then
+if wg1_interface_up; then
     wg1=1
 fi
-if proc_match_in xr xray; then
+if proc_match_in xr '[x]ray'; then
     xr=1
 fi
 if hysteria_running; then
     hy=1
 fi
-if proc_match_in tg mtproto-proxy; then
+if proc_match_in tg 'mtproto-proxy'; then
     tg=1
 fi
-if proc_match_in svc cron.php; then
+if proc_match_in svc 'cron.php'; then
     cron=1
 fi
 

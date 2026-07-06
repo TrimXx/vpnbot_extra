@@ -725,7 +725,7 @@ trait HwidTrait
         if (!is_array($iface)) {
             return false;
         }
-        if (!empty($iface['Jc'])) {
+        if (!empty($iface['H1']) || !empty($iface['S1'])) {
             return true;
         }
 
@@ -1200,9 +1200,6 @@ trait HwidTrait
         }
 
         $amneziaMap = [
-            'Jc' => 'jc',
-            'Jmin' => 'jmin',
-            'Jmax' => 'jmax',
             'S1' => 's1',
             'S2' => 's2',
             'S3' => 's3',

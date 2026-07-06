@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -u
 
 cat /ssh/key.pub > /root/.ssh/authorized_keys
 ssh-keygen -A
@@ -8,6 +8,12 @@ exec /usr/sbin/sshd -D -e "$@" &
 if ! command -v jq >/dev/null 2>&1; then
     apk add --no-cache jq >/dev/null 2>&1 || true
 fi
+if ! command -v jq >/dev/null 2>&1; then
+    tail -f /dev/null
+    exit 0
+fi
+
+set -e
 
 if [ ! -f /config/pac.json ] && [ ! -f /pac.json ]; then
     tail -f /dev/null
