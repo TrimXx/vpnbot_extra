@@ -144,6 +144,10 @@ trait NodeTrait
     foreach ($this->getNodeSyncPacExcludeKeys() as $key) {
       unset($pac[$key]);
     }
+    $xray = $this->getXray();
+    if ($this->patchXrayInboundTransportPaths($xray)) {
+      $this->restartXray($xray);
+    }
     $payload = [
       'version' => time(),
       'pac'     => $pac,
@@ -151,7 +155,7 @@ trait NodeTrait
       'hwid'    => file_exists($this->hwid) ? (json_decode(file_get_contents($this->hwid), true) ?: []) : [],
       'mtproto' => file_get_contents('/config/mtprotosecret'),
       'mtprotodomain' => file_get_contents('/config/mtprotodomain'),
-      'xray'    => $this->getXray(),
+      'xray'    => $xray,
       'hy'      => yaml_parse_file('/config/hysteria.yaml'),
       'deny'    => file_exists('/config/deny') ? (string) file_get_contents('/config/deny') : '',
     ];
@@ -232,7 +236,9 @@ trait NodeTrait
 
     if (!empty($json['xray'])) {
       $out[] = 'update xray';
-      $this->restartXray($json['xray']);
+      $xray = is_array($json['xray']) ? $json['xray'] : [];
+      $this->patchXrayInboundTransportPaths($xray);
+      $this->restartXray($xray);
       $this->adguardXrayClients();
       $pacForRestore = is_array($importPac) ? $importPac : $this->getPacConf();
       $this->setUpstreamDomain($this->getUpstreamRealityDomain($pacForRestore, $json['xray'] ?? null));

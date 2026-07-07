@@ -1325,8 +1325,25 @@ class Bot
         // NaiveProxy container removed in v3.
     }
 
+    protected function ensureServiceCertBundle(): void
+    {
+        if (is_readable('/certs/cert_public') && is_readable('/certs/cert_private')) {
+            return;
+        }
+        if (!is_readable('/certs/self_public') || !is_readable('/certs/self_private')) {
+            return;
+        }
+        if (!is_readable('/certs/cert_public')) {
+            copy('/certs/self_public', '/certs/cert_public');
+        }
+        if (!is_readable('/certs/cert_private')) {
+            copy('/certs/self_private', '/certs/cert_private');
+        }
+    }
+
     public function restartHysteria()
     {
+        $this->ensureServiceCertBundle();
         $pac = $this->getPacConf();
         $global = $this->getTransportRegistryGlobal($pac);
         $this->ssh('pkill -f "[h]ysteria server" || true', 'hy');

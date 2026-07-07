@@ -12,6 +12,13 @@ if [ ! -s /certs/self_private ] || [ ! -s /certs/self_public ]; then
         -subj "/C=NN/ST=N/L=N/O=N/CN=$IP"
 fi
 
+if [ ! -s /certs/cert_public ] && [ -s /certs/self_public ]; then
+    cp /certs/self_public /certs/cert_public
+fi
+if [ ! -s /certs/cert_private ] && [ -s /certs/self_private ]; then
+    cp /certs/self_private /certs/cert_private
+fi
+
 mkdir -p /logs
 chmod 777 /logs
 
