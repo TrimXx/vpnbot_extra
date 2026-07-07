@@ -24,10 +24,16 @@ if (!empty($bot->selfupdate)) {
 $bot->dontshowcron = 1;
 $bot->ensureAwgServerConfig();
 $bot->syncRuntimeWgServerOnStartup();
-$bot->sslip();
+if (!$bot->isChildNode()) {
+    $bot->sslip();
+}
 $pac = $bot->getPacConf();
 if (!$bot->isChildNode() || !empty($pac['child_adguard'])) {
-    $bot->adguardSync();
+    try {
+        $bot->adguardSync();
+    } catch (Throwable $e) {
+        error_log('adguardSync: ' . $e->getMessage());
+    }
 }
 $bot->cloakNginx();
 $bot->syncUpstreamRuntime();
