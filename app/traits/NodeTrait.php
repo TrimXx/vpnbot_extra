@@ -763,13 +763,27 @@ trait NodeTrait
   {
     $clone = $proxy;
     $clone['server'] = $childDomain;
+
+    // Reality relies on nginx SNI-preread routing plus a matching fake serverName
+    // configured in the child's xray inbound. Both are still the fake domain
+    // (okcdn.ru), so only the connection target changes; SNI must stay untouched.
+    $isReality = !empty($clone['reality-opts']) && is_array($clone['reality-opts'])
+      && !empty($clone['reality-opts']['public-key']);
+    if ($isReality) {
+      return $clone;
+    }
+
     foreach (['servername', 'sni', 'peer'] as $field) {
       if (!empty($clone[$field])) {
         $clone[$field] = $childDomain;
       }
     }
-    if (!empty($clone['client-fingerprint']) && is_string($clone['client-fingerprint'])) {
-      // keep fingerprint
+
+    // Child nodes usually serve a self-signed cert for their own domain
+    // (no Let's Encrypt), so TLS transports (ws/xhttp/hysteria2) must skip
+    // verification against the child domain to stay usable.
+    if (!empty($clone['tls']) || in_array(strtolower((string) ($clone['type'] ?? '')), ['hysteria2', 'hysteria', 'trojan'], true)) {
+      $clone['skip-cert-verify'] = true;
     }
     if (!empty($clone['ws-opts']) && is_array($clone['ws-opts'])) {
       if (!empty($clone['ws-opts']['headers']) && is_array($clone['ws-opts']['headers'])) {
@@ -778,11 +792,6 @@ trait NodeTrait
             $clone['ws-opts']['headers'][$hk] = $childDomain;
           }
         }
-      }
-    }
-    if (!empty($clone['reality-opts']) && is_array($clone['reality-opts']) && !empty($clone['reality-opts']['public-key'])) {
-      if (!empty($clone['reality-opts']['servername'])) {
-        $clone['reality-opts']['servername'] = $childDomain;
       }
     }
 
