@@ -128,13 +128,12 @@ trait TransportRuntimeTrait
                 }
             }
             if ($network === 'xhttp') {
-                if (!isset($xray['inbounds'][$idx]['streamSettings']['xhttpSettings']) || !is_array($xray['inbounds'][$idx]['streamSettings']['xhttpSettings'])) {
-                    $xray['inbounds'][$idx]['streamSettings']['xhttpSettings'] = ['mode' => 'auto'];
-                    $changed = true;
-                }
-                $current = (string) ($inbound['streamSettings']['xhttpSettings']['path'] ?? '');
-                if ($current !== $expectedXh) {
-                    $xray['inbounds'][$idx]['streamSettings']['xhttpSettings']['path'] = $expectedXh;
+                $expectedXhttp = $this->getXhttpTransportSettings($hash);
+                $currentXhttp = is_array($inbound['streamSettings']['xhttpSettings'] ?? null)
+                    ? $inbound['streamSettings']['xhttpSettings']
+                    : [];
+                if ($currentXhttp !== $expectedXhttp) {
+                    $xray['inbounds'][$idx]['streamSettings']['xhttpSettings'] = $expectedXhttp;
                     $changed = true;
                 }
             }
@@ -196,7 +195,7 @@ trait TransportRuntimeTrait
             'client-fingerprint' => 'chrome',
             'xhttp-opts' => [
                 'path' => $this->getXhttpTransportPath($hash),
-                'mode' => 'packet-up',
+                'mode' => $this->getXhttpTransportMode(),
             ],
         ];
     }

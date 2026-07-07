@@ -43,10 +43,19 @@ fi
 if [ -n "${NODE_ID:-}" ]; then
   jq_script="$jq_script | .node_id = \$node_id"
 fi
+if [ -n "${NODE_TOKEN:-}" ]; then
+  jq_script="$jq_script | .node_sync_token = \$token"
+fi
+if [ -n "${NODE_DOMAIN:-}" ]; then
+  jq_script="$jq_script | .domain = \$domain | .domain_main = \$domain"
+fi
+if [ -n "${PARENT_URL:-}" ]; then
+  jq_script="$jq_script | .parent_url = \$parent"
+fi
 if ! grep -q '^NODE_ROLE=child' override.env 2>/dev/null; then
   echo 'NODE_ROLE=child' >> override.env
 fi
-jq --arg hash "${PAC_HASH:-}" --arg node_id "${NODE_ID:-}" "$jq_script" "$PAC_FILE" > "$TMP_PAC"
+jq --arg hash "${PAC_HASH:-}" --arg node_id "${NODE_ID:-}" --arg token "${NODE_TOKEN:-}" --arg domain "${NODE_DOMAIN:-}" --arg parent "${PARENT_URL:-}" "$jq_script" "$PAC_FILE" > "$TMP_PAC"
 mv "$TMP_PAC" "$PAC_FILE"
 
 MARKER='# vpnbot-pac-bypass'

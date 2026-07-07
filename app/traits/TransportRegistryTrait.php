@@ -127,6 +127,26 @@ trait TransportRegistryTrait
         return '/xh' . ($hash !== '' ? $hash : $this->getHashBot());
     }
 
+    protected function getXhttpTransportMode(): string
+    {
+        return 'packet-up';
+    }
+
+    protected function getXhttpTransportSettings(string $hash = ''): array
+    {
+        return [
+            'mode' => $this->getXhttpTransportMode(),
+            'path' => $this->getXhttpTransportPath($hash),
+            'extra' => [
+                'noSSEHeader' => true,
+                'xPaddingBytes' => '100-1000',
+                'scMaxBufferedPosts' => 30,
+                'scMaxEachPostBytes' => 1000000,
+                'scStreamUpServerSecs' => '20-80',
+            ],
+        ];
+    }
+
     protected function getHyTransportPath(string $hash = ''): string
     {
         return '/hy' . ($hash !== '' ? $hash : $this->getHashBot());
@@ -195,7 +215,7 @@ trait TransportRegistryTrait
                 'protocol' => 'vless',
                 'settings' => ['clients' => $clients, 'decryption' => 'none'],
                 'sniffing' => $sniffing,
-                'streamSettings' => ['network' => 'xhttp', 'xhttpSettings' => ['mode' => 'auto', 'path' => $this->getXhttpTransportPath($h)]],
+                'streamSettings' => ['network' => 'xhttp', 'xhttpSettings' => $this->getXhttpTransportSettings($h)],
                 'tag' => 'vless_xhttp',
             ];
         }

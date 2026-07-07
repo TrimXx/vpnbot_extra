@@ -594,6 +594,7 @@ trait NodeTrait
       exit;
     }
     $hash = $this->getHashBot();
+    $node = $nodes[$nodeId];
     $header = "#!/bin/sh\n";
     foreach ([
       'REPO_BRANCH' => $branch,
@@ -601,6 +602,9 @@ trait NodeTrait
       'BOT_KEY'     => $this->key,
       'PAC_HASH'    => $hash,
       'NODE_ID'     => $nodeId,
+      'NODE_TOKEN'  => (string) ($node['token'] ?? ''),
+      'NODE_DOMAIN' => (string) ($node['domain'] ?? ''),
+      'PARENT_URL'  => $this->getParentPublicUrl($pac),
     ] as $k => $v) {
       $header .= 'export ' . $k . '=' . escapeshellarg((string) $v) . "\n";
     }

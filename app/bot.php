@@ -10352,17 +10352,7 @@ DNS-over-HTTPS with IP:
             case 'xhttp':
                 $baseInbound['streamSettings'] = [
                     "network"       => "xhttp",
-                    "xhttpSettings" => [
-                        "mode"  => "auto",
-                        "path"  => $this->getXhttpTransportPath($h),
-                        "extra" => [
-                            "noSSEHeader"          => true,
-                            "xPaddingBytes"        => "100-1000",
-                            "scMaxBufferedPosts"   => 30,
-                            "scMaxEachPostBytes"   => 1000000,
-                            "scStreamUpServerSecs" => "20-80"
-                        ]
-                    ]
+                    "xhttpSettings" => $this->getXhttpTransportSettings($h),
                 ];
                 $x['inbounds'] = [$baseInbound, $apiInbound];
                 break;
