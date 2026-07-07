@@ -71,11 +71,13 @@ jq --arg domain "$CHILD_DOMAIN" \
    --arg node_id "$NODE_ID" \
    --arg parent "$PARENT_URL" \
    --arg token "$NODE_TOKEN" \
+   --arg hash "$PAC_HASH" \
    '.node_role = "child"
     | .node_id = $node_id
     | .parent_url = $parent
     | .node_sync_token = $token
     | .domain = $domain
+    | .hashbot = $hash
     | .child_adguard = (.child_adguard // 0)' \
    "$PAC_FILE" > "$TMP_PAC"
 mv "$TMP_PAC" "$PAC_FILE"

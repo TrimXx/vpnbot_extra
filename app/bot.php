@@ -739,6 +739,14 @@ class Bot
                 $this->mirrors((int) ($m[1] ?? 0));
                 break;
 
+            case preg_match('~^/mirrorNode (\d+)(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->mirrorNodeMenu((int) $m[1], (int) ($m[2] ?? 0));
+                break;
+
+            case preg_match('~^/mirrorSetNode (\d+) (\S+)(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->mirrorSetNode((int) $m[1], $m[2], (int) ($m[3] ?? 0));
+                break;
+
             case preg_match('~^/nodes(?: (\d+))?$~', $this->input['callback'], $m):
                 $this->nodes((int) ($m[1] ?? 0));
                 break;
@@ -2728,6 +2736,7 @@ class Bot
             'linkdomain' => '',
             'mirrorlist' => [],
             'mirror_labels' => [],
+            'mirror_nodes' => [],
             'clash_proxy_suffixes' => [
                 'ws' => '-ws',
                 'xhttp' => '-xhttp',
@@ -5025,6 +5034,9 @@ DNS-over-HTTPS with IP:
     {
         $c = $this->getPacConf();
         unset($c[$type]);
+        if ($type === 'mirrorlist') {
+            unset($c['mirror_nodes']);
+        }
         $this->setPacConf($c);
         switch ($type) {
             case 'includelist':
@@ -5340,6 +5352,7 @@ DNS-over-HTTPS with IP:
             ],
         ];
         $domains = $this->getPacConf()[$type];
+        $mirrorNodes = ($type === 'mirrorlist') ? $this->getMirrorNodesMap() : [];
         if (!empty($domains)) {
             $all     = (int) ceil(count($domains) / $this->limit);
             $page    = min($page, $all - 1);
@@ -5350,7 +5363,7 @@ DNS-over-HTTPS with IP:
                 if ($type == 'rulessetlist') {
                     $text[] = "<blockquote><code>$k</code></blockquote>";
                 }
-                $data[] = [
+                $row = [
                     [
                         'text'          => $this->i18n($v ? 'on' : 'off') . ' ' . ($basename ? basename($k) . ' ' : '') . (in_array($type, ['rulessetlist', 'packagelist', 'processlist', 'subnetlist']) ? $k : idn_to_utf8($k)),
                         'callback_data' => "/change$type " . ($i + $page * $this->limit) . " $page",
@@ -5360,6 +5373,14 @@ DNS-over-HTTPS with IP:
                         'callback_data' => "/delete$type " . ($i + $page * $this->limit) . " $page",
                     ],
                 ];
+                if ($type === 'mirrorlist') {
+                    $mode = !empty($mirrorNodes[$k]) ? '🌐' : '↪';
+                    $row[] = [
+                        'text'          => $mode . ' ' . $this->i18n('mirror_pick_node'),
+                        'callback_data' => "/mirrorNode " . ($i + $page * $this->limit) . " $page",
+                    ];
+                }
+                $data[] = $row;
                 $i++;
             }
             if ($all > 1) {
@@ -5415,6 +5436,9 @@ DNS-over-HTTPS with IP:
                         break;
                     case 'delete':
                         unset($conf[$type][$k]);
+                        if ($type === 'mirrorlist' && isset($conf['mirror_nodes']) && is_array($conf['mirror_nodes'])) {
+                            unset($conf['mirror_nodes'][$k]);
+                        }
                         break;
                 }
                 break;
@@ -8685,8 +8709,9 @@ DNS-over-HTTPS with IP:
                     $this->appendClashCompanionTransportProxy($c, $index, $client, $pac, $domain, $uid);
                     $this->appendClashSubscriptionTransportProxies($c, $index, $client, $pac, $domain);
                 }
-                $this->appendClashMirrorProxies($c, $pac);
-                $this->appendClashChildNodeProxies($c, $pac);
+                $clashBaseProxies = array_values($c['proxies']);
+                $this->appendClashMirrorProxies($c, $pac, $clashBaseProxies);
+                $this->appendClashChildNodeProxies($c, $pac, $clashBaseProxies);
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
                     $c = $this->clashRules($c, $subscriptionId, $domain);
@@ -9111,7 +9136,7 @@ DNS-over-HTTPS with IP:
     {
         $p = $this->getPacConf();
         if (!empty($p['hashbot'])) {
-            return $p['hashbot'];
+            return (string) $p['hashbot'];
         }
         $p['hashbot'] = substr(hash('sha256', $this->key), 0, 8);
         if (empty($notset)) {

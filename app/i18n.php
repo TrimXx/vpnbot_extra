@@ -342,8 +342,8 @@ $i = [
         'ru' => 'зеркала',
     ],
     'mirrors_help' => [
-        'en' => 'Dedicated forwarder VPS (iptables DNAT). Each enabled mirror clones transport + AWG proxies in subscription. SNI stays on the main domain; AWG uses UDP WG1 port on the mirror.',
-        'ru' => 'Отдельный VPS-форвардер (iptables DNAT). Каждое зеркало клонирует transport- и AWG-узлы в подписке. SNI — основной домен; AWG — UDP-порт WG1 на зеркале.',
+        'en' => 'Forwarder VPS (iptables DNAT) or child node. DNAT: clones proxies with mirror IP, parent SNI. Node: pick 🌐 node — TLS/SNI go to child domain. Node-bound mirrors replace auto node clones in subscription.',
+        'ru' => 'Форвардер (iptables DNAT) или child-нода. DNAT (↪): IP зеркала, SNI родителя. Нода (🌐): TLS/SNI на домен ноды. Зеркало с нодой заменяет авто-клоны ноды в подписке.',
     ],
     'mirrors_add_prompt' => [
         'en' => 'send mirror hosts (domain or IP, optional :port), comma-separated',
@@ -352,6 +352,22 @@ $i = [
     'mirror_iptables_script' => [
         'en' => 'iptables mirror script',
         'ru' => 'скрипт iptables для зеркала',
+    ],
+    'mirror_pick_node' => [
+        'en' => 'mirror target',
+        'ru' => 'куда ведёт зеркало',
+    ],
+    'mirror_mode_dnat' => [
+        'en' => 'DNAT forwarder',
+        'ru' => 'DNAT форвардер',
+    ],
+    'mirror_mode_node' => [
+        'en' => 'child node',
+        'ru' => 'child-нода',
+    ],
+    'mirror_current_mode' => [
+        'en' => 'mode',
+        'ru' => 'режим',
     ],
     'clash_proxy_names' => [
         'en' => 'proxy names',

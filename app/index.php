@@ -38,23 +38,23 @@ switch (true) {
         $bot->input();
         break;
 
-    case preg_match('~^' . preg_quote("/pac$hash/node-bootstrap/") . '([^/?]+)~', $_SERVER['REQUEST_URI'], $m):
+    case preg_match('~^/pac[0-9a-f]{8}/node-bootstrap/([^/?]+)~', $_SERVER['REQUEST_URI'], $m):
         $bot->handleNodeBootstrap($m[1]);
         break;
 
-    case preg_match('~^' . preg_quote("/pac$hash/node-repair/") . '([^/?]+)~', $_SERVER['REQUEST_URI'], $m):
+    case preg_match('~^/pac[0-9a-f]{8}/node-repair/([^/?]+)~', $_SERVER['REQUEST_URI'], $m):
         $bot->handleNodeRepair($m[1]);
         break;
 
-    case preg_match('~^' . preg_quote("/pac$hash/node-register") . '~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
+    case preg_match('~^/pac[0-9a-f]{8}/node-register~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
         $bot->handleNodeRegister();
         break;
 
-    case preg_match('~^' . preg_quote("/pac$hash/node-sync") . '~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
+    case preg_match('~^/pac[0-9a-f]{8}/node-sync~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
         $bot->handleNodeSyncReceive();
         break;
 
-    case preg_match('~^' . preg_quote("/pac$hash/node-update") . '~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
+    case preg_match('~^/pac[0-9a-f]{8}/node-update~', $_SERVER['REQUEST_URI']) && 'POST' === $_SERVER['REQUEST_METHOD']:
         $bot->handleNodeUpdateReceive();
         break;
 
@@ -69,12 +69,12 @@ switch (true) {
         echo "/adguard$hash/";
         break;
 
-    case preg_match('~^' . preg_quote("/pac$hash/sub") . '~', $_SERVER['REQUEST_URI']) && file_exists(__DIR__ . '/subscription.php'):
+    case preg_match('~^/pac[0-9a-f]{8}/sub~', $_SERVER['REQUEST_URI']) && file_exists(__DIR__ . '/subscription.php'):
         $bot->sub();
         exit;
 
-    // subs & pac
-    case preg_match('~^' . preg_quote("/pac$hash") . '~', $_SERVER['REQUEST_URI']):
+    // subs & pac (accept any instance hash in URL — old subscription links must keep working)
+    case preg_match('~^/pac[0-9a-f]{8}~', $_SERVER['REQUEST_URI']):
         if (!empty($t = $bot->decodePacUrlPayload(explode('/', $_SERVER['REQUEST_URI'])[2] ?? ''))) {
             $_GET = array_merge($_GET, $t);
         }

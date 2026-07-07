@@ -113,6 +113,7 @@ trait NodeTrait
       'domain_aliases',
       'mirrorlist',
       'mirror_labels',
+      'mirror_nodes',
     ];
   }
 
@@ -128,6 +129,7 @@ trait NodeTrait
       'domain_main',
       'domain_aliases',
       'child_adguard',
+      'hashbot',
     ];
   }
 
@@ -585,7 +587,17 @@ trait NodeTrait
       echo 'repair script missing';
       exit;
     }
-    $header = "#!/bin/sh\nexport REPO_BRANCH=" . escapeshellarg($branch) . "\nexport APP_DIR=/root/vpnbot_extra\n";
+    $hash = $this->getHashBot();
+    $header = "#!/bin/sh\n";
+    foreach ([
+      'REPO_BRANCH' => $branch,
+      'APP_DIR'     => '/root/vpnbot_extra',
+      'BOT_KEY'     => $this->key,
+      'PAC_HASH'    => $hash,
+      'NODE_ID'     => $nodeId,
+    ] as $k => $v) {
+      $header .= 'export ' . $k . '=' . escapeshellarg((string) $v) . "\n";
+    }
     header('Content-Type: text/plain; charset=utf-8');
     header('Content-Disposition: inline; filename="node_repair.sh"');
     echo $header . "\n" . $script;
@@ -610,14 +622,16 @@ trait NodeTrait
     $data[] = [
       [
         'text'          => $this->i18n('back'),
-        'callback_data' => "/nodeView $nodeId",
+        'callback_data' => '/nodes',
       ],
     ];
     $body = implode("\n", $text);
-    $r = $this->update($this->input['chat'], $this->input['message_id'], $body, $data);
-    if (empty($r['ok'])) {
-      $this->send($this->input['chat'], $body, $this->input['message_id'], $data);
-    }
+    $this->replyMenu(
+      $this->input['chat'],
+      (int) ($this->input['message_id'] ?? 0),
+      $body,
+      $data,
+    );
   }
 
   public function handleNodeUpdateReceive(): void
@@ -769,7 +783,7 @@ trait NodeTrait
     return $clone;
   }
 
-  protected function appendClashChildNodeProxies(array &$c, ?array $pac = null): void
+  protected function appendClashChildNodeProxies(array &$c, ?array $pac = null, ?array $baseProxies = null): void
   {
     if (!$this->isParentNode()) {
       return;
@@ -780,7 +794,9 @@ trait NodeTrait
       return;
     }
 
-    $originalProxies = array_values($c['proxies']);
+    $skipNodeIds = array_fill_keys($this->getNodeIdsBoundViaMirrors($pac), true);
+
+    $originalProxies = $baseProxies ?? array_values($c['proxies']);
     $existingNames = [];
     foreach ($c['proxies'] as $proxy) {
       if (is_array($proxy) && !empty($proxy['name'])) {
@@ -789,6 +805,9 @@ trait NodeTrait
     }
 
     foreach ($nodes as $node) {
+      if (!empty($skipNodeIds[$node['id'] ?? ''])) {
+        continue;
+      }
       foreach ($originalProxies as $proxy) {
         if (!is_array($proxy)) {
           continue;
@@ -897,10 +916,11 @@ trait NodeTrait
         'callback_data' => '/xrayCore',
       ],
     ];
-    $this->update(
+    $body = implode("\n", $text ?: ['...']);
+    $this->replyMenu(
       $this->input['chat'],
-      $this->input['message_id'],
-      implode("\n", $text ?: ['...']),
+      (int) ($this->input['message_id'] ?? 0),
+      $body,
       $data ?: false,
     );
   }
@@ -1021,15 +1041,12 @@ trait NodeTrait
       ],
     ];
     $body = implode("\n", $text);
-    $r = $this->update(
+    $this->replyMenu(
       $this->input['chat'],
-      $this->input['message_id'],
+      (int) ($this->input['message_id'] ?? 0),
       $body,
       $data,
     );
-    if (empty($r['ok'])) {
-      $this->send($this->input['chat'], $body, $this->input['message_id'], $data);
-    }
   }
 
   public function nodeJoinCommand(string $nodeId)
@@ -1055,15 +1072,12 @@ trait NodeTrait
       ],
     ];
     $body = implode("\n", $text);
-    $r = $this->update(
+    $this->replyMenu(
       $this->input['chat'],
-      $this->input['message_id'],
+      (int) ($this->input['message_id'] ?? 0),
       $body,
       $data,
     );
-    if (empty($r['ok'])) {
-      $this->send($this->input['chat'], $body, $this->input['message_id'], button: $data);
-    }
   }
 
   public function nodeToggle(string $nodeId, int $page = 0)
@@ -1099,9 +1113,9 @@ trait NodeTrait
         $fail++;
       }
     }
-    $this->update(
+    $this->replyMenu(
       $this->input['chat'],
-      $this->input['message_id'],
+      (int) ($this->input['message_id'] ?? 0),
       $this->i18n('nodes_sync_result') . ": OK=$ok FAIL=$fail",
       [[['text' => $this->i18n('back'), 'callback_data' => '/nodes']]],
     );
@@ -1129,9 +1143,9 @@ trait NodeTrait
   {
     $this->releaseSessionLock();
     $this->queueParentNodeMaintenance('both', 35);
-    $this->update(
+    $this->replyMenu(
       $this->input['chat'],
-      $this->input['message_id'],
+      (int) ($this->input['message_id'] ?? 0),
       $this->i18n('nodes_upgrade_queued'),
       [[['text' => $this->i18n('back'), 'callback_data' => '/nodes']]],
     );
