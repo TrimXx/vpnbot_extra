@@ -108,7 +108,9 @@ services:
             xr:
                 condition: service_started
         healthcheck:
-            test: ["CMD-SHELL", "nginx -t && nc -z 10.10.0.2 443"]
+            # 10.10.0.2:443 expects PROXY protocol; plain nc triggers "broken header" in error log.
+            # -q keeps nginx -t from writing "test successful" to the shared error log every interval.
+            test: ["CMD-SHELL", "nginx -t -q && nc -z 10.10.1.2 443"]
             interval: 10s
             timeout: 5s
             retries: 5

@@ -129,7 +129,7 @@ trait TransportRegistryTrait
 
     protected function getXhttpTransportMode(): string
     {
-        return 'packet-up';
+        return 'auto';
     }
 
     protected function getXhttpTransportSettings(string $hash = ''): array
