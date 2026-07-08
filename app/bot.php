@@ -9194,8 +9194,10 @@ DNS-over-HTTPS with IP:
             location
         CONF;
         $template = preg_replace('~(location /adguard.+?})\s*location~s', $r, $template);
-        $template = $this->injectNginxPacProxyBypass($template);
         $template = $this->applyTransportAwareNginxTemplate($template, $conf);
+        $template = $this->stripNginxLocationPrefix($template, '/pac' . $h);
+        $template = $this->stripNginxLocationPrefix($template, '/tlgrm');
+        $template = $this->injectNginxPacProxyBypass($template, $h);
         $this->ensurePacLocationConf();
         $this->writeAndReloadNginx($template);
         $x = $this->getXray();

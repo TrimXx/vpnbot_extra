@@ -280,7 +280,8 @@ trait TransportRuntimeTrait
 
     protected function stripNginxLocationPrefix(string $template, string $prefix): string
     {
-        $pattern = '~\n\s*location\s+' . preg_quote($prefix, '~') . '[^\n]*\n.*?\n\s*}\s*~s';
+        $quoted = preg_quote($prefix, '~');
+        $pattern = '~\n\s*location\s+' . $quoted . '\s*\{.*?\n\s*\}\s*~s';
 
         return preg_replace($pattern, "\n", $template) ?? $template;
     }
@@ -288,14 +289,16 @@ trait TransportRuntimeTrait
     /**
      * Ensure /pac and /tlgrm bypass basic auth even when location / is ordered first.
      */
-    protected function injectNginxPacProxyBypass(string $template): string
+    protected function injectNginxPacProxyBypass(string $template, string $hash = ''): string
     {
-        $snippet = <<<'NGINX'
+        $hash = $hash !== '' ? $hash : $this->getHashBot();
+        $pacPath = '/pac' . $hash;
+        $snippet = <<<NGINX
 
-        location ^~ /pac {
+        location ^~ {$pacPath} {
             access_log off;
-            proxy_set_header Host $http_host;
-            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header Host \$http_host;
+            proxy_set_header X-Real-IP \$remote_addr;
             proxy_pass http://php;
         }
         location ^~ /tlgrm {
