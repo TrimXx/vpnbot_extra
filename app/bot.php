@@ -10952,6 +10952,11 @@ DNS-over-HTTPS with IP:
 
     public function setwebhook()
     {
+        if ($this->isChildNode()) {
+            file_put_contents('/start', '1');
+
+            return;
+        }
         $ip = $this->ip;
         if (empty($ip)) {
             die('??? ????');
@@ -10971,6 +10976,9 @@ DNS-over-HTTPS with IP:
 
     public function setcommands()
     {
+        if ($this->isChildNode()) {
+            return;
+        }
         $data = [
             'commands' => [
                 [
