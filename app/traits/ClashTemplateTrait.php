@@ -4,6 +4,118 @@ require_once __DIR__ . '/../ClashTemplatePlaceholders.php';
 
 trait ClashTemplateTrait
 {
+    protected function getAllowedClientFingerprints(): array
+    {
+        return ['chrome', 'firefox', 'safari', 'ios', 'android', 'edge', '360', 'qq', 'random', 'randomized'];
+    }
+
+    protected function normalizeClientFingerprint(string $value): string
+    {
+        $fp = strtolower(trim($value));
+
+        return in_array($fp, $this->getAllowedClientFingerprints(), true) ? $fp : 'chrome';
+    }
+
+    protected function getClientFingerprint(?array $pac = null): string
+    {
+        $pac = $pac ?? $this->getPacConf();
+
+        return $this->normalizeClientFingerprint((string) ($pac['client_fingerprint'] ?? 'chrome'));
+    }
+
+    protected function getAllowedProxyGroupTypes(): array
+    {
+        return ['keep', 'select', 'url-test', 'fallback', 'load-balance'];
+    }
+
+    protected function normalizeProxyGroupType(string $value): string
+    {
+        $type = strtolower(trim($value));
+
+        return in_array($type, $this->getAllowedProxyGroupTypes(), true) ? $type : 'keep';
+    }
+
+    protected function getProxyGroupType(?array $pac = null): string
+    {
+        $pac = $pac ?? $this->getPacConf();
+
+        return $this->normalizeProxyGroupType((string) ($pac['proxy_group_type'] ?? 'keep'));
+    }
+
+    protected function getProxyGroupHealthUrl(?array $pac = null): string
+    {
+        $pac = $pac ?? $this->getPacConf();
+        $url = trim((string) ($pac['proxy_group_url'] ?? ''));
+
+        return $url !== '' ? $url : 'http://www.gstatic.com/generate_204';
+    }
+
+    protected function getProxyGroupInterval(?array $pac = null): int
+    {
+        $pac = $pac ?? $this->getPacConf();
+        $interval = (int) ($pac['proxy_group_interval'] ?? 300);
+
+        return $interval > 0 ? $interval : 300;
+    }
+
+    /**
+     * Override main Clash proxy-group type (PROXY / ~outbound~ / first group).
+     * keep = leave template as-is.
+     */
+    protected function applyProxyGroupTypeToClashConfig(array &$c, ?array $pac = null): void
+    {
+        $pac = $pac ?? $this->getPacConf();
+        $type = $this->getProxyGroupType($pac);
+        if ($type === 'keep' || empty($c['proxy-groups']) || !is_array($c['proxy-groups'])) {
+            return;
+        }
+
+        $outbound = $this->getMainClashOutboundName($pac);
+        $target = null;
+        foreach ($c['proxy-groups'] as $gk => $group) {
+            if (!is_array($group)) {
+                continue;
+            }
+            $name = (string) ($group['name'] ?? '');
+            if ($name === 'PROXY' || $name === $outbound) {
+                $target = $gk;
+                break;
+            }
+        }
+        if ($target === null) {
+            foreach ($c['proxy-groups'] as $gk => $group) {
+                if (is_array($group)) {
+                    $target = $gk;
+                    break;
+                }
+            }
+        }
+        if ($target === null) {
+            return;
+        }
+
+        $c['proxy-groups'][$target]['type'] = $type;
+        if (in_array($type, ['url-test', 'fallback', 'load-balance'], true)) {
+            if (empty($c['proxy-groups'][$target]['url'])) {
+                $c['proxy-groups'][$target]['url'] = $this->getProxyGroupHealthUrl($pac);
+            }
+            if (empty($c['proxy-groups'][$target]['interval'])) {
+                $c['proxy-groups'][$target]['interval'] = $this->getProxyGroupInterval($pac);
+            }
+            if (!array_key_exists('lazy', $c['proxy-groups'][$target])) {
+                $c['proxy-groups'][$target]['lazy'] = true;
+            }
+        } else {
+            unset(
+                $c['proxy-groups'][$target]['url'],
+                $c['proxy-groups'][$target]['interval'],
+                $c['proxy-groups'][$target]['lazy'],
+                $c['proxy-groups'][$target]['tolerance'],
+                $c['proxy-groups'][$target]['strategy']
+            );
+        }
+    }
+
     protected function isClashAutoTransportsEnabled(array $template): bool
     {
         if (!array_key_exists('auto-transports', $template)) {
@@ -159,6 +271,8 @@ trait ClashTemplateTrait
             '~proxy_suffix_ws~' => $this->getClashTransportSuffix('ws', $pac),
             '~proxy_suffix_xhttp~' => $this->getClashTransportSuffix('xhttp', $pac),
             '~proxy_suffix_hy2~' => $this->getClashTransportSuffix('hy2', $pac),
+            '~client_fingerprint~' => $this->getClientFingerprint($pac),
+            '~proxy_group_type~' => $this->getProxyGroupType($pac),
         ];
 
         return $tags;

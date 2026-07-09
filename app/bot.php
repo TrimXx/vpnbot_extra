@@ -11,6 +11,7 @@ require_once __DIR__ . '/traits/ClashTemplateTrait.php';
 require_once __DIR__ . '/traits/UserPortalTrait.php';
 require_once __DIR__ . '/traits/MirrorTrait.php';
 require_once __DIR__ . '/traits/NodeTrait.php';
+require_once __DIR__ . '/traits/LoggingTrait.php';
 
 class Bot
 {
@@ -25,6 +26,7 @@ class Bot
     use UserPortalTrait;
     use MirrorTrait;
     use NodeTrait;
+    use LoggingTrait;
 
     public $input;
     public $admin = false;
@@ -119,6 +121,9 @@ class Bot
 
     protected function logWebhook(string $stage = 'event'): void
     {
+        if (!$this->isPhpWebhookLoggingEnabled()) {
+            return;
+        }
         $kind = !empty($this->input['callback']) ? 'cb' : 'msg';
         $payload = (string) ($this->input['callback'] ?: $this->input['message']);
         $payload = preg_replace('~\s+~', ' ', substr($payload, 0, 120));
@@ -271,6 +276,18 @@ class Bot
                 break;
             case preg_match('~^/mainOutbound$~', $this->input['callback'], $m):
                 $this->mainOutbound();
+                break;
+            case preg_match('~^/proxyGroupType$~', $this->input['callback'], $m):
+                $this->proxyGroupType();
+                break;
+            case preg_match('~^/setProxyGroupType (.+)$~', $this->input['callback'], $m):
+                $this->setProxyGroupType($m[1]);
+                break;
+            case preg_match('~^/clientFingerprint$~', $this->input['callback'], $m):
+                $this->clientFingerprint();
+                break;
+            case preg_match('~^/setClientFingerprint (.+)$~', $this->input['callback'], $m):
+                $this->setClientFingerprint($m[1]);
                 break;
             case preg_match('~^/importIps (.+)$~', $this->input['callback'], $m):
                 $this->importIps($m[1]);
@@ -442,6 +459,15 @@ class Bot
                 break;
             case preg_match('~^/logs$~', $this->input['callback'], $m):
                 $this->logs();
+                break;
+            case preg_match('~^/logLevels$~', $this->input['callback'], $m):
+                $this->logLevels();
+                break;
+            case preg_match('~^/logLevelView (\S+)$~', $this->input['callback'], $m):
+                $this->logLevelView($m[1]);
+                break;
+            case preg_match('~^/setLogLevel (\S+) (\S+)$~', $this->input['callback'], $m):
+                $this->setLogLevel($m[1], $m[2]);
                 break;
             case preg_match('~^/getLog (?P<arg>\d+(?:_(?:-)?\d+)?)$~', $this->input['callback'], $m):
                 $this->getLog(...explode('_', $m['arg']));
@@ -970,64 +996,13 @@ class Bot
         $c['inbounds'][0]['settings']['clients'] = array_values($c['inbounds'][0]['settings']['clients']);
         $this->ensureUniqueXrayClientEmails($c);
         $this->applyXrayLogConfig($c);
-        foreach ($c['inbounds'] as $v) {
-            if ($v['tag'] == 'api') {
-                $inbound = true;
-                break;
-            }
-        }
-        if (empty($inbound)) {
-            $c['inbounds'][] = [
-                "listen"   => "127.0.0.1",
-                "port"     => 8080,
-                "protocol" => "dokodemo-door",
-                "settings" => [
-                    "address" => "127.0.0.1"
-                ],
-                "tag" => "api"
-            ];
-        }
-        foreach (($c['inbounds'] ?? []) as $idx => $inboundCfg) {
-            if (($inboundCfg['tag'] ?? '') !== 'api') {
-                continue;
-            }
-            $c['inbounds'][$idx]['listen'] = '127.0.0.1';
-            $c['inbounds'][$idx]['port'] = 8080;
-            $c['inbounds'][$idx]['protocol'] = 'dokodemo-door';
-            $c['inbounds'][$idx]['settings'] = [
-                'address' => '127.0.0.1',
-            ];
-            break;
-        }
-        foreach ($c['routing']['rules'] as $v) {
-            if ($v['outboundTag'] == 'api') {
-                $rule = true;
-                break;
-            }
-        }
-        if (empty($rule)) {
-            $c['routing']['rules'][] = [
-                "inboundTag"  => ["api"],
-                "outboundTag" => "api",
-                "type"        => "field"
-            ];
-        }
-        $c['api'] = [
-            'services' => ['StatsService'],
-            'tag'      => 'api'
-        ];
-        $c['policy']['system'] = [
-            "statsInboundUplink"    => true,
-            "statsInboundDownlink"  => true,
-            "statsOutboundUplink"   => true,
-            "statsOutboundDownlink" => true
-        ];
+        $this->applyXrayApiRuntimeConfig($c);
         $this->normalizeXrayStatsPolicyLevels($c);
         if (empty($norestart)) {
             $this->collectSession();
             $this->writeXrayConfig($c);
             $this->ssh('pkill xray', 'xr');
-            $this->ssh('xray run -config /xray.json > /dev/null 2>&1 &', 'xr');
+            $this->ssh($this->getXrayStartCommand(), 'xr');
             $this->scheduleNodeSync();
         } else {
             $this->writeXrayConfig($c);
@@ -1814,8 +1789,11 @@ class Bot
 
     public function cleanQueue(): void
     {
-        $r = $this->request('deleteWebhook', []);
-        $r = $this->request('getUpdates', ['offset' => -1]);
+        // Never call deleteWebhook here:
+        // 1) Parent: if setwebhook() fails afterwards, the menu dies.
+        // 2) Child: shares the same bot token — deleteWebhook would wipe the
+        //    parent's Telegram webhook on every child php/init restart.
+        // Pending updates are dropped via drop_pending_updates in setwebhook().
     }
 
     public function pinAdmin($pin, $unpin = false)
@@ -2750,6 +2728,11 @@ class Bot
             'silence' => 0,
             'reset_monthly' => 0,
             'outbound' => 'proxy',
+            'proxy_group_type' => 'keep',
+            'proxy_group_url' => 'http://www.gstatic.com/generate_204',
+            'proxy_group_interval' => 300,
+            'client_fingerprint' => 'chrome',
+            'log_levels' => [],
             'linkdomain' => '',
             'mirrorlist' => [],
             'mirror_labels' => [],
@@ -6112,15 +6095,6 @@ DNS-over-HTTPS with IP:
         }
     }
 
-    protected function applyXrayLogConfig(array &$c): void
-    {
-        $c['log'] = [
-            'access'   => 'none',
-            'error'    => '/logs/xray_error',
-            'loglevel' => 'error',
-        ];
-    }
-
     protected function normalizeXrayStatsPolicyLevels(array &$c): void
     {
         if (!isset($c['stats']) || is_array($c['stats'])) {
@@ -6779,13 +6753,14 @@ DNS-over-HTTPS with IP:
         }
 
         $clientPort = $this->getTransportClientPort((string) $transport, $pac);
+        $fp = rawurlencode($this->getClientFingerprint($pac));
 
         switch ($transport) {
             case 'reality':
                 return "vless://{$clientId}@$domain:{$clientPort}"
                     . "?security=reality"
                     . "&sni={$realitySni}"
-                    . "&fp=chrome&pbk={$pac['xray']}"
+                    . "&fp={$fp}&pbk={$pac['xray']}"
                     . "&sid={$realitySid}"
                     . "&type=tcp"
                     . "&flow=xtls-rprx-vision"
@@ -6803,7 +6778,7 @@ DNS-over-HTTPS with IP:
                     . "&mode=packet-up"
                     . "&extra=%7B%22xmux%22%3A%7B%22cMaxReuseTimes%22%3A0%2C%22maxConcurrency%22%3A%2216-32%22%2C%22maxConnections%22%3A0%2C%22hKeepAlivePeriod%22%3A0%2C%22hMaxRequestTimes%22%3A%22600-900%22%2C%22hMaxReusableSecs%22%3A%221800-3000%22%7D%2C%22headers%22%3A%7B%7D%2C%22noGRPCHeader%22%3Afalse%2C%22xPaddingBytes%22%3A%22100-1000%22%2C%22scMaxEachPostBytes%22%3A1000000%2C%22scMinPostsIntervalMs%22%3A30%2C%22scStreamUpServerSecs%22%3A%2220-80%22%7D"
                     . "&sni=$domain"
-                    . "&fp=chrome"
+                    . "&fp={$fp}"
                     . "&alpn=h2"
                     . "#{$email}";
             case 'ws':
@@ -6815,7 +6790,7 @@ DNS-over-HTTPS with IP:
                     . "&path={$wsPath}"
                     . "&security=tls"
                     . "&sni=$domain"
-                    . "&fp=chrome"
+                    . "&fp={$fp}"
                     . "&type=ws"
                     . "#{$email}";
         }
@@ -7482,6 +7457,99 @@ DNS-over-HTTPS with IP:
         $this->xray();
     }
 
+    public function clientFingerprint()
+    {
+        $this->ackCallback();
+        $pac = $this->getPacConf();
+        $current = $this->getClientFingerprint($pac);
+        $text[] = 'Menu -> ' . $this->i18n('xray') . ' -> ' . $this->i18n('client_fingerprint');
+        $text[] = $this->i18n('client_fingerprint_help');
+        $text[] = $this->i18n('current') . ': <code>' . $current . '</code>';
+
+        $data = [];
+        $row = [];
+        foreach ($this->getAllowedClientFingerprints() as $fp) {
+            $label = $fp . ($fp === $current ? ' ✓' : '');
+            $row[] = [
+                'text'          => $label,
+                'callback_data' => "/setClientFingerprint $fp",
+            ];
+            if (count($row) === 2) {
+                $data[] = $row;
+                $row = [];
+            }
+        }
+        if ($row !== []) {
+            $data[] = $row;
+        }
+        $data[] = [[
+            'text'          => $this->i18n('back'),
+            'callback_data' => '/xrayCore',
+        ]];
+        $this->replyMenu(
+            $this->input['chat'],
+            (int) ($this->input['message_id'] ?? 0),
+            implode("\n", $text),
+            $data
+        );
+    }
+
+    public function setClientFingerprint($text)
+    {
+        $pac = $this->getPacConf();
+        $pac['client_fingerprint'] = $this->normalizeClientFingerprint((string) $text);
+        $this->setPacConf($pac);
+        $this->clientFingerprint();
+    }
+
+    public function proxyGroupType()
+    {
+        $this->ackCallback();
+        $pac = $this->getPacConf();
+        $current = $this->getProxyGroupType($pac);
+        $text[] = 'Menu -> ' . $this->i18n('xray') . ' -> ' . $this->i18n('proxy_group_type');
+        $text[] = $this->i18n('proxy_group_type_help');
+        $text[] = $this->i18n('current') . ': <code>' . $current . '</code>';
+        if ($current !== 'keep') {
+            $text[] = 'url: <code>' . htmlspecialchars($this->getProxyGroupHealthUrl($pac), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+            $text[] = 'interval: <code>' . $this->getProxyGroupInterval($pac) . '</code>';
+        }
+
+        $data = [];
+        $row = [];
+        foreach ($this->getAllowedProxyGroupTypes() as $type) {
+            $row[] = [
+                'text'          => $type . ($type === $current ? ' ✓' : ''),
+                'callback_data' => "/setProxyGroupType $type",
+            ];
+            if (count($row) === 2) {
+                $data[] = $row;
+                $row = [];
+            }
+        }
+        if ($row !== []) {
+            $data[] = $row;
+        }
+        $data[] = [[
+            'text'          => $this->i18n('back'),
+            'callback_data' => '/xrayCore',
+        ]];
+        $this->replyMenu(
+            $this->input['chat'],
+            (int) ($this->input['message_id'] ?? 0),
+            implode("\n", $text),
+            $data
+        );
+    }
+
+    public function setProxyGroupType($text)
+    {
+        $pac = $this->getPacConf();
+        $pac['proxy_group_type'] = $this->normalizeProxyGroupType((string) $text);
+        $this->setPacConf($pac);
+        $this->proxyGroupType();
+    }
+
     public function getBytes($bytes)
     {
         $t = [
@@ -7635,6 +7703,8 @@ DNS-over-HTTPS with IP:
             }
         }
         $text[] = 'main outbound: ' . ($p['outbound'] ?: 'proxy');
+        $text[] = 'proxy-group type: ' . $this->getProxyGroupType($p);
+        $text[] = 'client-fingerprint: ' . $this->getClientFingerprint($p);
         $globalTransports = $this->getTransportRegistryGlobal($p);
         $text[] = 'transports: Reality=' . (int) !empty($globalTransports['reality'])
             . ' WS=' . (int) !empty($globalTransports['ws'])
@@ -7662,6 +7732,14 @@ DNS-over-HTTPS with IP:
         $data[] = [[
             'text' => $this->i18n('main outbound name: ') . ($p['outbound'] ?: 'proxy'),
             'callback_data' => '/mainOutbound',
+        ]];
+        $data[] = [[
+            'text' => $this->i18n('proxy_group_type') . ': ' . $this->getProxyGroupType($p),
+            'callback_data' => '/proxyGroupType',
+        ]];
+        $data[] = [[
+            'text' => $this->i18n('client_fingerprint') . ': ' . $this->getClientFingerprint($p),
+            'callback_data' => '/clientFingerprint',
         ]];
         $mirrorCount = count($this->getEnabledMirrors($p));
         $data[] = [[
@@ -8729,6 +8807,7 @@ DNS-over-HTTPS with IP:
                 $clashBaseProxies = array_values($c['proxies']);
                 $this->appendClashMirrorProxies($c, $pac, $clashBaseProxies);
                 $this->appendClashChildNodeProxies($c, $pac, $clashBaseProxies);
+                $this->applyProxyGroupTypeToClashConfig($c, $pac);
                 $c = $this->addClashRuleSet($c);
                 if (!empty($c['rules'])) {
                     $c = $this->clashRules($c, $subscriptionId, $domain);
@@ -9198,6 +9277,7 @@ DNS-over-HTTPS with IP:
         $template = $this->stripNginxLocationPrefix($template, '/pac' . $h);
         $template = $this->stripNginxLocationPrefix($template, '/tlgrm');
         $template = $this->injectNginxPacProxyBypass($template, $h);
+        $template = $this->applyNginxTemplateLogging($template);
         $this->ensurePacLocationConf();
         $this->writeAndReloadNginx($template);
         $x = $this->getXray();
@@ -9897,6 +9977,10 @@ DNS-over-HTTPS with IP:
         }
         $data[] = [
             [
+                'text'          => $this->i18n('log_levels'),
+                'callback_data' => '/logLevels',
+            ],
+            [
                 'text'          => $this->i18n('clean all'),
                 'callback_data' => "/cleanLog",
             ],
@@ -9921,9 +10005,15 @@ DNS-over-HTTPS with IP:
                 'callback_data' => "/menu config",
             ],
         ];
-        $this->update(
-            $this->input['chat'],
-            $this->input['message_id'],
+        $chat = $this->input['chat'] ?? null;
+        $messageId = (int) ($this->input['message_id'] ?? 0);
+        if ($chat === null || $chat === '' || $messageId <= 0) {
+            // Cron/autoclean and other non-Telegram contexts have no chat to edit.
+            return;
+        }
+        $this->replyMenu(
+            $chat,
+            $messageId,
             implode("\n", ['...']),
             $data ?: false,
         );
@@ -10963,9 +11053,10 @@ DNS-over-HTTPS with IP:
         }
         echo "$ip\n";
         var_dump($r = $this->request('setWebhook', [
-            'url'             => "https://$ip/tlgrm?k={$this->key}",
-            'certificate'     => curl_file_create('/certs/self_public'),
-            'allowed_updates' => json_encode(['*']),
+            'url'                  => "https://$ip/tlgrm?k={$this->key}",
+            'certificate'          => curl_file_create('/certs/self_public'),
+            'allowed_updates'      => json_encode(['*']),
+            'drop_pending_updates' => true,
         ]));
         if (!empty($r['result']) && $r['result'] == true) {
             file_put_contents('/start', 1);
@@ -11097,6 +11188,9 @@ DNS-over-HTTPS with IP:
 
     public function update($chat, $message_id, $text, $button = false, $reply = false, $mode = 'HTML')
     {
+        if ($chat === null || $chat === '' || (int) $message_id <= 0) {
+            return ['ok' => false, 'description' => 'missing chat/message_id'];
+        }
         if ($button) {
             $extra = ['inline_keyboard' => $button];
         }

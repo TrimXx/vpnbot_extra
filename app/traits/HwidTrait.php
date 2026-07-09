@@ -1269,6 +1269,26 @@ trait HwidTrait
             }
         }
     }
+
+    public function clearAllRuntimeWgProfiles(): int
+    {
+        $uuids = [];
+        foreach ($this->readClients() as $client) {
+            if (!is_array($client)) {
+                continue;
+            }
+            $uuid = (string) ($client['interface']['## device_uuid'] ?? '');
+            if ($uuid !== '') {
+                $uuids[$uuid] = true;
+            }
+        }
+        foreach (array_keys($uuids) as $uuid) {
+            $this->deleteDeviceWgProfileByUuid($uuid);
+        }
+
+        return count($uuids);
+    }
+
     protected function ensureRuntimeDeviceUuid(array $ownerClient, int $ownerIndex, string $hwid, int $limit): ?string
     {
         $xray = $this->getXray();

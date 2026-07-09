@@ -2,7 +2,7 @@
 
 require __DIR__ . '/timezone.php';
 require __DIR__ . '/config.php';
-if (!empty($c['debug'] ?? false)) {
+if (!empty($c['debug'] ?? false) || vpnbot_requests_logging_enabled()) {
     require __DIR__ . '/debug.php';
 }
 require __DIR__ . '/calc.php';

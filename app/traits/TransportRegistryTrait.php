@@ -185,19 +185,6 @@ trait TransportRegistryTrait
                 break;
             }
         }
-        $apiInbound = ['listen' => '127.0.0.1', 'port' => 8080, 'protocol' => 'dokodemo-door', 'settings' => ['address' => '127.0.0.1'], 'tag' => 'api'];
-        foreach (($xray['inbounds'] ?? []) as $inbound) {
-            if (($inbound['tag'] ?? '') === 'api' || ($inbound['protocol'] ?? '') === 'dokodemo-door') {
-                $apiInbound = $inbound;
-                break;
-            }
-        }
-        $apiInbound['listen'] = '127.0.0.1';
-        $apiInbound['port'] = 8080;
-        $apiInbound['protocol'] = 'dokodemo-door';
-        $apiInbound['settings'] = ['address' => '127.0.0.1'];
-        $apiInbound['tag'] = 'api';
-
         $inbounds = [];
         if (!empty($global['ws'])) {
             $inbounds[] = [
@@ -252,7 +239,6 @@ trait TransportRegistryTrait
                 'tag' => 'vless_tls',
             ];
         }
-        $inbounds[] = $apiInbound;
 
         return $inbounds;
     }

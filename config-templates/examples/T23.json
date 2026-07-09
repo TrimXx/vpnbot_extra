@@ -81,7 +81,7 @@
                 "short-id": "~short_id~"
             },
             "servername": "~server_name~",
-            "client-fingerprint": "chrome"
+            "client-fingerprint": "~client_fingerprint~"
         },
         {
             "name": "WS1",
@@ -93,7 +93,7 @@
             "udp": true,
             "tls": true,
             "servername": "~directdomain~",
-            "client-fingerprint": "chrome",
+            "client-fingerprint": "~client_fingerprint~",
             "ws-opts": {
                 "path": "~ws_path~"
             }
@@ -108,7 +108,7 @@
             "udp": true,
             "tls": true,
             "servername": "~directdomain~",
-            "client-fingerprint": "chrome",
+            "client-fingerprint": "~client_fingerprint~",
             "ws-opts": {
                 "path": "~ws_path~"
             }
@@ -124,7 +124,7 @@
             "udp": true,
             "tls": true,
             "servername": "~server_name~",
-            "client-fingerprint": "chrome",
+            "client-fingerprint": "~client_fingerprint~",
             "reality-opts": {
                 "public-key": "~public_key~",
                 "short-id": "~short_id~"
@@ -141,7 +141,7 @@
             "udp": true,
             "tls": true,
             "servername": "~server_name~",
-            "client-fingerprint": "chrome",
+            "client-fingerprint": "~client_fingerprint~",
             "reality-opts": {
                 "public-key": "~public_key~",
                 "short-id": "~short_id~"

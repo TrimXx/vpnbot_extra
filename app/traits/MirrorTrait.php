@@ -357,6 +357,7 @@ trait MirrorTrait
         $text[] = 'Menu -> ' . $this->i18n('clash_proxy_names');
         $text[] = $this->i18n('clash_proxy_names_help');
         $text[] = $this->i18n('main outbound name: ') . '<code>' . $this->getMainClashOutboundName($p) . '</code>';
+        $text[] = $this->i18n('proxy_group_type') . ': <code>' . $this->getProxyGroupType($p) . '</code>';
         $text[] = 'WS: <code>' . htmlspecialchars((string) $suffixes['ws'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
         $text[] = 'XHTTP: <code>' . htmlspecialchars((string) $suffixes['xhttp'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
         $text[] = 'HY2: <code>' . htmlspecialchars((string) $suffixes['hy2'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
@@ -365,6 +366,12 @@ trait MirrorTrait
             [
                 'text'          => $this->i18n('main outbound name: ') . $this->getMainClashOutboundName($p),
                 'callback_data' => '/mainOutbound',
+            ],
+        ];
+        $data[] = [
+            [
+                'text'          => $this->i18n('proxy_group_type') . ': ' . $this->getProxyGroupType($p),
+                'callback_data' => '/proxyGroupType',
             ],
         ];
         $data[] = [

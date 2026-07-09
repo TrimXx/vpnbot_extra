@@ -389,6 +389,34 @@ $i = [
         'en' => 'main outbound name',
         'ru' => 'имя основного прокси',
     ],
+    'client_fingerprint' => [
+        'en' => 'client fingerprint',
+        'ru' => 'client fingerprint',
+    ],
+    'client_fingerprint_help' => [
+        'en' => 'uTLS fingerprint for VLESS in Clash/Mihomo subscription (~client_fingerprint~). Used for Reality, WS, xHTTP and auto-transports.',
+        'ru' => 'uTLS fingerprint для VLESS в подписке Clash/Mihomo (~client_fingerprint~). Применяется к Reality, WS, xHTTP и auto-transports.',
+    ],
+    'proxy_group_type' => [
+        'en' => 'proxy group type',
+        'ru' => 'тип proxy-group',
+    ],
+    'proxy_group_type_help' => [
+        'en' => 'Type of the main Clash/Mihomo proxy-group (PROXY / main outbound). keep = leave template as-is. select = manual. url-test / fallback / load-balance = health-check modes (url+interval from pac or template).',
+        'ru' => 'Тип основной proxy-group в Clash/Mihomo (PROXY / main outbound). keep = как в шаблоне. select = вручную. url-test / fallback / load-balance = режимы с health-check (url+interval из pac или шаблона).',
+    ],
+    'current' => [
+        'en' => 'current',
+        'ru' => 'текущий',
+    ],
+    'log_levels' => [
+        'en' => 'log levels',
+        'ru' => 'уровни логов',
+    ],
+    'log_levels_help' => [
+        'en' => 'Choose verbosity per service. Xray REALITY debug writes handshake details to /logs/xray_reality.log (not xray_error).',
+        'ru' => 'Уровень логирования по сервисам. Xray REALITY debug пишет детали handshake в /logs/xray_reality.log (не в xray_error).',
+    ],
     'enabled' => [
         'en' => 'enabled',
         'ru' => 'включено',

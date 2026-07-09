@@ -1,29 +1,14 @@
 #!/bin/sh
-# Ad-hoc child-node transport diagnostics.
-cd /root/vpnbot_extra || exit 1
-
-echo "=== service status ==="
-docker compose ps --format '{{.Name}} {{.Status}}' 2>/dev/null
-
-echo "=== xray process ==="
-docker compose exec -T xr sh -c 'pgrep -a xray || echo NO_XRAY_PROCESS'
-
-echo "=== xray listen (8080 api / inbounds) ==="
-docker compose exec -T xr sh -c 'ss -tlnp 2>/dev/null | grep -E ":8080|:443|:2053" || netstat -tlnp 2>/dev/null | grep -E ":8080|:443|:2053" || echo NO_LISTENERS'
-
-echo "=== hysteria process ==="
-docker compose exec -T hy sh -c 'pgrep -a hysteria || echo NO_HY_PROCESS'
-
-echo "=== nginx upstream to xray (443 sni) ==="
-docker compose exec -T up sh -c 'pgrep -a nginx | head -3'
-
-echo "=== last service run marker ==="
-ls -la /start 2>/dev/null || echo NO_START_MARKER
-
-echo "=== re-run service.php (bounded) ==="
-timeout 60 docker compose exec -T php php service.php 2>&1 | tail -20 || echo "service.php exited $?"
-
-echo "=== xray process after service ==="
-docker compose exec -T xr sh -c 'pgrep -a xray || echo NO_XRAY_PROCESS'
-
-echo "DIAG_DONE"
+cd /root/vpnbot_extra
+echo "=== node VDSINA ==="
+jq '.nodes[] | select(.name=="VDSINA" or .domain=="nltest.trimx.ru")' config/pac.json
+echo "=== DNS ==="
+getent hosts nltest.trimx.ru || true
+echo "=== TCP 443 ==="
+nc -z -w5 nltest.trimx.ru 443 && echo OPEN || echo CLOSED
+echo "=== TCP 80 ==="
+nc -z -w5 nltest.trimx.ru 80 && echo OPEN || echo CLOSED
+echo "=== curl ==="
+curl -sS -o /dev/null -w "https code=%{http_code} time=%{time_total}s\n" --max-time 8 https://nltest.trimx.ru/ 2>&1 || echo curl_fail
+echo "=== parent IP ==="
+hostname -I | awk '{print $1}'

@@ -232,6 +232,16 @@ final class ClashTemplatePlaceholders
             'type' => 'string',
             'ru' => 'Суффикс имени HY2-прокси (по умолчанию -hy2).',
         ],
+        '~client_fingerprint~' => [
+            'group' => 'transports',
+            'type' => 'string',
+            'ru' => 'uTLS fingerprint для VLESS (pac.client_fingerprint): chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized.',
+        ],
+        '~proxy_group_type~' => [
+            'group' => 'client',
+            'type' => 'string',
+            'ru' => 'Тип основной proxy-group (pac.proxy_group_type): keep, select, url-test, fallback, load-balance. keep = как в шаблоне.',
+        ],
     ];
 
     public static function names(): array

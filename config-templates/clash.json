@@ -78,7 +78,7 @@
                 "short-id": "~short_id~"
             },
             "servername": "~server_name~",
-            "client-fingerprint": "chrome"
+            "client-fingerprint": "~client_fingerprint~"
         }
     ],
     "proxy-groups": [

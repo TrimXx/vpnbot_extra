@@ -65,7 +65,7 @@ trait TransportRuntimeTrait
                 'udp' => true,
                 'tls' => true,
                 'servername' => $realityServerName,
-                'client-fingerprint' => $c['proxies'][$index]['client-fingerprint'] ?? 'chrome',
+                'client-fingerprint' => $c['proxies'][$index]['client-fingerprint'] ?? $this->getClientFingerprint($pac),
                 'reality-opts' => [
                     'public-key' => $publicKey,
                     'short-id' => $realityShortId,
@@ -95,13 +95,17 @@ trait TransportRuntimeTrait
     {
         unset($c['global-client-fingerprint']);
         $this->stripClashTemplateMetaKeys($c);
+        $clashLogLevel = $this->getLogLevel('clash');
+        if ($clashLogLevel !== '') {
+            $c['log-level'] = $clashLogLevel;
+        }
         if (!empty($c['proxies']) && is_array($c['proxies'])) {
             foreach ($c['proxies'] as $idx => $proxy) {
                 if (!is_array($proxy) || (($proxy['type'] ?? '') !== 'vless')) {
                     continue;
                 }
                 if (empty($proxy['client-fingerprint'])) {
-                    $c['proxies'][$idx]['client-fingerprint'] = 'chrome';
+                    $c['proxies'][$idx]['client-fingerprint'] = $this->getClientFingerprint();
                 }
             }
         }
@@ -173,7 +177,7 @@ trait TransportRuntimeTrait
             'udp' => true,
             'tls' => true,
             'servername' => $domain,
-            'client-fingerprint' => 'chrome',
+            'client-fingerprint' => $this->getClientFingerprint($pac),
             'ws-opts' => [
                 'path' => $this->getWsTransportPath($hash),
             ],
@@ -192,7 +196,7 @@ trait TransportRuntimeTrait
             'udp' => true,
             'tls' => true,
             'servername' => $domain,
-            'client-fingerprint' => 'chrome',
+            'client-fingerprint' => $this->getClientFingerprint($pac),
             'xhttp-opts' => [
                 'path' => $this->getXhttpTransportPath($hash),
                 'mode' => $this->getXhttpTransportMode(),

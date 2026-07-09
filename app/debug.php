@@ -1,6 +1,10 @@
 <?php
 
-// Lightweight debug: log request line only (full payload logging is very slow).
+require_once __DIR__ . '/timezone.php';
+
+if (!vpnbot_requests_logging_enabled()) {
+    return;
+}
 
 $GLOBALS['debug'] = true;
 

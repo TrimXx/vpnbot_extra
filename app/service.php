@@ -6,7 +6,7 @@ require __DIR__ . '/bot.php';
 require __DIR__ . '/config.php';
 require __DIR__ . '/i18n.php';
 
-if (!empty($c['debug'] ?? false)) {
+if (!empty($c['debug'] ?? false) || vpnbot_requests_logging_enabled()) {
     require __DIR__ . '/debug.php';
 }
 
