@@ -189,6 +189,10 @@ trait BotCacheTrait
         if (empty($this->input['callback_id'])) {
             return;
         }
+        // input() already answers empty callbacks; skip duplicate unless we need text/alert.
+        if (!empty($this->callback) && ($text === null || $text === '') && !$showAlert) {
+            return;
+        }
         $this->answer($this->input['callback_id'], $text ?? '', $showAlert);
     }
 

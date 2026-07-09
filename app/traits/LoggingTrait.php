@@ -295,35 +295,60 @@ trait LoggingTrait
         $this->startAd();
     }
 
-    public function applyLoggingRuntime(): void
+    /**
+     * Apply only the runtime pieces affected by $service.
+     * PHP/clash flags need no process restart; xray/nginx/adguard do.
+     */
+    public function applyLoggingRuntime(?string $service = null): void
     {
-        try {
-            $xray = $this->getXray();
-            $this->applyXrayLogConfig($xray);
-            $this->applyXrayApiRuntimeConfig($xray);
-            $this->restartXray($xray);
-        } catch (Throwable $e) {
-            error_log('applyLoggingRuntime xray: ' . $e->getMessage());
-        }
+        $service = $service !== null ? strtolower(trim($service)) : null;
+        $touchAll = $service === null || $service === '';
+        $touchXray = $touchAll || in_array($service, [
+            'xray', 'xray_access', 'xray_api_inbound', 'xray_reality_show',
+        ], true);
+        $touchNginx = $touchAll || $service === 'nginx';
+        $touchUpstream = $touchAll || in_array($service, [
+            'nginx_upstream', 'nginx_upstream_access',
+        ], true);
+        $touchAdguard = $touchAll || $service === 'adguard';
+        // php / php_webhook / php_requests / clash: pac.json only (read at request/sub time)
 
-        try {
-            if (method_exists($this, 'cloakNginx')) {
-                $this->cloakNginx();
+        if ($touchXray) {
+            try {
+                $xray = $this->getXray();
+                $this->applyXrayLogConfig($xray);
+                $this->applyXrayApiRuntimeConfig($xray);
+                // Log-level changes must not fan out a full node sync.
+                $this->restartXray($xray, false, false);
+            } catch (Throwable $e) {
+                error_log('applyLoggingRuntime xray: ' . $e->getMessage());
             }
-        } catch (Throwable $e) {
-            error_log('applyLoggingRuntime nginx: ' . $e->getMessage());
         }
 
-        try {
-            $this->applyUpstreamLogging(true);
-        } catch (Throwable $e) {
-            error_log('applyLoggingRuntime upstream: ' . $e->getMessage());
+        if ($touchNginx) {
+            try {
+                if (method_exists($this, 'cloakNginx')) {
+                    $this->cloakNginx();
+                }
+            } catch (Throwable $e) {
+                error_log('applyLoggingRuntime nginx: ' . $e->getMessage());
+            }
         }
 
-        try {
-            $this->applyAdguardLogging();
-        } catch (Throwable $e) {
-            error_log('applyLoggingRuntime adguard: ' . $e->getMessage());
+        if ($touchUpstream) {
+            try {
+                $this->applyUpstreamLogging(true);
+            } catch (Throwable $e) {
+                error_log('applyLoggingRuntime upstream: ' . $e->getMessage());
+            }
+        }
+
+        if ($touchAdguard) {
+            try {
+                $this->applyAdguardLogging();
+            } catch (Throwable $e) {
+                error_log('applyLoggingRuntime adguard: ' . $e->getMessage());
+            }
         }
     }
 
@@ -417,7 +442,7 @@ trait LoggingTrait
         }
         $pac['log_levels'][$service] = $this->normalizeLogLevel($service, $level);
         $this->setPacConf($pac);
-        $this->applyLoggingRuntime();
+        $this->applyLoggingRuntime($service);
         $this->logLevelView($service);
     }
 }

@@ -991,7 +991,7 @@ class Bot
         }
     }
 
-    public function restartXray($c, $norestart = false)
+    public function restartXray($c, $norestart = false, bool $scheduleSync = true)
     {
         $c['inbounds'][0]['settings']['clients'] = array_values($c['inbounds'][0]['settings']['clients']);
         $this->ensureUniqueXrayClientEmails($c);
@@ -1003,7 +1003,9 @@ class Bot
             $this->writeXrayConfig($c);
             $this->ssh('pkill xray', 'xr');
             $this->ssh($this->getXrayStartCommand(), 'xr');
-            $this->scheduleNodeSync();
+            if ($scheduleSync) {
+                $this->scheduleNodeSync();
+            }
         } else {
             $this->writeXrayConfig($c);
         }
