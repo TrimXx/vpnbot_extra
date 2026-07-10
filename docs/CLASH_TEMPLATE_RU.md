@@ -24,27 +24,20 @@
 | Поле | По умолчанию | Описание |
 |------|--------------|----------|
 | `auto-transports` | `true` | `false` — бот **не** дописывает транспорты и не правит основной VLESS; в подписке только то, что описано в шаблоне (+ AWG runtime при включённом HWID WG). |
-| `vpnbot-app-groups` | — | Мета wizard: список app-групп `{name, provider, url, …}`. В итоговый YAML подписки **не** попадает. |
+| `vpnbot-app-groups` | — | Опциональная мета (не попадает в YAML подписки). Можно хранить вручную в JSON шаблона. |
 
 Пример продвинутого шаблона: `config-templates/examples/T23.json` (`auto-transports: false`).  
-Пример app-групп: `config-templates/examples/T24.json`.
+Пример app-групп (RULE-SET MRS): `config-templates/examples/T24.json`.
 
 ---
 
-## App-группы (wizard)
+## App-группы (вручную в JSON)
 
-В боте: **Xray → clash templates → template wizard** (create / clone / edit).
+В шаблоне можно добавить select-группы + `rule-providers` (MRS domain/ipcidr или yaml classical) + `RULE-SET` в `rules`.
 
-Админ вручную задаёт группы: `Name|https://…/file.mrs` (без встроенных пресетов сервисов).
+Порядок правил критичен: app RULE-SET — **сразу после** REJECT/block, **до** process/package/warp/pac/subnet/MATCH. Для таких шаблонов обычно `"add-rule-providers": false`.
 
-Wizard пишет в шаблон:
-
-- `proxy-groups` — select с членами `PROXY`, `DIRECT` (+ proxies шаблона);
-- `rule-providers` — http MRS/YAML;
-- `rules` — `RULE-SET` **сразу после** REJECT/block, **до** process/package/warp/pac/subnet/MATCH;
-- `add-rule-providers: false` — pac `rulessetlist` не вмешивается.
-
-Порядок правил критичен: первое совпадение побеждает. Домен из MRS app-группы не должен «проигрывать» общему `~pac~`.
+В меню шаблонов кнопка **назначить** открывает список подписок и ставит шаблон выбранному клиенту.
 
 ---
 
