@@ -45,7 +45,7 @@ class ClashTemplateValidator
       $errors[] = 'proxies must not be empty';
     } else {
       foreach ($template['proxies'] as $i => $proxy) {
-        if (!is_array($proxy) || self::isListArray($proxy)) {
+        if (!is_array($proxy) || ($proxy !== [] && self::isListArray($proxy))) {
           $errors[] = "proxies[$i] must be an object";
           continue;
         }
@@ -74,7 +74,7 @@ class ClashTemplateValidator
       $errors[] = 'proxy-groups must be a non-empty array';
     } else {
       foreach ($template['proxy-groups'] as $gi => $group) {
-        if (!is_array($group) || self::isListArray($group)) {
+        if (!is_array($group) || ($group !== [] && self::isListArray($group))) {
           $errors[] = "proxy-groups[$gi] must be an object";
           continue;
         }
@@ -132,12 +132,14 @@ class ClashTemplateValidator
 
     $providers = [];
     if (isset($template['rule-providers'])) {
-      if (!is_array($template['rule-providers']) || self::isListArray($template['rule-providers'])) {
+      if (!is_array($template['rule-providers'])) {
+        $errors[] = 'rule-providers must be an object when present';
+      } elseif ($template['rule-providers'] !== [] && self::isListArray($template['rule-providers'])) {
         $errors[] = 'rule-providers must be an object when present';
       } else {
         foreach ($template['rule-providers'] as $pid => $provider) {
           $pid = (string) $pid;
-          if (!is_array($provider) || self::isListArray($provider)) {
+          if (!is_array($provider) || ($provider !== [] && self::isListArray($provider))) {
             $errors[] = "rule-providers.$pid must be an object";
             continue;
           }
