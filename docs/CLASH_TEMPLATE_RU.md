@@ -182,12 +182,16 @@
 
 ## Валидация
 
-При сохранении шаблона `ClashTemplateValidator` проверяет:
+При **загрузке файла** в боте и при **Save** в web-редакторе шаблон проверяется сразу. Ошибки блокируют сохранение; warnings показываются, но не блокируют.
 
-- наличие `proxies`, группы `PROXY`;
-- дубликаты имён;
-- неизвестные плейсхолдеры (warning);
-- vless без `~uid~` (warning).
+Проверяется:
+
+- синтаксис JSON (в т.ч. типичные подсказки: trailing comma, кавычки);
+- `proxies` / `proxy-groups` (нужна группа `PROXY`, ссылки на существующие proxy/group);
+- `rule-providers` (behavior/format/url; `mrs` + `classical` — ошибка);
+- `rules`: type/action, RULE-SET → provider, `MATCH` только последним;
+- warning, если внешний RULE-SET стоит ниже `~pac~`;
+- неизвестные плейсхолдеры (warning).
 
 ---
 

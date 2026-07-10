@@ -7255,21 +7255,31 @@ DNS-over-HTTPS with IP:
             $this->send($this->input['chat'], 'empty name');
             return;
         }
-        $r    = $this->request('getFile', ['file_id' => $this->input['file_id']]);
-        $json = json_decode(file_get_contents($this->file . $r['result']['file_path']), true);
-        if ($json === false || !is_array($json)) {
-            $this->send($this->input['chat'], 'wrong format');
-            return;
-        }
+        $r = $this->request('getFile', ['file_id' => $this->input['file_id']]);
+        $raw = (string) file_get_contents($this->file . $r['result']['file_path']);
         require_once __DIR__ . '/ClashTemplateValidator.php';
-        $validation = ClashTemplateValidator::validateClashTemplate($json);
+        $validation = ClashTemplateValidator::validateClashTemplateJson($raw);
         if (!$validation['ok']) {
-            $this->send($this->input['chat'], implode("\n", $validation['errors']));
+            $this->send(
+                $this->input['chat'],
+                "Template rejected:\n" . ClashTemplateValidator::formatValidationMessage($validation),
+                $this->input['message_id']
+            );
             return;
         }
         $pac = $this->getPacConf();
-        $pac["{$type}templates"][$this->input['caption']] = $json;
+        $pac["{$type}templates"][$this->input['caption']] = $validation['data'];
         $this->setPacConf($pac);
+        if (!empty($validation['warnings'])) {
+            $this->send(
+                $this->input['chat'],
+                "Saved with warnings:\n" . ClashTemplateValidator::formatValidationMessage([
+                    'errors' => [],
+                    'warnings' => $validation['warnings'],
+                ]),
+                $this->input['message_id']
+            );
+        }
         $this->templates($type);
     }
 
@@ -7281,21 +7291,17 @@ DNS-over-HTTPS with IP:
                 'message' => 'removed',
             ];
         }
-        $decoded = json_decode($json, true);
-        if ($decoded === false || !is_array($decoded)) {
-            return [
-                'status'  => false,
-                'message' => 'wrong format',
-            ];
-        }
         require_once __DIR__ . '/ClashTemplateValidator.php';
-        $validation = ClashTemplateValidator::validateClashTemplate($decoded);
+        $validation = ClashTemplateValidator::validateClashTemplateJson((string) $json);
         if (!$validation['ok']) {
             return [
                 'status'  => false,
-                'message' => implode('; ', $validation['errors']),
+                'message' => ClashTemplateValidator::formatValidationMessage($validation),
+                'errors' => $validation['errors'],
+                'warnings' => $validation['warnings'],
             ];
         }
+        $decoded = $validation['data'];
         $pac = $this->getPacConf();
         switch ($name) {
             case 'origin':
@@ -7309,6 +7315,13 @@ DNS-over-HTTPS with IP:
         $this->setPacConf($pac);
         return [
             'status' => true,
+            'warnings' => $validation['warnings'],
+            'message' => !empty($validation['warnings'])
+                ? ClashTemplateValidator::formatValidationMessage([
+                    'errors' => [],
+                    'warnings' => $validation['warnings'],
+                ])
+                : 'ok',
         ];
     }
 
@@ -7328,9 +7341,17 @@ DNS-over-HTTPS with IP:
         }
         $origin = json_decode(file_get_contents('/config/clash.json'), true);
         require_once __DIR__ . '/ClashTemplateValidator.php';
+        if (!is_array($origin)) {
+            $this->send($this->input['chat'], 'origin is not valid JSON', $this->input['message_id']);
+            return;
+        }
         $validation = ClashTemplateValidator::validateClashTemplate($origin);
         if (!$validation['ok']) {
-            $this->send($this->input['chat'], 'Template invalid: ' . implode('; ', $validation['errors']), $this->input['message_id']);
+            $this->send(
+                $this->input['chat'],
+                'origin invalid — fix it first:' . "\n" . ClashTemplateValidator::formatValidationMessage($validation),
+                $this->input['message_id']
+            );
             return;
         }
         $pac  = $this->getPacConf();

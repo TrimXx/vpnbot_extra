@@ -130,26 +130,40 @@ switch (true) {
                                     editor.set({$t})
                                     tg.MainButton.show().setText('{$bot->i18n('save')}').onClick(function (e) {
                                         var self = this;
+                                        var raw;
+                                        try {
+                                            raw = editor.getText();
+                                            JSON.parse(raw);
+                                        } catch (err) {
+                                            tg.showAlert('JSON parse error: ' + (err && err.message ? err.message : err));
+                                            return;
+                                        }
+                                        tg.MainButton.setText('...');
                                         $.ajax({
                                             url: '/webapp$hash/save?' + tg.initData,
                                             method: 'POST',
                                             data: {
                                                 name: '$name',
                                                 type: '$type',
-                                                json: editor.getText()
+                                                json: raw
                                             },
                                             dataType: 'json'
                                         }).done(function (r) {
                                             if (r.status == true) {
+                                                if (r.warnings && r.warnings.length) {
+                                                    tg.showAlert(r.message || ('Warnings:\\n' + r.warnings.join('\\n')));
+                                                }
                                                 tg.MainButton.setText('{$bot->i18n('success')}')
                                                 setTimeout(() => {
                                                     tg.close();
                                                 }, 500);
                                             } else {
-                                                tg.MainButton.setText(r.message);
+                                                tg.showAlert(r.message || '{$bot->i18n('error')}');
+                                                tg.MainButton.setText('{$bot->i18n('save')}');
                                             }
                                         }).fail(function (r) {
-                                            tg.MainButton.setText('{$bot->i18n('error')}')
+                                            tg.showAlert('{$bot->i18n('error')}');
+                                            tg.MainButton.setText('{$bot->i18n('save')}');
                                         });
                                     });
                                 });
