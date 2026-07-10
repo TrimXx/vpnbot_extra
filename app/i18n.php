@@ -385,6 +385,90 @@ $i = [
         'en' => 'send suffixes (0 to reset). Example:',
         'ru' => 'суффиксы (0 — сброс). Пример:',
     ],
+    'clash_wizard' => [
+        'en' => 'template wizard',
+        'ru' => 'мастер шаблона',
+    ],
+    'clash_wizard_edit' => [
+        'en' => 'edit app groups',
+        'ru' => 'править app-группы',
+    ],
+    'clash_wizard_clone' => [
+        'en' => 'clone + edit',
+        'ru' => 'клон + правка',
+    ],
+    'clash_wizard_help' => [
+        'en' => "Build a Clash template with custom app proxy-groups.\nEach group: name + MRS/YAML URL. Rules go after REJECT/block, before pac/subnet.\nadd-rule-providers is set to false.",
+        'ru' => "Сборка Clash-шаблона с произвольными app proxy-groups.\nКаждая группа: имя + URL MRS/YAML. Правила — после REJECT/block, до pac/subnet.\nadd-rule-providers = false.",
+    ],
+    'clash_wizard_set_name' => [
+        'en' => 'set template name',
+        'ru' => 'имя шаблона',
+    ],
+    'clash_wizard_name_prompt' => [
+        'en' => 'send template name',
+        'ru' => 'отправьте имя шаблона',
+    ],
+    'clash_wizard_name_needed' => [
+        'en' => 'set a template name first',
+        'ru' => 'сначала задайте имя шаблона',
+    ],
+    'clash_wizard_name_invalid' => [
+        'en' => 'invalid name (letters, digits, ._- space, max 64)',
+        'ru' => 'неверное имя (буквы, цифры, ._- пробел, до 64)',
+    ],
+    'clash_wizard_name_exists' => [
+        'en' => 'template with this name already exists',
+        'ru' => 'шаблон с таким именем уже есть',
+    ],
+    'clash_wizard_add_group' => [
+        'en' => 'add app group',
+        'ru' => 'добавить app-группу',
+    ],
+    'clash_wizard_add_hint' => [
+        'en' => 'Format: Name|https://…/file.mrs',
+        'ru' => 'Формат: Name|https://…/file.mrs',
+    ],
+    'clash_wizard_group_prompt' => [
+        'en' => 'send Name|https://…/file.mrs (or Name https://…)',
+        'ru' => 'отправьте Name|https://…/file.mrs (или Name https://…)',
+    ],
+    'clash_wizard_group_invalid' => [
+        'en' => 'invalid line. Example: AppOne|https://example.com/list.mrs',
+        'ru' => 'неверная строка. Пример: AppOne|https://example.com/list.mrs',
+    ],
+    'clash_wizard_group_exists' => [
+        'en' => 'group with this name already added',
+        'ru' => 'группа с таким именем уже добавлена',
+    ],
+    'clash_app_groups' => [
+        'en' => 'app groups',
+        'ru' => 'app-группы',
+    ],
+    'clash_app_groups_empty' => [
+        'en' => 'none yet — add Name|MRS URL',
+        'ru' => 'пока пусто — добавьте Name|MRS URL',
+    ],
+    'clash_app_groups_saved' => [
+        'en' => "Saved. In the client you will see groups: %s.\nEach has PROXY / DIRECT / nodes. Domains come from the MRS URL.",
+        'ru' => "Сохранено. В клиенте появятся группы: %s.\nУ каждой — выбор PROXY / DIRECT / ноды. Домены — из MRS URL.",
+    ],
+    'clash_app_groups_saved_empty' => [
+        'en' => 'Saved. No app groups — only PROXY / template rules.',
+        'ru' => 'Сохранено. App-групп нет — только PROXY / правила шаблона.',
+    ],
+    'name' => [
+        'en' => 'name',
+        'ru' => 'имя',
+    ],
+    'mode' => [
+        'en' => 'mode',
+        'ru' => 'режим',
+    ],
+    'source' => [
+        'en' => 'source',
+        'ru' => 'источник',
+    ],
     'main outbound name: ' => [
         'en' => 'main outbound name',
         'ru' => 'имя основного прокси',

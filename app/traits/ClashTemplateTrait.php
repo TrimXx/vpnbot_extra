@@ -127,7 +127,368 @@ trait ClashTemplateTrait
 
     protected function stripClashTemplateMetaKeys(array &$c): void
     {
-        unset($c['auto-transports']);
+        unset($c['auto-transports'], $c['vpnbot-app-groups']);
+    }
+
+    protected function slugClashAppGroupProvider(string $name): string
+    {
+        $slug = strtolower(trim($name));
+        $slug = preg_replace('~[^a-z0-9]+~', '_', $slug) ?? '';
+        $slug = trim($slug, '_');
+
+        return $slug !== '' ? $slug : 'app';
+    }
+
+    /**
+     * Parse "Name|https://…/file.mrs" (pipe or whitespace-separated URL).
+     *
+     * @return array{name: string, url: string}|null
+     */
+    protected function parseClashAppGroupLine(string $line): ?array
+    {
+        $line = trim($line);
+        if ($line === '') {
+            return null;
+        }
+        if (str_contains($line, '|')) {
+            [$name, $url] = array_map('trim', explode('|', $line, 2));
+        } elseif (preg_match('~^(\S+)\s+(https?://\S+)$~i', $line, $m)) {
+            $name = $m[1];
+            $url = $m[2];
+        } else {
+            return null;
+        }
+        if ($name === '' || !preg_match('~^https?://.+\.(mrs|yaml|yml)(\?.*)?$~i', $url)) {
+            return null;
+        }
+        if (in_array(strtoupper($name), ['PROXY', 'DIRECT', 'REJECT', 'GLOBAL', 'PASS', 'MATCH'], true)) {
+            return null;
+        }
+
+        return ['name' => $name, 'url' => $url];
+    }
+
+    /**
+     * @param list<array{name: string, url: string, interval?: int, behavior?: string}> $groups
+     * @return list<array{name: string, provider: string, url: string, interval: int, behavior: string}>
+     */
+    protected function normalizeClashAppGroups(array $groups): array
+    {
+        $out = [];
+        $usedProviders = [];
+        foreach ($groups as $g) {
+            if (!is_array($g)) {
+                continue;
+            }
+            $name = trim((string) ($g['name'] ?? ''));
+            $url = trim((string) ($g['url'] ?? ''));
+            if ($name === '' || $url === '') {
+                continue;
+            }
+            $provider = trim((string) ($g['provider'] ?? ''));
+            if ($provider === '') {
+                $provider = $this->slugClashAppGroupProvider($name);
+            }
+            $base = $provider;
+            $i = 2;
+            while (isset($usedProviders[$provider])) {
+                $provider = $base . '_' . $i;
+                $i++;
+            }
+            $usedProviders[$provider] = true;
+            $format = 'mrs';
+            if (preg_match('~\.(yaml|yml)(\?.*)?$~i', $url)) {
+                $format = 'yaml';
+            }
+            $behavior = strtolower(trim((string) ($g['behavior'] ?? 'domain')));
+            if (!in_array($behavior, ['domain', 'ipcidr', 'classical'], true)) {
+                $behavior = $format === 'mrs' ? 'domain' : 'classical';
+            }
+            $interval = (int) ($g['interval'] ?? 86400);
+            if ($interval <= 0) {
+                $interval = 86400;
+            }
+            $out[] = [
+                'name' => $name,
+                'provider' => $provider,
+                'url' => $url,
+                'interval' => $interval,
+                'behavior' => $behavior,
+                'format' => $format,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<array{name: string, provider: string, url: string, interval: int, behavior: string, format?: string}>
+     */
+    protected function extractClashAppGroupsFromTemplate(array $template): array
+    {
+        $meta = $template['vpnbot-app-groups'] ?? null;
+        if (is_array($meta) && $meta !== []) {
+            return $this->normalizeClashAppGroups($meta);
+        }
+
+        return [];
+    }
+
+    /**
+     * Insert app RULE-SET rules after REJECT/block, before pac/subnet/warp/process/package/MATCH.
+     *
+     * @param list<array{name: string, provider: string, url: string, interval: int, behavior: string, format?: string}> $appGroups
+     */
+    protected function patchClashTemplateAppGroups(array $template, array $appGroups): array
+    {
+        $appGroups = $this->normalizeClashAppGroups($appGroups);
+        $template['vpnbot-app-groups'] = array_map(static function (array $g): array {
+            return [
+                'name' => $g['name'],
+                'provider' => $g['provider'],
+                'url' => $g['url'],
+                'interval' => $g['interval'],
+                'behavior' => $g['behavior'],
+            ];
+        }, $appGroups);
+
+        $appNames = [];
+        foreach ($appGroups as $g) {
+            $appNames[$g['name']] = true;
+        }
+
+        $groups = [];
+        foreach (($template['proxy-groups'] ?? []) as $group) {
+            if (!is_array($group)) {
+                continue;
+            }
+            $name = (string) ($group['name'] ?? '');
+            if ($name !== '' && isset($appNames[$name])) {
+                continue;
+            }
+            $groups[] = $group;
+        }
+
+        $members = ['PROXY', 'DIRECT'];
+        foreach (($template['proxies'] ?? []) as $proxy) {
+            $pn = trim((string) ($proxy['name'] ?? ''));
+            if ($pn !== '' && !in_array($pn, $members, true)) {
+                $members[] = $pn;
+            }
+        }
+
+        foreach ($appGroups as $g) {
+            $groups[] = [
+                'name' => $g['name'],
+                'type' => 'select',
+                'proxies' => $members,
+            ];
+        }
+        $template['proxy-groups'] = $groups;
+
+        $providers = is_array($template['rule-providers'] ?? null) ? $template['rule-providers'] : [];
+        $appProviderIds = [];
+        foreach ($appGroups as $g) {
+            $appProviderIds[$g['provider']] = true;
+            $providers[$g['provider']] = [
+                'type' => 'http',
+                'behavior' => $g['behavior'],
+                'format' => $g['format'] ?? 'mrs',
+                'url' => $g['url'],
+                'interval' => $g['interval'],
+            ];
+        }
+        $template['rule-providers'] = $providers;
+
+        $existing = is_array($template['rules'] ?? null) ? $template['rules'] : [];
+        $head = [];
+        $tail = [];
+        $matchRule = ['type' => 'MATCH', 'action' => 'DIRECT'];
+        foreach ($existing as $rule) {
+            if (!is_array($rule)) {
+                continue;
+            }
+            $type = strtoupper((string) ($rule['type'] ?? ''));
+            if ($type === 'MATCH') {
+                $matchRule = $rule;
+                continue;
+            }
+            if ($type === 'RULE-SET') {
+                $list = (string) ($rule['list'] ?? $rule['name'] ?? '');
+                $action = (string) ($rule['action'] ?? '');
+                $name = (string) ($rule['name'] ?? '');
+                if (isset($appProviderIds[$list]) || isset($appProviderIds[$name]) || isset($appNames[$action])) {
+                    continue;
+                }
+            }
+            $action = strtoupper((string) ($rule['action'] ?? ''));
+            $name = strtolower((string) ($rule['name'] ?? ''));
+            $isReject = ($action === 'REJECT' || $name === 'block');
+            if ($isReject) {
+                $head[] = $rule;
+            } else {
+                $tail[] = $rule;
+            }
+        }
+
+        $appRules = [];
+        foreach ($appGroups as $g) {
+            $appRules[] = [
+                'type' => 'RULE-SET',
+                'list' => $g['provider'],
+                'action' => $g['name'],
+                'name' => $g['provider'],
+                'interval' => $g['interval'],
+                'behavior' => $g['behavior'],
+            ];
+        }
+
+        $template['rules'] = array_merge($head, $appRules, $tail, [$matchRule]);
+        $template['add-rule-providers'] = false;
+
+        return $template;
+    }
+
+    /**
+     * Remove app groups previously stored in meta, then apply new list.
+     *
+     * @param list<array{name: string, url: string, interval?: int, behavior?: string}> $appGroups
+     */
+    protected function replaceClashTemplateAppGroups(array $template, array $appGroups): array
+    {
+        $old = $this->extractClashAppGroupsFromTemplate($template);
+        $oldNames = [];
+        $oldProviders = [];
+        foreach ($old as $g) {
+            $oldNames[$g['name']] = true;
+            $oldProviders[$g['provider']] = true;
+        }
+
+        if (!empty($template['proxy-groups']) && is_array($template['proxy-groups'])) {
+            $template['proxy-groups'] = array_values(array_filter(
+                $template['proxy-groups'],
+                static function ($group) use ($oldNames): bool {
+                    if (!is_array($group)) {
+                        return false;
+                    }
+                    $name = (string) ($group['name'] ?? '');
+
+                    return $name === '' || !isset($oldNames[$name]);
+                }
+            ));
+        }
+
+        if (!empty($template['rule-providers']) && is_array($template['rule-providers'])) {
+            foreach (array_keys($template['rule-providers']) as $key) {
+                if (isset($oldProviders[$key])) {
+                    unset($template['rule-providers'][$key]);
+                }
+            }
+        }
+
+        if (!empty($template['rules']) && is_array($template['rules'])) {
+            $template['rules'] = array_values(array_filter(
+                $template['rules'],
+                static function ($rule) use ($oldNames, $oldProviders): bool {
+                    if (!is_array($rule)) {
+                        return false;
+                    }
+                    if (strtoupper((string) ($rule['type'] ?? '')) !== 'RULE-SET') {
+                        return true;
+                    }
+                    $list = (string) ($rule['list'] ?? $rule['name'] ?? '');
+                    $action = (string) ($rule['action'] ?? '');
+                    $name = (string) ($rule['name'] ?? '');
+                    if (isset($oldProviders[$list]) || isset($oldProviders[$name]) || isset($oldNames[$action])) {
+                        return false;
+                    }
+
+                    return true;
+                }
+            ));
+        }
+
+        unset($template['vpnbot-app-groups']);
+
+        return $this->patchClashTemplateAppGroups($template, $appGroups);
+    }
+
+    /**
+     * Build a new clash template from origin + wizard options.
+     *
+     * @param list<array{name: string, url: string, interval?: int, behavior?: string}> $appGroups
+     */
+    protected function buildClashTemplateFromWizard(array $opts = []): array
+    {
+        $originPath = '/config/clash.json';
+        $base = [];
+        if (is_readable($originPath)) {
+            $decoded = json_decode((string) file_get_contents($originPath), true);
+            if (is_array($decoded)) {
+                $base = $decoded;
+            }
+        }
+        if ($base === []) {
+            $base = [
+                'proxies' => [[
+                    'name' => '~outbound~',
+                    'type' => 'vless',
+                    'server' => '~reality_server_host~',
+                    'port' => '~port_reality~',
+                    'uuid' => '~uid~',
+                    'network' => 'tcp',
+                    'udp' => true,
+                    'tls' => true,
+                ]],
+                'proxy-groups' => [[
+                    'name' => 'PROXY',
+                    'type' => 'select',
+                    'proxies' => ['~outbound~'],
+                ]],
+                'rules' => [['type' => 'MATCH', 'action' => 'DIRECT']],
+            ];
+        }
+
+        if (array_key_exists('auto-transports', $opts)) {
+            $base['auto-transports'] = !empty($opts['auto-transports']);
+        }
+        $proxyType = strtolower(trim((string) ($opts['proxy_group_type'] ?? '')));
+        if (in_array($proxyType, ['select', 'url-test', 'fallback', 'load-balance'], true)) {
+            foreach ($base['proxy-groups'] as $i => $group) {
+                if (($group['name'] ?? '') === 'PROXY') {
+                    $base['proxy-groups'][$i]['type'] = $proxyType;
+                    if (in_array($proxyType, ['url-test', 'fallback', 'load-balance'], true)) {
+                        if (empty($base['proxy-groups'][$i]['url'])) {
+                            $base['proxy-groups'][$i]['url'] = $this->getProxyGroupHealthUrl();
+                        }
+                        if (empty($base['proxy-groups'][$i]['interval'])) {
+                            $base['proxy-groups'][$i]['interval'] = $this->getProxyGroupInterval();
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        $appGroups = is_array($opts['app_groups'] ?? null) ? $opts['app_groups'] : [];
+
+        return $this->replaceClashTemplateAppGroups($base, $appGroups);
+    }
+
+    protected function formatClashAppGroupsSaveHint(array $appGroups): string
+    {
+        $names = [];
+        foreach ($this->normalizeClashAppGroups($appGroups) as $g) {
+            $names[] = $g['name'];
+        }
+        if ($names === []) {
+            return $this->i18n('clash_app_groups_saved_empty');
+        }
+
+        return sprintf(
+            $this->i18n('clash_app_groups_saved'),
+            htmlspecialchars(implode(', ', $names), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+        );
     }
 
     protected function resolveClashRealityMeta(array $xr, array $pac, string $domain): array

@@ -867,6 +867,33 @@ class Bot
             case preg_match('~^/templates (\w+)$~', $this->input['callback'], $m):
                 $this->templates($m[1]);
                 break;
+            case preg_match('~^/clashWizard(?: (\w+))?$~', $this->input['callback'], $m):
+                $this->clashWizard($m[1] ?? 'create');
+                break;
+            case preg_match('~^/clashWizardAskName$~', $this->input['callback'], $m):
+                $this->clashWizardAskName();
+                break;
+            case preg_match('~^/clashWizardEdit (.+)$~', $this->input['callback'], $m):
+                $this->clashWizardEdit($m[1]);
+                break;
+            case preg_match('~^/clashWizardClone (.+)$~', $this->input['callback'], $m):
+                $this->clashWizardClone($m[1]);
+                break;
+            case preg_match('~^/clashWizardAddGroup$~', $this->input['callback'], $m):
+                $this->clashWizardAddGroup();
+                break;
+            case preg_match('~^/clashWizardDelGroup (\d+)$~', $this->input['callback'], $m):
+                $this->clashWizardDelGroup((int) $m[1]);
+                break;
+            case preg_match('~^/clashWizardToggleAuto$~', $this->input['callback'], $m):
+                $this->clashWizardToggleAuto();
+                break;
+            case preg_match('~^/clashWizardProxyType$~', $this->input['callback'], $m):
+                $this->clashWizardCycleProxyType();
+                break;
+            case preg_match('~^/clashWizardSave(?: (1))?$~', $this->input['callback'], $m):
+                $this->clashWizardSave(!empty($m[1]));
+                break;
             case preg_match('~^/templateAdd (\w+)$~', $this->input['callback'], $m):
                 $this->templateAdd($m[1]);
                 break;
@@ -7377,6 +7404,10 @@ DNS-over-HTTPS with IP:
                 'text'          => $this->i18n('add'),
                 'callback_data' => "/templateAdd $type",
             ],
+            [
+                'text'          => $this->i18n('clash_wizard'),
+                'callback_data' => '/clashWizard create',
+            ],
         ];
         $data[] = [
             [
@@ -7397,6 +7428,7 @@ DNS-over-HTTPS with IP:
             ],
         ];
         foreach ($templates as $k => $v) {
+            $enc = base64_encode($k);
             $data[] = [
                 [
                     'text'          => $k,
@@ -7404,15 +7436,25 @@ DNS-over-HTTPS with IP:
                 ],
                 [
                     'text'          => $this->i18n('download'),
-                    'callback_data' => "/downloadTemplate $type " . base64_encode($k),
+                    'callback_data' => "/downloadTemplate $type $enc",
                 ],
                 [
                     'text'          => $this->i18n('delete'),
-                    'callback_data' => "/delTemplate $type " . base64_encode($k),
+                    'callback_data' => "/delTemplate $type $enc",
                 ],
                 [
-                    'text'          => $this->i18n($pac["default{$type}template"] == base64_encode($k) ? 'on' : 'off'),
-                    'callback_data' => "/defaultTemplate $type " . base64_encode($k),
+                    'text'          => $this->i18n($pac["default{$type}template"] == $enc ? 'on' : 'off'),
+                    'callback_data' => "/defaultTemplate $type $enc",
+                ],
+            ];
+            $data[] = [
+                [
+                    'text'          => $this->i18n('clash_wizard_edit'),
+                    'callback_data' => "/clashWizardEdit $enc",
+                ],
+                [
+                    'text'          => $this->i18n('clash_wizard_clone'),
+                    'callback_data' => "/clashWizardClone $enc",
                 ],
             ];
         }
@@ -7429,6 +7471,408 @@ DNS-over-HTTPS with IP:
             implode("\n", $text ?: ['...']),
             $data ?: false,
         );
+    }
+
+    protected function defaultClashWizardState(string $mode = 'create'): array
+    {
+        return [
+            'mode' => $mode,
+            'name' => '',
+            'source' => '',
+            'auto_transports' => true,
+            'proxy_group_type' => 'select',
+            'app_groups' => [],
+        ];
+    }
+
+    protected function getClashWizardState(): array
+    {
+        $state = $_SESSION['clash_wizard'] ?? null;
+        if (!is_array($state)) {
+            $state = $this->defaultClashWizardState();
+        }
+        $state['mode'] = (string) ($state['mode'] ?? 'create');
+        $state['name'] = (string) ($state['name'] ?? '');
+        $state['source'] = (string) ($state['source'] ?? '');
+        $state['auto_transports'] = !empty($state['auto_transports']);
+        $state['proxy_group_type'] = (string) ($state['proxy_group_type'] ?? 'select');
+        $state['app_groups'] = is_array($state['app_groups'] ?? null) ? $state['app_groups'] : [];
+
+        return $state;
+    }
+
+    protected function setClashWizardState(array $state): void
+    {
+        $_SESSION['clash_wizard'] = $state;
+    }
+
+    protected function clearClashWizardState(): void
+    {
+        unset($_SESSION['clash_wizard']);
+    }
+
+    protected function loadClashTemplateByName(string $name): ?array
+    {
+        if ($name === '' || $name === 'origin') {
+            $path = '/config/clash.json';
+            if (!is_readable($path)) {
+                return null;
+            }
+            $decoded = json_decode((string) file_get_contents($path), true);
+
+            return is_array($decoded) ? $decoded : null;
+        }
+        $pac = $this->getPacConf();
+        $tpl = $pac['clashtemplates'][$name] ?? null;
+
+        return is_array($tpl) ? $tpl : null;
+    }
+
+    public function clashWizard($mode = 'create')
+    {
+        $this->ackCallback();
+        $mode = in_array($mode, ['create', 'clone', 'edit'], true) ? $mode : 'create';
+        $state = $this->defaultClashWizardState($mode);
+        if ($mode === 'create') {
+            $state['name'] = '';
+            $state['source'] = 'origin';
+        }
+        $this->setClashWizardState($state);
+        $this->clashWizardScreen();
+    }
+
+    public function clashWizardEdit($encName)
+    {
+        $this->ackCallback();
+        $name = base64_decode((string) $encName, true);
+        if ($name === false || $name === '') {
+            $this->send($this->input['chat'], 'wrong template', $this->input['message_id']);
+            return;
+        }
+        $tpl = $this->loadClashTemplateByName($name);
+        if ($tpl === null) {
+            $this->send($this->input['chat'], 'template not found', $this->input['message_id']);
+            return;
+        }
+        $proxyType = 'select';
+        foreach (($tpl['proxy-groups'] ?? []) as $g) {
+            if (($g['name'] ?? '') === 'PROXY') {
+                $proxyType = strtolower((string) ($g['type'] ?? 'select'));
+                break;
+            }
+        }
+        if (!in_array($proxyType, ['select', 'url-test', 'fallback', 'load-balance'], true)) {
+            $proxyType = 'select';
+        }
+        $this->setClashWizardState([
+            'mode' => 'edit',
+            'name' => $name,
+            'source' => $name,
+            'auto_transports' => $this->isClashAutoTransportsEnabled($tpl),
+            'proxy_group_type' => $proxyType,
+            'app_groups' => $this->extractClashAppGroupsFromTemplate($tpl),
+        ]);
+        $this->clashWizardScreen();
+    }
+
+    public function clashWizardClone($encName)
+    {
+        $this->ackCallback();
+        $name = base64_decode((string) $encName, true);
+        if ($name === false || $name === '') {
+            $this->send($this->input['chat'], 'wrong template', $this->input['message_id']);
+            return;
+        }
+        $tpl = $this->loadClashTemplateByName($name);
+        if ($tpl === null) {
+            $this->send($this->input['chat'], 'template not found', $this->input['message_id']);
+            return;
+        }
+        $proxyType = 'select';
+        foreach (($tpl['proxy-groups'] ?? []) as $g) {
+            if (($g['name'] ?? '') === 'PROXY') {
+                $proxyType = strtolower((string) ($g['type'] ?? 'select'));
+                break;
+            }
+        }
+        if (!in_array($proxyType, ['select', 'url-test', 'fallback', 'load-balance'], true)) {
+            $proxyType = 'select';
+        }
+        $this->setClashWizardState([
+            'mode' => 'clone',
+            'name' => '',
+            'source' => $name,
+            'auto_transports' => $this->isClashAutoTransportsEnabled($tpl),
+            'proxy_group_type' => $proxyType,
+            'app_groups' => $this->extractClashAppGroupsFromTemplate($tpl),
+        ]);
+        $this->clashWizardScreen();
+    }
+
+    protected function clashWizardScreen(): void
+    {
+        $state = $this->getClashWizardState();
+        $mode = $state['mode'];
+        $text = [];
+        $text[] = 'Menu -> ' . $this->i18n('xray') . ' -> ' . $this->i18n('clash') . ' templates -> ' . $this->i18n('clash_wizard');
+        $text[] = $this->i18n('clash_wizard_help');
+        $text[] = $this->i18n('mode') . ': <code>' . htmlspecialchars($mode, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+        if ($state['name'] !== '') {
+            $text[] = $this->i18n('name') . ': <code>' . htmlspecialchars($state['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+        } elseif ($mode !== 'edit') {
+            $text[] = $this->i18n('name') . ': <i>' . $this->i18n('clash_wizard_name_needed') . '</i>';
+        }
+        if ($state['source'] !== '' && $mode !== 'create') {
+            $text[] = $this->i18n('source') . ': <code>' . htmlspecialchars($state['source'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+        }
+        $text[] = 'auto-transports: <code>' . ($state['auto_transports'] ? 'true' : 'false') . '</code>';
+        $text[] = 'PROXY type: <code>' . htmlspecialchars($state['proxy_group_type'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>';
+        $text[] = '';
+        $text[] = '<b>' . $this->i18n('clash_app_groups') . '</b>';
+        if ($state['app_groups'] === []) {
+            $text[] = '<i>' . $this->i18n('clash_app_groups_empty') . '</i>';
+        } else {
+            foreach ($state['app_groups'] as $i => $g) {
+                $n = htmlspecialchars((string) ($g['name'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $u = htmlspecialchars((string) ($g['url'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $text[] = ($i + 1) . '. <code>' . $n . '</code> → <code>' . $u . '</code>';
+            }
+        }
+        $text[] = '';
+        $text[] = $this->i18n('clash_wizard_add_hint');
+
+        $data = [];
+        if ($mode !== 'edit') {
+            $data[] = [[
+                'text' => $this->i18n('clash_wizard_set_name'),
+                'callback_data' => '/clashWizardAskName',
+            ]];
+        }
+        $data[] = [
+            [
+                'text' => 'auto-transports: ' . ($state['auto_transports'] ? 'ON' : 'OFF'),
+                'callback_data' => '/clashWizardToggleAuto',
+            ],
+            [
+                'text' => 'PROXY: ' . $state['proxy_group_type'],
+                'callback_data' => '/clashWizardProxyType',
+            ],
+        ];
+        $data[] = [[
+            'text' => $this->i18n('clash_wizard_add_group'),
+            'callback_data' => '/clashWizardAddGroup',
+        ]];
+        foreach ($state['app_groups'] as $i => $g) {
+            $label = (string) ($g['name'] ?? ('#' . ($i + 1)));
+            $data[] = [[
+                'text' => '✕ ' . $label,
+                'callback_data' => '/clashWizardDelGroup ' . $i,
+            ]];
+        }
+        if ($state['name'] !== '') {
+            $data[] = [
+                [
+                    'text' => $this->i18n('save'),
+                    'callback_data' => '/clashWizardSave',
+                ],
+                [
+                    'text' => $this->i18n('save') . ' + default',
+                    'callback_data' => '/clashWizardSave 1',
+                ],
+            ];
+        }
+        $data[] = [[
+            'text' => $this->i18n('back'),
+            'callback_data' => '/templates clash',
+        ]];
+
+        $this->replyMenu(
+            $this->input['chat'],
+            (int) ($this->input['message_id'] ?? 0),
+            implode("\n", $text),
+            $data
+        );
+    }
+
+    public function clashWizardAskName()
+    {
+        $this->ackCallback();
+        $r = $this->send(
+            $this->input['chat'],
+            '@' . $this->input['username'] . ' ' . $this->i18n('clash_wizard_name_prompt'),
+            $this->input['message_id'],
+            reply: $this->i18n('clash_wizard_name_prompt'),
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'start_callback' => $this->input['callback_id'],
+            'callback' => 'clashWizardSetName',
+            'args' => [],
+        ];
+    }
+
+    public function clashWizardSetName($text)
+    {
+        $name = trim((string) $text);
+        if ($name === '' || preg_match('~[^\w.\- ]~u', $name) || strlen($name) > 64) {
+            $this->send($this->input['chat'], $this->i18n('clash_wizard_name_invalid'), $this->input['message_id']);
+            $this->clashWizardScreen();
+            return;
+        }
+        $state = $this->getClashWizardState();
+        if ($state['mode'] === 'edit') {
+            $this->clashWizardScreen();
+            return;
+        }
+        $pac = $this->getPacConf();
+        if (!empty($pac['clashtemplates'][$name]) && $state['mode'] === 'create') {
+            $this->send($this->input['chat'], $this->i18n('clash_wizard_name_exists'), $this->input['message_id']);
+            $this->clashWizardScreen();
+            return;
+        }
+        $state['name'] = $name;
+        $this->setClashWizardState($state);
+        $this->clashWizardScreen();
+    }
+
+    public function clashWizardToggleAuto()
+    {
+        $this->ackCallback();
+        $state = $this->getClashWizardState();
+        $state['auto_transports'] = empty($state['auto_transports']);
+        $this->setClashWizardState($state);
+        $this->clashWizardScreen();
+    }
+
+    public function clashWizardCycleProxyType()
+    {
+        $this->ackCallback();
+        $types = ['select', 'url-test', 'fallback', 'load-balance'];
+        $state = $this->getClashWizardState();
+        $cur = (string) ($state['proxy_group_type'] ?? 'select');
+        $idx = array_search($cur, $types, true);
+        $state['proxy_group_type'] = $types[($idx === false ? 0 : $idx + 1) % count($types)];
+        $this->setClashWizardState($state);
+        $this->clashWizardScreen();
+    }
+
+    public function clashWizardAddGroup()
+    {
+        $this->ackCallback();
+        $r = $this->send(
+            $this->input['chat'],
+            '@' . $this->input['username'] . ' ' . $this->i18n('clash_wizard_group_prompt'),
+            $this->input['message_id'],
+            reply: $this->i18n('clash_wizard_group_prompt'),
+        );
+        $_SESSION['reply'][$r['result']['message_id']] = [
+            'start_message' => $this->input['message_id'],
+            'start_callback' => $this->input['callback_id'],
+            'callback' => 'clashWizardAddGroupLine',
+            'args' => [],
+        ];
+    }
+
+    public function clashWizardAddGroupLine($text)
+    {
+        $parsed = $this->parseClashAppGroupLine((string) $text);
+        if ($parsed === null) {
+            $this->send($this->input['chat'], $this->i18n('clash_wizard_group_invalid'), $this->input['message_id']);
+            $this->clashWizardScreen();
+            return;
+        }
+        $state = $this->getClashWizardState();
+        foreach ($state['app_groups'] as $g) {
+            if (strcasecmp((string) ($g['name'] ?? ''), $parsed['name']) === 0) {
+                $this->send($this->input['chat'], $this->i18n('clash_wizard_group_exists'), $this->input['message_id']);
+                $this->clashWizardScreen();
+                return;
+            }
+        }
+        $state['app_groups'][] = $parsed;
+        $this->setClashWizardState($state);
+        $this->clashWizardScreen();
+    }
+
+    public function clashWizardDelGroup(int $index)
+    {
+        $this->ackCallback();
+        $state = $this->getClashWizardState();
+        if (isset($state['app_groups'][$index])) {
+            array_splice($state['app_groups'], $index, 1);
+            $this->setClashWizardState($state);
+        }
+        $this->clashWizardScreen();
+    }
+
+    public function clashWizardSave(bool $asDefault = false)
+    {
+        $this->ackCallback();
+        $state = $this->getClashWizardState();
+        $mode = $state['mode'];
+        $name = trim((string) $state['name']);
+        if ($name === '') {
+            $this->send($this->input['chat'], $this->i18n('clash_wizard_name_needed'), $this->input['message_id']);
+            $this->clashWizardScreen();
+            return;
+        }
+
+        if ($mode === 'edit' || $mode === 'clone') {
+            $base = $this->loadClashTemplateByName((string) $state['source']);
+            if ($base === null) {
+                $this->send($this->input['chat'], 'template not found', $this->input['message_id']);
+                return;
+            }
+            $base['auto-transports'] = !empty($state['auto_transports']);
+            $proxyType = strtolower((string) ($state['proxy_group_type'] ?? 'select'));
+            if (in_array($proxyType, ['select', 'url-test', 'fallback', 'load-balance'], true)) {
+                foreach ($base['proxy-groups'] as $i => $group) {
+                    if (($group['name'] ?? '') === 'PROXY') {
+                        $base['proxy-groups'][$i]['type'] = $proxyType;
+                        if (in_array($proxyType, ['url-test', 'fallback', 'load-balance'], true)) {
+                            if (empty($base['proxy-groups'][$i]['url'])) {
+                                $base['proxy-groups'][$i]['url'] = $this->getProxyGroupHealthUrl();
+                            }
+                            if (empty($base['proxy-groups'][$i]['interval'])) {
+                                $base['proxy-groups'][$i]['interval'] = $this->getProxyGroupInterval();
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+            $tpl = $this->replaceClashTemplateAppGroups($base, $state['app_groups']);
+        } else {
+            $tpl = $this->buildClashTemplateFromWizard([
+                'auto-transports' => !empty($state['auto_transports']),
+                'proxy_group_type' => $state['proxy_group_type'],
+                'app_groups' => $state['app_groups'],
+            ]);
+        }
+
+        require_once __DIR__ . '/ClashTemplateValidator.php';
+        $validation = ClashTemplateValidator::validateClashTemplate($tpl);
+        if (!$validation['ok']) {
+            $this->send($this->input['chat'], implode("\n", $validation['errors']), $this->input['message_id']);
+            $this->clashWizardScreen();
+            return;
+        }
+
+        $pac = $this->getPacConf();
+        if ($mode === 'create' && !empty($pac['clashtemplates'][$name])) {
+            $this->send($this->input['chat'], $this->i18n('clash_wizard_name_exists'), $this->input['message_id']);
+            $this->clashWizardScreen();
+            return;
+        }
+        $pac['clashtemplates'][$name] = $tpl;
+        if ($asDefault) {
+            $pac['defaultclashtemplate'] = base64_encode($name);
+        }
+        $this->setPacConf($pac);
+        $hint = $this->formatClashAppGroupsSaveHint($state['app_groups']);
+        $this->clearClashWizardState();
+        $this->send($this->input['chat'], $hint, $this->input['message_id']);
+        $this->templates('clash');
     }
 
     public function mainOutbound()
@@ -8879,13 +9323,23 @@ DNS-over-HTTPS with IP:
                             case 'reject':
                             case 'REJECT':
                                 array_unshift($c['rules'], [
-                                    'RULE-SET', $url, strtoupper($type)
+                                    'RULE-SET', $url, 'REJECT'
                                 ]);
                                 break;
 
-                            default:
+                            case 'direct':
+                            case 'DIRECT':
+                            case 'proxy':
+                            case 'PROXY':
                                 array_splice($c['rules'], count($c['rules']) - 1, 0, [[
                                     'RULE-SET', $url, strtoupper($type)
+                                ]]);
+                                break;
+
+                            default:
+                                // Custom proxy-group name — keep original case (YouTube ≠ YOUTUBE).
+                                array_splice($c['rules'], count($c['rules']) - 1, 0, [[
+                                    'RULE-SET', $url, $type
                                 ]]);
                                 break;
                         }
@@ -8956,25 +9410,53 @@ DNS-over-HTTPS with IP:
     {
         $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
         $hash   = $this->getHashBot();
+        $tmp = [];
+        if (!isset($c['rule-providers']) || !is_array($c['rule-providers'])) {
+            $c['rule-providers'] = [];
+        }
         foreach ($c['rules'] as $v) {
+            if (!is_array($v)) {
+                continue;
+            }
             if (array_key_exists('list', $v)) {
-                if ($v['type'] == 'RULE-SET') {
-                    if (!empty($_GET['r']) && $v['name'] == $_GET['r']) {
-                        $this->emitClashRuleProviderYaml((string) $v['name'], $v['list'] ?? []);
+                if (($v['type'] ?? '') == 'RULE-SET') {
+                    $list = $v['list'] ?? null;
+                    $ruleName = (string) ($v['name'] ?? '');
+                    // External MRS/YAML provider: list is provider id string, keep existing rule-providers entry.
+                    if (is_string($list) && $list !== '' && !is_array($list)) {
+                        $providerId = $list;
+                        if (empty($c['rule-providers'][$providerId]) && !empty($v['url'])) {
+                            $format = 'mrs';
+                            if (preg_match('~\.(yaml|yml)(\?.*)?$~i', (string) $v['url'])) {
+                                $format = 'yaml';
+                            }
+                            $c['rule-providers'][$providerId] = [
+                                'type'     => 'http',
+                                'url'      => (string) $v['url'],
+                                'interval' => (int) ($v['interval'] ?? 86400),
+                                'behavior' => (string) ($v['behavior'] ?? 'domain'),
+                                'format'   => $format,
+                            ];
+                        }
+                        $tmp[] = "RULE-SET, {$providerId}, {$v['action']}";
+                        continue;
                     }
-                    $c['rule-providers'][$v['name']] = [
+                    if (!empty($_GET['r']) && $ruleName == $_GET['r']) {
+                        $this->emitClashRuleProviderYaml($ruleName, is_array($list) ? $list : []);
+                    }
+                    $c['rule-providers'][$ruleName] = [
                         'type'     => 'http',
                         'url'      => $this->buildPacUrl($scheme, $domain, $hash, [
                             'h' => $hash,
                             't' => 'cl',
                             's' => $subscriptionId,
-                            'r' => $v['name'],
+                            'r' => $ruleName,
                         ]),
                         'interval' => $v['interval'],
                         'behavior' => $v['behavior'],
                         'format'   => 'yaml',
                     ];
-                    $tmp[] = "{$v['type']}, {$v['name']}, {$v['action']}";
+                    $tmp[] = "{$v['type']}, {$ruleName}, {$v['action']}";
                 } else {
                     if (!empty($v['list'])) {
                         foreach ($v['list'] as $j) {

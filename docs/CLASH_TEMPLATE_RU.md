@@ -24,8 +24,27 @@
 | Поле | По умолчанию | Описание |
 |------|--------------|----------|
 | `auto-transports` | `true` | `false` — бот **не** дописывает транспорты и не правит основной VLESS; в подписке только то, что описано в шаблоне (+ AWG runtime при включённом HWID WG). |
+| `vpnbot-app-groups` | — | Мета wizard: список app-групп `{name, provider, url, …}`. В итоговый YAML подписки **не** попадает. |
 
-Пример продвинутого шаблона: `config-templates/examples/T23.json` (`auto-transports: false`).
+Пример продвинутого шаблона: `config-templates/examples/T23.json` (`auto-transports: false`).  
+Пример app-групп: `config-templates/examples/T24.json`.
+
+---
+
+## App-группы (wizard)
+
+В боте: **Xray → clash templates → template wizard** (create / clone / edit).
+
+Админ вручную задаёт группы: `Name|https://…/file.mrs` (без встроенных пресетов сервисов).
+
+Wizard пишет в шаблон:
+
+- `proxy-groups` — select с членами `PROXY`, `DIRECT` (+ proxies шаблона);
+- `rule-providers` — http MRS/YAML;
+- `rules` — `RULE-SET` **сразу после** REJECT/block, **до** process/package/warp/pac/subnet/MATCH;
+- `add-rule-providers: false` — pac `rulessetlist` не вмешивается.
+
+Порядок правил критичен: первое совпадение побеждает. Домен из MRS app-группы не должен «проигрывать» общему `~pac~`.
 
 ---
 
@@ -187,6 +206,7 @@
 | `app/traits/ClashTemplateTrait.php` | `buildClashTemplateTags()`, `auto-transports`. |
 | `config-templates/clash.json` | Шаблон `origin`. |
 | `config-templates/examples/T23.json` | Multi-node fallback без auto-transports. |
+| `config-templates/examples/T24.json` | App-группы (RULE-SET MRS) выше pac/subnet. |
 
 ---
 
@@ -196,3 +216,4 @@
 2. **`global-client-fingerprint`** — удалён в Mihomo; только `client-fingerprint` на proxy.
 3. **`auto-transports: true` + свои WS/HY в шаблоне** — получите дубликаты; ставьте `false` или уберите ручные proxy.
 4. **AWG в шаблоне** — статические ключи не подставляются; runtime AWG добавляется ботом при HWID WG.
+5. **App RULE-SET ниже `~pac~`** — домен уйдёт в PROXY, а не в app-группу. Держите app-правила сразу после block.
