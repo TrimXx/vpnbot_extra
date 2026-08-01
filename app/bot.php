@@ -8052,14 +8052,46 @@ DNS-over-HTTPS with IP:
 
     public function addWarpPlus($key)
     {
-        $c = $this->getPacConf();
-        if (!empty($key)) {
+        $c    = $this->getPacConf();
+        $chat = $this->input['chat'];
+        $key  = trim((string) $key);
+        if ($key !== '' && !preg_match('/^[A-Za-z0-9\-]+$/', $key)) {
+            $this->send($chat, 'invalid warp key');
+
+            return;
+        }
+
+        $this->ssh('wg-quick down /etc/warp/wgcf-profile.conf 2>/dev/null || true; pkill microsocks 2>/dev/null || true', 'wp');
+        $this->ssh('rm -f /etc/warp/wgcf-profile.conf /etc/warp/wgcf-account.toml', 'wp');
+        $reg = trim((string) $this->ssh('cd /etc/warp && wgcf register --accept-tos 2>&1', 'wp'));
+        if ($reg !== '' && stripos($reg, 'error') !== false) {
+            $this->send($chat, "register failed:\n<pre>" . htmlspecialchars($reg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</pre>');
+
+            return;
+        }
+
+        if ($key !== '') {
             $c['warp'] = $key;
-            $this->send($this->input['chat'], 'Warp registration license: ' . $this->ssh("warp-cli --accept-tos registration license $key 2>&1", 'wp'));
+            $this->ssh('sed -i "s/^license_key.*/license_key = \"' . $key . '\"/" /etc/warp/wgcf-account.toml', 'wp');
+            $this->ssh('cd /etc/warp && wgcf update 2>&1', 'wp');
         } else {
             unset($c['warp']);
         }
         $this->setPacConf($c);
+
+        $gen = trim((string) $this->ssh('cd /etc/warp && wgcf generate 2>&1', 'wp'));
+        if ($gen !== '' && stripos($gen, 'error') !== false) {
+            $this->send($chat, "generate failed:\n<pre>" . htmlspecialchars($gen, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</pre>');
+
+            return;
+        }
+        $this->ssh("sed -i '/^Address.*:/d' /etc/warp/wgcf-profile.conf", 'wp');
+        $this->ssh("sed -i '/^AllowedIPs.*::/d' /etc/warp/wgcf-profile.conf", 'wp');
+
+        if (empty($c['warpoff'])) {
+            $this->ssh('wg-quick up /etc/warp/wgcf-profile.conf 2>&1 | grep -v "skip sysctl" || true; pgrep microsocks >/dev/null || microsocks -p 4000 >/dev/null 2>&1 &', 'wp');
+        }
+
         sleep(1);
         $this->warp();
     }
@@ -8148,31 +8180,27 @@ DNS-over-HTTPS with IP:
 
     public function offWarp()
     {
-        $p    = $this->getPacConf();
+        $p = $this->getPacConf();
         if (!empty($this->selfupdate)) {
             if (!empty($p['warpoff'])) {
-                $this->ssh('warp-cli --accept-tos registration delete 2>&1', 'wp');
-                $this->ssh('pkill warp-svc', 'wp');
+                $this->ssh('wg-quick down /etc/warp/wgcf-profile.conf 2>/dev/null || true', 'wp');
+                $this->ssh('pkill microsocks 2>/dev/null || true', 'wp');
             }
         } elseif (!empty($p['warpoff'])) {
-            $this->ssh('warp-svc > /dev/null 2>&1 &', 'wp');
-            sleep(3);
-            if (empty($this->ssh('[ -f "/var/lib/cloudflare-warp/conf.json" ] && echo 1', 'wp'))) {
-                $this->send($this->input['chat'], 'Registration: ' . $this->ssh('warp-cli --accept-tos registration new 2>&1', 'wp'));
-                if (!empty($p['warp'])) {
-                    $this->send($this->input['chat'], 'License: ' . $this->ssh("warp-cli --accept-tos registration license {$p['warp']} 2>&1", 'wp'));
-                }
-            }
-            $this->send($this->input['chat'], 'Proxy mode: ' . $this->ssh('warp-cli --accept-tos mode proxy 2>&1', 'wp'));
-            $this->send($this->input['chat'], 'Connect: ' . $this->ssh('warp-cli --accept-tos connect 2>&1', 'wp'));
             unset($p['warpoff']);
+            $this->setPacConf($p);
+            if (empty($this->ssh('[ -f /etc/warp/wgcf-profile.conf ] && echo 1', 'wp'))) {
+                $this->send($this->input['chat'], 'Profile missing — set key or wait for container recreate');
+            } else {
+                $this->send($this->input['chat'], 'Start: ' . $this->ssh('out=$(wg-quick up /etc/warp/wgcf-profile.conf 2>&1 | grep -v "skip sysctl"); ec=${PIPESTATUS[0]}; pgrep microsocks >/dev/null || microsocks -p 4000 >/dev/null 2>&1 &; printf "%s" "$out"; exit $ec', 'wp'));
+            }
         } else {
-            $this->send($this->input['chat'], 'Registration delete: ' . $this->ssh('warp-cli --accept-tos registration delete 2>&1', 'wp'));
-            $this->ssh('pkill warp-svc', 'wp');
+            $this->send($this->input['chat'], 'Stop: ' . $this->ssh('wg-quick down /etc/warp/wgcf-profile.conf 2>&1 | grep -v "skip sysctl"; pkill microsocks 2>/dev/null || true', 'wp'));
             $p['warpoff'] = 1;
+            $this->setPacConf($p);
         }
-        $this->setPacConf($p);
         if (empty($this->selfupdate)) {
+            sleep(1);
             $this->warp();
         }
     }
@@ -8180,25 +8208,37 @@ DNS-over-HTTPS with IP:
     public function warp()
     {
         $p      = $this->getPacConf();
-        $text[] = "Menu -> " . $this->i18n('warp');
-        $text[] = "status: " . $this->warpStatus();
-        $text[] = "key: <code>{$this->getPacConf()['warp']}</code>";
+        $account = htmlspecialchars((string) $this->ssh('cat /etc/warp/wgcf-account.toml 2>/dev/null || true', 'wp'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $profile = htmlspecialchars((string) $this->ssh('cat /etc/warp/wgcf-profile.conf 2>/dev/null || true', 'wp'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $trace   = htmlspecialchars((string) $this->ssh('wgcf trace 2>/dev/null || true', 'wp'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $text[]  = 'Menu -> ' . $this->i18n('warp') . ' (wgcf)';
+        $text[]  = 'status: ' . $this->warpStatus();
+        $text[]  = "key: <code>{$p['warp']}</code>";
+        if ($trace !== '') {
+            $text[] = "<pre>$trace</pre>";
+        }
+        if ($account !== '') {
+            $text[] = "<pre>$account</pre>";
+        }
+        if ($profile !== '') {
+            $text[] = "<pre>$profile</pre>";
+        }
         $data[] = [
             [
                 'text'          => $this->i18n($p['warpoff'] ? 'off' : 'on'),
-                'callback_data' => "/offWarp",
+                'callback_data' => '/offWarp',
             ],
         ];
         $data[] = [
             [
                 'text'          => $this->i18n('set key'),
-                'callback_data' => "/warpPlus",
+                'callback_data' => '/warpPlus',
             ],
         ];
         $data[] = [
             [
                 'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
+                'callback_data' => '/menu',
             ],
         ];
         $this->update(

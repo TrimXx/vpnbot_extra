@@ -215,7 +215,7 @@ services:
             - xr
             - hy
     wg1:
-        image: mercurykd/vpnbot-wg:1.3
+        image: mercurykd/vpnbot-wg:1.4
         build:
             dockerfile: dockerfile/wireguard.dockerfile
             args:
@@ -349,23 +349,26 @@ services:
                 ipv4_address: 10.10.1.9
         logging: *default-logging
     wp:
-        image: mercurykd/vpnbot-wp:1.5
+        # Lightweight WARP via wgcf + WireGuard + microsocks (same image as wg1).
+        # SOCKS stays on :4000 — existing xray outbound is unchanged.
+        image: mercurykd/vpnbot-wg:1.4
         build:
-            dockerfile: dockerfile/warp.dockerfile
+            dockerfile: dockerfile/wireguard.dockerfile
             args:
                 image: ${IMAGE}
         cap_add:
             - NET_ADMIN
+        sysctls:
+            - net.ipv4.conf.all.src_valid_mark=1
         devices:
             - /dev/net/tun:/dev/net/tun
         volumes:
-            - ./config/.profile:/root/.bashrc:ro
+            - ./config/.profile:/root/.ashrc:ro
             - ./ssh:/ssh
             - ./config/sshd_config:/etc/ssh/sshd_config
             - ./config:/config
-            - ./certs:/certs
             - ./scripts/start_wp.sh:/start_wp.sh
-            - warp:/var/lib/cloudflare-warp
+            - warp:/etc/warp
         hostname: warp
         container_name: wp
         depends_on:
@@ -377,6 +380,7 @@ services:
             - path: ./override.env
               required: false
         stop_grace_period: 1s
+        working_dir: /etc/warp
         command: ["/bin/sh", "/start_wp.sh"]
         networks:
             default:

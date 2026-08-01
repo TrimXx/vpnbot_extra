@@ -64,8 +64,12 @@ if proc_match_in svc 'cron.php'; then
 fi
 
 if docker inspect -f '{{.State.Running}}' wp 2>/dev/null | grep -q true; then
-    if docker exec wp sh -c 'pgrep warp-svc' 2>/dev/null | grep -q .; then
-        trace="$(docker exec wp curl -m 1 -s -x socks5://127.0.0.1:40000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    if docker exec wp sh -c 'pgrep microsocks >/dev/null 2>&1 && wg show >/dev/null 2>&1' 2>/dev/null; then
+        trace="$(docker exec wp wgcf trace 2>/dev/null || true)"
+        if [ -z "$trace" ]; then
+            # Fallback via xray container to legacy socks :4000 (config-compatible).
+            trace="$(docker exec xr curl -m 1 -s -x socks5://10.10.0.13:4000 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+        fi
         warp="$(echo "$trace" | sed -n 's/^warp=\(.*\)$/\1/p' | head -n1)"
         if [ -z "$warp" ]; then
             warp="on"
