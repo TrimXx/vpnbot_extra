@@ -7254,7 +7254,9 @@ DNS-over-HTTPS with IP:
         $isRuleRequest = is_array($params) && !empty($params['r']);
 
         $hwidNotSupported = !$isRuleRequest && !$isBrowser && $hwid === '';
-        $hwidMaxReached = count($devices) >= $limit;
+        // Занятая квота не должна помечаться для уже известного устройства: Prizrak отбрасывает профиль, если эти заголовки true.
+        $isNewDevice = $hwid !== '' && !isset($devices[$hwid]);
+        $hwidMaxReached = $isNewDevice && count($devices) >= $limit;
         header('x-hwid-active: true');
         header('x-hwid-not-supported: ' . ($hwidNotSupported ? 'true' : 'false'));
         header('x-hwid-max-devices-reached: ' . ($hwidMaxReached ? 'true' : 'false'));
