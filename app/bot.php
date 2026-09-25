@@ -6743,7 +6743,7 @@ DNS-over-HTTPS with IP:
                     $ips[] = $peerIp;
                 }
             }
-            $ip_count = (1 << (32 - $bitmask)) - count($ips) - 1;
+            $ip_count = (1 << (32 - $bitmask)) - 1;
             $client_ip = null;
             for ($i = 1; $i < $ip_count; $i++) {
                 $ip = $i + $server_ip;
@@ -12727,7 +12727,7 @@ DNS-over-HTTPS with IP:
                 $ips[] = ip2long(explode('/', $v['AllowedIPs'] ?: $v['# AllowedIPs'])[0]);
             }
         }
-        $ip_count = (1 << (32 - $bitmask)) - count($ips) - 1;
+        $ip_count = (1 << (32 - $bitmask)) - 1;
         for ($i = 1; $i < $ip_count; $i++) {
             $ip = $i + $server_ip;
             if (!in_array($ip, $ips)) {
