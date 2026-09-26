@@ -16,6 +16,7 @@ class Bot
     public $pool;
     public $hwid;
     public $last = '';
+    protected $xrayStatSnapshot = null;
 
     public function __construct($key, $i18n)
     {
@@ -1545,6 +1546,10 @@ class Bot
         if (empty($this->time_xray_stats) || time() - $this->time_xray_stats > 60) {
             $this->time_xray_stats = time();
             try {
+                $this->xrayStatSnapshot = null;
+                if ($this->loadXrayStatSnapshot() === null) {
+                    return;
+                }
                 $x  = $this->getXray();
                 $td = $this->queryXrayStatCounter('inbound>>>vless_tls>>>traffic>>>downlink');
                 $tu = $this->queryXrayStatCounter('inbound>>>vless_tls>>>traffic>>>uplink');
@@ -8501,15 +8506,45 @@ DNS-over-HTTPS with IP:
         return 0;
     }
 
+    protected function loadXrayStatSnapshot(): ?array
+    {
+        if (is_array($this->xrayStatSnapshot)) {
+            return $this->xrayStatSnapshot;
+        }
+        try {
+            $raw = (string) $this->ssh('xray api statsquery --server=127.0.0.1:8080', 'xr');
+            $jsonStart = strpos($raw, '{');
+            $jsonEnd = strrpos($raw, '}');
+            if ($jsonStart === false || $jsonEnd === false || $jsonEnd < $jsonStart) {
+                return null;
+            }
+            $resp = json_decode(substr($raw, $jsonStart, $jsonEnd - $jsonStart + 1), true);
+            if (!is_array($resp) || !isset($resp['stat']) || !is_array($resp['stat'])) {
+                return null;
+            }
+            $map = [];
+            foreach ($resp['stat'] as $row) {
+                if (!is_array($row) || !isset($row['name'])) {
+                    continue;
+                }
+                $map[(string) $row['name']] = (int) ($row['value'] ?? 0);
+            }
+            $this->xrayStatSnapshot = $map;
+
+            return $map;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
     protected function queryXrayStatCounter(string $name): int
     {
-        try {
-            $resp = json_decode($this->ssh('xray api stats --server=127.0.0.1:8080 -name "' . str_replace(['"', '\\'], '', $name) . '" 2>&1', 'xr'), true);
-
-            return is_array($resp) ? (int) ($resp['stat']['value'] ?? 0) : 0;
-        } catch (\Throwable $e) {
+        $snap = $this->loadXrayStatSnapshot();
+        if (!is_array($snap)) {
             return 0;
         }
+
+        return (int) ($snap[$name] ?? 0);
     }
 
     public function checkTrafficLimitXr(): void
