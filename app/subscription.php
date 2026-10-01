@@ -2178,8 +2178,14 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
         }
 
         function getSubscriptionApiUrl() {
-            const raw = panelData?.response?.subscriptionUrl || '';
-            return raw.split('#')[0];
+            try {
+                const page = new URL(window.location.href);
+                page.hash = '';
+                return page.toString();
+            } catch (e) {
+                const raw = panelData?.response?.subscriptionUrl || '';
+                return raw.split('#')[0];
+            }
         }
 
         async function postSubscriptionAction(action, payload = {}) {

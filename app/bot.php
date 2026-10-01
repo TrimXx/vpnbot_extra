@@ -10053,7 +10053,12 @@ DNS-over-HTTPS with IP:
         $st     = $this->getXrayStats();
         $useCdnDomain = !in_array(($pac['transport'] ?? ''), ['Reality', 'Both'], true);
         $domain = !empty($_GET['cdn'] ?? '') ? $_GET['cdn'] : ($_SERVER['SERVER_NAME'] ?: $this->getDomain($useCdnDomain));
-        $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
+        $forwardedProto = strtolower(trim(explode(',', (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0]));
+        if ($forwardedProto === 'https' || $forwardedProto === 'http') {
+            $scheme = $forwardedProto;
+        } else {
+            $scheme = empty($this->nginxGetTypeCert()) ? 'http' : 'https';
+        }
         $hash   = $this->getHashBot();
         $flag   = true;
         $client = null;
