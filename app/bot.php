@@ -3550,7 +3550,8 @@ DNS-over-HTTPS with IP:
 
     public function stopAd()
     {
-        return $this->ssh('kill -15 $(cat /opt/adguardhome/pid)', 'ad');
+        // pidfile only names the last start, so older copies stay resident.
+        return $this->ssh('pkill -x AdGuardHome >/dev/null 2>&1 || true; sleep 1; pkill -9 -x AdGuardHome >/dev/null 2>&1 || true; rm -f /opt/adguardhome/pid', 'ad');
     }
 
     public function selfsslInstall()
