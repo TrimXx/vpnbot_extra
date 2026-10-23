@@ -871,11 +871,74 @@ class Bot
         if (empty($norestart)) {
             $this->collectSession();
             $this->writeXrayConfig($c);
-            $this->ssh('pkill xray', 'xr');
-            $this->ssh('xray run -config /xray.json > /dev/null 2>&1 &', 'xr');
+            $this->reloadXrayProcess();
+            $this->markXrayRuntimeStamp();
         } else {
             $this->writeXrayConfig($c);
         }
+    }
+
+    protected function xrayClientStamp(array $c): string
+    {
+        $ids = [];
+        foreach ($c['inbounds'] ?? [] as $inbound) {
+            if (!is_array($inbound)) {
+                continue;
+            }
+            foreach (($inbound['settings']['clients'] ?? []) as $client) {
+                if (!is_array($client)) {
+                    continue;
+                }
+                $id = (string) ($client['id'] ?? '');
+                if ($id !== '') {
+                    $ids[] = $id;
+                }
+            }
+        }
+        sort($ids);
+
+        return md5(implode("\n", $ids));
+    }
+
+    protected function xrayRuntimeHasClients(array $c): bool
+    {
+        $stampFile = '/config/xray.runtime.stamp';
+        if (!is_file($stampFile)) {
+            return false;
+        }
+        $loaded = trim((string) file_get_contents($stampFile));
+
+        return $loaded !== '' && $loaded === $this->xrayClientStamp($c);
+    }
+
+    protected function reloadXrayProcess(): void
+    {
+        $this->ssh(
+            'pkill -x xray >/dev/null 2>&1 || true; '
+            . 'i=0; while pidof xray >/dev/null 2>&1 && [ "$i" -lt 25 ]; do i=$((i+1)); sleep 0.2; done; '
+            . 'if pidof xray >/dev/null 2>&1; then pkill -9 -x xray >/dev/null 2>&1 || true; sleep 0.3; fi',
+            'xr'
+        );
+        $start = 'xray run -config /xray.json > /dev/null 2>&1 &';
+        $this->ssh($start, 'xr');
+        $pid = trim((string) $this->ssh('sleep 0.4; pidof xray || true', 'xr'));
+        if ($pid === '') {
+            $this->ssh($start, 'xr');
+        }
+    }
+
+    protected function markXrayRuntimeStamp(): void
+    {
+        $pid = trim((string) $this->ssh('pidof xray || true', 'xr'));
+        if ($pid === '') {
+            return;
+        }
+        $raw = file_get_contents('/config/xray.json');
+        $cfg = json_decode((string) $raw, true);
+        if (!is_array($cfg)) {
+            return;
+        }
+        file_put_contents('/config/xray.runtime.stamp', $this->xrayClientStamp($cfg));
     }
 
     public function collectSession() {
@@ -7204,7 +7267,7 @@ DNS-over-HTTPS with IP:
         $storage[$ownerSubId] = $devices;
         $this->setHwidStorage($storage);
 
-        if ($changed) {
+        if ($changed || !$this->xrayRuntimeHasClients($xray)) {
             $this->restartXray($xray);
         } else {
             $this->writeXrayConfig($xray);
