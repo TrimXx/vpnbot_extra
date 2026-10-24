@@ -6,10 +6,20 @@ if [ ! -s /ssh/key ] || [ ! -s /ssh/key.pub ]; then
     ssh-keygen -m PEM -t rsa -f /ssh/key -N ''
 fi
 
-if [ ! -s /certs/self_private ] || [ ! -s /certs/self_public ]; then
+cert_ip=""
+if [ -s /certs/self_public ]; then
+    cert_ip=$(openssl x509 -in /certs/self_public -noout -ext subjectAltName 2>/dev/null | sed -n 's/.*IP Address:\([0-9.]\{1,\}\).*/\1/p' | head -n 1 || true)
+fi
+# Telegram checks the webhook IP against subjectAltName. An old file must be reissued.
+if [ ! -s /certs/self_private ] || [ ! -s /certs/self_public ] || [ "$cert_ip" != "$IP" ]; then
+    if [ -z "${IP:-}" ]; then
+        echo "webhook certificate: IP is empty" >&2
+        exit 1
+    fi
     openssl req -newkey rsa:2048 -sha256 -nodes -x509 -days 365 \
         -keyout /certs/self_private -out /certs/self_public \
-        -subj "/C=NN/ST=N/L=N/O=N/CN=$IP"
+        -subj "/C=NN/ST=N/L=N/O=N/CN=$IP" \
+        -addext "subjectAltName=IP:$IP"
 fi
 
 if [ ! -s /certs/cert_public ] && [ -s /certs/self_public ]; then
