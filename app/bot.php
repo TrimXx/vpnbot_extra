@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 require_once __DIR__ . '/traits/SubscriptionSecurityTrait.php';
 require_once __DIR__ . '/traits/TransportRegistryTrait.php';
