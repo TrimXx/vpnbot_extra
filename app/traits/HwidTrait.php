@@ -241,6 +241,23 @@ trait HwidTrait
         return $normalized;
     }
 
+    protected function getRuntimeDeviceHwidSet(string $ownerSubId): array
+    {
+        $seen = [];
+        $xray = $this->getXray();
+        foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $client) {
+            if (!is_array($client) || (string) ($client['device_parent_id'] ?? '') !== $ownerSubId) {
+                continue;
+            }
+            $hwid = trim((string) ($client['device_hwid'] ?? ''));
+            if ($hwid !== '') {
+                $seen[$hwid] = true;
+            }
+        }
+
+        return $seen;
+    }
+
     public function getHwidDevicesByUser($uid)
     {
         $storage = $this->getHwidStorage();
@@ -515,6 +532,26 @@ trait HwidTrait
         }
 
         return ['download' => $download, 'upload' => $upload, 'any_online' => $anyOnline];
+    }
+
+    protected function applyHwidRequestMeta(array $current): array
+    {
+        $current['time'] = time();
+        $incoming = [
+            'user_agent' => trim((string) ($_SERVER['HTTP_USER_AGENT'] ?? '')),
+            'device_os' => trim((string) ($_SERVER['HTTP_X_DEVICE_OS'] ?? '')),
+            'os_version' => trim((string) ($_SERVER['HTTP_X_VER_OS'] ?? '')),
+            'device_model' => trim((string) ($_SERVER['HTTP_X_DEVICE_MODEL'] ?? '')),
+        ];
+        foreach ($incoming as $field => $value) {
+            if ($value !== '') {
+                $current[$field] = $value;
+            } elseif (!array_key_exists($field, $current)) {
+                $current[$field] = '';
+            }
+        }
+
+        return $current;
     }
 
     public function setHwidDevice($uid, $hwid, array $info)
@@ -1330,18 +1367,11 @@ trait HwidTrait
             $changed = true;
         }
 
-        // Sync storage with already existing runtime children.
+        // Keep UUID links for devices already in the list.
+        // Do not invent a card for an Xray client that has no hwid.json row:
+        // Xray does not store the device name, and a placeholder gets the current time.
         foreach ($existingByHwid as $existingHwid => $meta) {
             if (!isset($devices[$existingHwid]) || !is_array($devices[$existingHwid])) {
-                $devices[$existingHwid] = [
-                    'time' => time(),
-                    'user_agent' => '',
-                    'device_os' => '',
-                    'os_version' => '',
-                    'device_model' => '',
-                    'device_uuid' => (string) $meta['id'],
-                    'runtime_confirmed' => 0,
-                ];
                 continue;
             }
             if (($devices[$existingHwid]['device_uuid'] ?? '') !== (string) $meta['id']) {
@@ -1416,11 +1446,7 @@ trait HwidTrait
                 }
                 $devices[$hwid]['device_uuid'] = $deviceUuid;
             }
-            $devices[$hwid]['time'] = time();
-            $devices[$hwid]['user_agent'] = $_SERVER['HTTP_USER_AGENT'] ?? '';
-            $devices[$hwid]['device_os'] = $_SERVER['HTTP_X_DEVICE_OS'] ?? '';
-            $devices[$hwid]['os_version'] = $_SERVER['HTTP_X_VER_OS'] ?? '';
-            $devices[$hwid]['device_model'] = $_SERVER['HTTP_X_DEVICE_MODEL'] ?? '';
+            $devices[$hwid] = $this->applyHwidRequestMeta($devices[$hwid]);
             $devices[$hwid]['runtime_confirmed'] = 1;
         }
 
@@ -1432,7 +1458,7 @@ trait HwidTrait
         $storage[$ownerSubId] = $devices;
         $this->setHwidStorage($storage);
 
-        if ($changed) {
+        if ($changed || !$this->xrayRuntimeHasClients($xray)) {
             $this->restartXray($xray);
         } else {
             $this->writeXrayConfig($xray);
@@ -1470,6 +1496,8 @@ trait HwidTrait
 
         $ownerSubId = $this->getClientSubscriptionId($client);
         $devices   = $this->getHwidDevicesByUser($ownerSubId);
+        $runtimeHwids = $this->getRuntimeDeviceHwidSet($ownerSubId);
+        $occupied = max(count($devices), count($runtimeHwids));
         $hwid      = trim($_SERVER['HTTP_X_HWID'] ?? '');
         $isBrowser = $this->isBrowserRequest();
         $ruleName  = (string) ($_GET['r'] ?? '');
@@ -1485,7 +1513,7 @@ trait HwidTrait
         $isRuleRequest = $this->isClashRuleProviderRequest($ruleName);
 
         $hwidNotSupported = !$isRuleRequest && !$isBrowser && $hwid === '';
-        $hwidMaxReached = count($devices) >= $limit;
+        $hwidMaxReached = $occupied >= $limit;
         header('x-hwid-active: true');
         header('x-hwid-not-supported: ' . ($hwidNotSupported ? 'true' : 'false'));
         header('x-hwid-max-devices-reached: ' . ($hwidMaxReached ? 'true' : 'false'));
@@ -1509,9 +1537,9 @@ trait HwidTrait
         if ($isRuleRequest) {
             return true;
         }
-        $isNew = !isset($devices[$hwid]);
+        $isNew = !isset($devices[$hwid]) && !isset($runtimeHwids[$hwid]);
 
-        if ($isNew && count($devices) >= $limit) {
+        if ($isNew && $occupied >= $limit) {
             $message = 'HWID device limit exceeded';
             header('announce: base64:' . base64_encode($message));
             header('X-HWID-Status: ' . $message);
@@ -1519,13 +1547,8 @@ trait HwidTrait
             return false;
         }
 
-        $this->setHwidDevice($ownerSubId, $hwid, [
-            'time'         => time(),
-            'user_agent'   => $_SERVER['HTTP_USER_AGENT'] ?? '',
-            'device_os'    => $_SERVER['HTTP_X_DEVICE_OS'] ?? '',
-            'os_version'   => $_SERVER['HTTP_X_VER_OS'] ?? '',
-            'device_model' => $_SERVER['HTTP_X_DEVICE_MODEL'] ?? '',
-        ]);
+        $existingDevice = (isset($devices[$hwid]) && is_array($devices[$hwid])) ? $devices[$hwid] : [];
+        $this->setHwidDevice($ownerSubId, $hwid, $this->applyHwidRequestMeta($existingDevice));
 
         if ($runtimeModeEnabled && $clientIndex !== null) {
             $deviceUuid = $this->ensureRuntimeDeviceUuid($client, $clientIndex, $hwid, $limit);
