@@ -199,24 +199,108 @@ trait HwidTrait
 
     public function getHwidStorage()
     {
-        if (!file_exists($this->hwid)) {
+        $decoded = $this->readHwidStorageLocked();
+
+        return $decoded ?? [];
+    }
+
+    public function setHwidStorage(array $storage)
+    {
+        $this->mutateHwidStorage(function (array $current) use ($storage) {
+            return $storage;
+        });
+    }
+
+    protected function readHwidStorageLocked(): ?array
+    {
+        return $this->withHwidFileLock(false, function ($fh) {
+            return $this->decodeHwidHandle($fh);
+        });
+    }
+
+    protected function mutateHwidStorage(callable $mutator): void
+    {
+        $this->withHwidFileLock(true, function ($fh) use ($mutator) {
+            $current = $this->decodeHwidHandle($fh);
+            if ($current === null) {
+                return null;
+            }
+            $next = $mutator($current);
+            if (!is_array($next)) {
+                return null;
+            }
+            $normalized = $this->preserveHwidShrink($current, $this->normalizeHwidStorage($next));
+            $json = json_encode($normalized, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if ($json === false) {
+                return null;
+            }
+            rewind($fh);
+            ftruncate($fh, 0);
+            fwrite($fh, $json);
+            fflush($fh);
+            if (method_exists($this, 'scheduleNodeSync')) {
+                $this->scheduleNodeSync();
+            }
+
+            return true;
+        });
+    }
+
+    protected function withHwidFileLock(bool $exclusive, callable $fn)
+    {
+        $fh = @fopen($this->hwid, 'c+');
+        if ($fh === false) {
+            return $exclusive ? null : [];
+        }
+        try {
+            if (!flock($fh, $exclusive ? LOCK_EX : LOCK_SH)) {
+                return $exclusive ? null : [];
+            }
+            return $fn($fh);
+        } finally {
+            flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+    }
+
+    protected function decodeHwidHandle($fh): ?array
+    {
+        rewind($fh);
+        $raw = stream_get_contents($fh);
+        if ($raw === false || trim($raw) === '') {
             return [];
         }
-        $data = json_decode(file_get_contents($this->hwid), true);
+        $data = json_decode($raw, true);
         if (!is_array($data)) {
-            return [];
+            return null;
         }
 
         return $this->normalizeHwidStorage($data);
     }
 
-    public function setHwidStorage(array $storage)
+    protected function preserveHwidShrink(array $before, array $after): array
     {
-        $normalized = $this->normalizeHwidStorage($storage);
-        file_put_contents($this->hwid, json_encode($normalized, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-        if (method_exists($this, 'scheduleNodeSync')) {
-            $this->scheduleNodeSync();
+        if (count($before) >= 3 && count($after) + 2 < count($before)) {
+            foreach ($before as $uid => $devices) {
+                if (!isset($after[$uid])) {
+                    $after[$uid] = $devices;
+                }
+            }
         }
+        foreach ($before as $uid => $devices) {
+            if (!isset($after[$uid]) || !is_array($devices) || !is_array($after[$uid])) {
+                continue;
+            }
+            if (count($devices) >= 5 && count($after[$uid]) + 3 < count($devices)) {
+                foreach ($devices as $hwid => $info) {
+                    if (!isset($after[$uid][$hwid])) {
+                        $after[$uid][$hwid] = $info;
+                    }
+                }
+            }
+        }
+
+        return $after;
     }
 
     protected function normalizeHwidStorage(array $storage)
@@ -302,13 +386,19 @@ trait HwidTrait
             return ['ok' => false, 'message' => 'empty name'];
         }
 
-        $storage = $this->getHwidStorage();
-        if (!isset($storage[$ownerSubId][$hwid]) || !is_array($storage[$ownerSubId][$hwid])) {
+        $updated = false;
+        $this->mutateHwidStorage(function (array $storage) use ($ownerSubId, $hwid, $name, &$updated) {
+            if (!isset($storage[$ownerSubId][$hwid]) || !is_array($storage[$ownerSubId][$hwid])) {
+                return null;
+            }
+            $storage[$ownerSubId][$hwid]['device_name'] = $name;
+            $updated = true;
+
+            return $storage;
+        });
+        if (!$updated) {
             return ['ok' => false, 'message' => 'device not found'];
         }
-
-        $storage[$ownerSubId][$hwid]['device_name'] = $name;
-        $this->setHwidStorage($storage);
 
         return ['ok' => true, 'device_name' => $name];
     }
@@ -556,30 +646,48 @@ trait HwidTrait
 
     public function setHwidDevice($uid, $hwid, array $info)
     {
-        $storage = $this->getHwidStorage();
-        $storage[$uid][$hwid] = $info;
-        $this->setHwidStorage($storage);
+        $this->mutateHwidStorage(function (array $storage) use ($uid, $hwid, $info) {
+            $prev = $storage[$uid][$hwid] ?? [];
+            if (!is_array($prev)) {
+                $prev = [];
+            }
+            $merged = $prev;
+            foreach ($info as $key => $value) {
+                if (($value === '' || $value === null) && array_key_exists($key, $prev) && $prev[$key] !== '' && $prev[$key] !== null) {
+                    continue;
+                }
+                $merged[$key] = $value;
+            }
+            if (empty($merged['device_name']) && !empty($prev['device_name'])) {
+                $merged['device_name'] = $prev['device_name'];
+            }
+            $storage[$uid][$hwid] = $merged;
+
+            return $storage;
+        });
     }
 
     public function deleteHwidDevice($uid, $hwid)
     {
-        $storage = $this->getHwidStorage();
-        if (isset($storage[$uid][$hwid])) {
-            unset($storage[$uid][$hwid]);
-            if (empty($storage[$uid])) {
-                unset($storage[$uid]);
+        $this->mutateHwidStorage(function (array $storage) use ($uid, $hwid) {
+            if (isset($storage[$uid][$hwid])) {
+                unset($storage[$uid][$hwid]);
+                if (empty($storage[$uid])) {
+                    unset($storage[$uid]);
+                }
             }
-            $this->setHwidStorage($storage);
-        }
+
+            return $storage;
+        });
     }
 
     public function deleteHwidUser($uid)
     {
-        $storage = $this->getHwidStorage();
-        if (isset($storage[$uid])) {
+        $this->mutateHwidStorage(function (array $storage) use ($uid) {
             unset($storage[$uid]);
-            $this->setHwidStorage($storage);
-        }
+
+            return $storage;
+        });
     }
 
     protected function getHwidTokenScope($index)
@@ -1455,8 +1563,33 @@ trait HwidTrait
             $changed = true;
         }
 
-        $storage[$ownerSubId] = $devices;
-        $this->setHwidStorage($storage);
+        $this->mutateHwidStorage(function (array $storage) use ($ownerSubId, $devices) {
+            if (!isset($storage[$ownerSubId]) || !is_array($storage[$ownerSubId])) {
+                $storage[$ownerSubId] = [];
+            }
+            foreach ($devices as $deviceHwid => $info) {
+                if (!is_array($info)) {
+                    continue;
+                }
+                $prev = $storage[$ownerSubId][$deviceHwid] ?? [];
+                if (!is_array($prev)) {
+                    $prev = [];
+                }
+                $merged = $prev;
+                foreach ($info as $key => $value) {
+                    if (($value === '' || $value === null) && array_key_exists($key, $prev) && $prev[$key] !== '' && $prev[$key] !== null) {
+                        continue;
+                    }
+                    $merged[$key] = $value;
+                }
+                if (empty($merged['device_name']) && !empty($prev['device_name'])) {
+                    $merged['device_name'] = $prev['device_name'];
+                }
+                $storage[$ownerSubId][$deviceHwid] = $merged;
+            }
+
+            return $storage;
+        });
 
         if ($changed || !$this->xrayRuntimeHasClients($xray)) {
             $this->restartXray($xray);
