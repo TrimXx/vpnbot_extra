@@ -180,8 +180,43 @@ function parse_traffic_to_bytes($traffic_str): int {
     return (int)$traffic_str;
 }
 
+// Тот же URL подписки на первом доменном алиасе (на проде это ru.trimx.ru).
+// Заголовок отдаём и с самого алиаса: пустое значение Prizrak стирает запасной адрес.
+function subscription_fallback_url(string $subscriptionUrl, array $pacConfig): string {
+    $parts = parse_url($subscriptionUrl);
+    if (!is_array($parts) || empty($parts['host'])) {
+        return '';
+    }
+    $main = strtolower(trim((string) ($pacConfig['domain_main'] ?? $pacConfig['domain'] ?? '')));
+    $rawAliases = $pacConfig['domain_aliases'] ?? [];
+    if (!is_array($rawAliases)) {
+        $rawAliases = preg_split('~[\s,;]+~', (string) $rawAliases) ?: [];
+    }
+    $fallbackHost = '';
+    foreach ($rawAliases as $alias) {
+        $alias = strtolower(trim((string) $alias));
+        if ($alias === '' || $alias === $main || !preg_match('~^[a-z0-9.-]+$~', $alias)) {
+            continue;
+        }
+        $fallbackHost = $alias;
+        break;
+    }
+    if ($fallbackHost === '') {
+        return '';
+    }
+    $scheme = (string) ($parts['scheme'] ?? 'https');
+    $path = (string) ($parts['path'] ?? '');
+    $query = isset($parts['query']) && $parts['query'] !== '' ? '?' . $parts['query'] : '';
+    $url = $scheme . '://' . $fallbackHost . $path . $query;
+    if (preg_match('~[\r\n]~', $url)) {
+        return '';
+    }
+
+    return $url;
+}
+
 // Функция для отправки общих заголовков профиля
-function send_profile_headers(string $email, string $subscription_url, string $supportUrl, $download, $expire, string $announce): void {
+function send_profile_headers(string $email, string $subscription_url, string $supportUrl, $download, $expire, string $announce, array $pacConfig = []): void {
     // Основные заголовки
     header('x-robots-tag: noindex, nofollow, noarchive, nosnippet, noimageindex');
     header('profile-title: base64:' . base64_encode(substr($email, 0, 25)));
@@ -209,9 +244,14 @@ function send_profile_headers(string $email, string $subscription_url, string $s
     header('flclashx-view: type:list; sort:none; layout:standard; icon:standard; card:min');
 
     // Prizrak-Box: 0 показывает задержку цифрами, 1 включает пункт «Глобальный режим».
+    // fallback-url — полный запасной адрес той же подписки, если основной хост недоступен.
     if (preg_match('~prizrak-box~i', $_SERVER['HTTP_USER_AGENT'] ?? '')) {
         header('pxa-latency-dots: 0');
         header('pxa-global-mode-mp: 1');
+        $fallbackUrl = subscription_fallback_url($subscription_url, $pacConfig);
+        if ($fallbackUrl !== '') {
+            header('fallback-url: ' . $fallbackUrl);
+        }
     }
 }
 
@@ -220,20 +260,20 @@ $panelDataB64 = $panelData; // Already base64 encoded
 
 switch (true) {
     case preg_match('~^(?:[Kk]oala-[Cc]lash|FlClashX|prizrak-box)~iu', $ua):
-        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce, $pacConfig);
         header('Content-type: text/yaml');
         echo $configs['clash'];
         break;
 
     case preg_match('~Happ/~', $ua):
-        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce, $pacConfig);
         header('routing: happ://routing/onadd/eyJOYW1lIjoiU2ltcGxlLVJVLXJvdXRpbmciLCJHbG9iYWxQcm94eSI6InRydWUiLCJSZW1vdGVETlNUeXBlIjoiRG9VIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly9kbnMuYWRndWFyZC1kbnMuY29tL2Rucy1xdWVyeSIsIlJlbW90ZUROU0lQIjoiOTQuMTQwLjE0LjE0IiwiRG9tZXN0aWNETlNUeXBlIjoiRG9VIiwiRG9tZXN0aWNETlNEb21haW4iOiJodHRwczovL2Rucy5hZGd1YXJkLWRucy5jb20vZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJUCI6Ijk0LjE0MC4xNS4xNSIsIkdlb2lwdXJsIjoiaHR0cHM6Ly9naXRodWIuY29tL2ZyYXlaVi9zaW1wbGUtcnUtZ2VvaXAvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb2lwLmRhdCIsIkdlb3NpdGV1cmwiOiJodHRwczovL2dpdGh1Yi5jb20vZnJheVpWL3NpbXBsZS1ydS1nZW9zaXRlL3JlbGVhc2VzL2xhdGVzdC9kb3dubG9hZC9nZW9zaXRlLmRhdCIsIkxhc3RVcGRhdGVkIjoiMTc1MTY4MTM4MiIsIkRuc0hvc3RzIjp7fSwiRGlyZWN0U2l0ZXMiOlsiZ2Vvc2l0ZTpwcml2YXRlIiwiZ2Vvc2l0ZTpjYXRlZ29yeS1ydSIsImdlb3NpdGU6YXBwbGUiLCJnZW9zaXRlOnR3aXRjaCJdLCJEaXJlY3RJcCI6WyJnZW9pcDpydSIsImdlb2lwOnByaXZhdGUiXSwiUHJveHlTaXRlcyI6WyJnZW9zaXRlOnlvdXR1YmUiLCJnZW9zaXRlOmNhdGVnb3J5LWJhbi1ydSJdLCJQcm94eUlwIjpbXSwiQmxvY2tTaXRlcyI6W10sIkJsb2NrSXAiOltdLCJEb21haW5TdHJhdGVneSI6IklQSWZOb25NYXRjaCIsIkZha2VETlMiOiJmYWxzZSIsIlVzZUNodW5rRmlsZXMiOiJ0cnVlIn0=');
         header('Content-type: text/plain');
         echo base64_encode($vless);
         break;
 
     case preg_match('~^(?:FlClash|[Cc]lash-[Vv]erge|[Cc]lash-?[Mm]eta|[Mm]urge|[Cc]lashX [Mm]eta|[Mm]ihomo|[Cc]lash-nyanpasu|clash\.meta)~iu', $ua):
-        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce, $pacConfig);
         header('Content-type: text/yaml');
         echo $configs['clash'];
         break;
@@ -3244,7 +3284,7 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
         break;
 
     default:
-        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce);
+        send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce, $pacConfig);
         header('Content-type: text/plain');
         echo base64_encode($vless);
         break;
