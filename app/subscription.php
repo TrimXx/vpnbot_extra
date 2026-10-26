@@ -207,6 +207,12 @@ function send_profile_headers(string $email, string $subscription_url, string $s
     header('flclashx-custom: update');
     header('flclashx-widgets: announce,metainfo,networkDetection,intranetIp,tunButton,systemProxyButton,networkSpeed');
     header('flclashx-view: type:list; sort:none; layout:standard; icon:standard; card:min');
+
+    // Prizrak-Box: 0 показывает задержку цифрами, 1 включает пункт «Глобальный режим».
+    if (preg_match('~prizrak-box~i', $_SERVER['HTTP_USER_AGENT'] ?? '')) {
+        header('pxa-latency-dots: 0');
+        header('pxa-global-mode-mp: 1');
+    }
 }
 
 $panelData = generate_panelData($uid, $download, $email, $vless, $subscription_url, $clash, $singbox, $windows, $xray, $wgconf ?? '', $expire, $connectedDevicesList, $connectedDevicesMax, !empty($hasDeviceDeletePassword), $trafficLimitHuman, (string) $trafficLimitBytes);
