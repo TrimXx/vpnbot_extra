@@ -1602,6 +1602,7 @@ class Bot
     {
         $period = 10;
         while (true) {
+            $this->invalidatePacConfCache();
             $this->shutdownClient();
             $this->shutdownClientXr();
             $this->checkTrafficLimitXr();
@@ -1760,106 +1761,89 @@ class Bot
 
     public function checkBackup()
     {
-        $c = $this->getPacConf();
-        if (!empty($c['backup'])) {
+        $run = false;
+        $this->patchPacConf(function (array $c) use (&$run) {
+            if (empty($c['backup']) || !str_contains((string) $c['backup'], '/')) {
+                return null;
+            }
             $now = time();
-            [$start, $period] = explode('/', $c['backup']);
+            [$start, $period] = explode('/', (string) $c['backup'], 2);
             $start  = strtotime(trim($start));
             $period = strtotime(trim($period), 0);
-
-            if (
-                !empty($start)
-                && !empty($period)
-                && $now >= $start
-            ) {
-                // ?????????, ??????? ?????? ???????? ?????? ? ??????? start
-                $elapsed = $now - $start;
-                $periodsElapsed = floor($elapsed / $period);
-
-                // ????? ?????????? ????????? ??????
-                $lastScheduledBackup = $start + ($periodsElapsed * $period);
-
-                // ?????????, ?????? ?? ??? ????? ? ???? ???????
-                $lastBackupTime = $c['last_backup_time'] ?? 0;
-
-                // ???? ????????? ????? ??? ?????? ?? ?????? ???????? ??????? - ?????? ?????
-                if ($lastBackupTime < $lastScheduledBackup) {
-                    $c['last_backup_time'] = $now;
-                    $this->setPacConf($c);
-                    $this->pinBackup();
-                }
+            if (empty($start) || empty($period) || $now < $start) {
+                return null;
             }
+            $lastScheduledBackup = $start + (floor(($now - $start) / $period) * $period);
+            if ((int) ($c['last_backup_time'] ?? 0) >= $lastScheduledBackup) {
+                return null;
+            }
+            $c['last_backup_time'] = $now;
+            $run = true;
+
+            return $c;
+        });
+        if ($run) {
+            $this->pinBackup();
         }
     }
 
     public function checkResetXrayStats()
     {
-        $pac = $this->getPacConf();
-        if (!empty($pac['reset_monthly'])) {
+        $run = false;
+        $this->patchPacConf(function (array $pac) use (&$run) {
+            if (empty($pac['reset_monthly'])) {
+                return null;
+            }
             $now    = time();
             $start  = strtotime('first day of previous month midnight');
             $period = strtotime('1 month', 0);
-
-            if (
-                !empty($start)
-                && !empty($period)
-                && $now >= $start
-            ) {
-                // ?????????, ??????? ?????? ???????? ?????? ? ??????? start
-                $elapsed = $now - $start;
-                $periodsElapsed = floor($elapsed / $period);
-
-                // ????? ?????????? ????????? ?????? ??????????
-                $lastScheduledReset = $start + ($periodsElapsed * $period);
-
-                // ?????????, ?????? ?? ??? ????? ? ???? ???????
-                $lastResetTime = $pac['last_reset_xray_time'] ?? 0;
-
-                // ???? ????????? ????? ??? ?????? ?? ?????? ???????? ??????? - ?????? ?????
-                if ($lastResetTime < $lastScheduledReset) {
-                    $pac['last_reset_xray_time'] = $now;
-                    $this->setPacConf($pac);
-                    $this->resetXrStats(1);
-                    require __DIR__ . '/config.php';
-                    foreach ($c['admin'] as $admin) {
-                        $this->send($admin, "vless: reset stats");
-                    }
-                }
+            if (empty($start) || empty($period) || $now < $start) {
+                return null;
             }
+            $lastScheduledReset = $start + (floor(($now - $start) / $period) * $period);
+            if ((int) ($pac['last_reset_xray_time'] ?? 0) >= $lastScheduledReset) {
+                return null;
+            }
+            $pac['last_reset_xray_time'] = $now;
+            $run = true;
+
+            return $pac;
+        });
+        if (!$run) {
+            return;
+        }
+        $this->resetXrStats(1);
+        require __DIR__ . '/config.php';
+        foreach ($c['admin'] as $admin) {
+            $this->send($admin, "vless: reset stats");
         }
     }
 
     public function checkLogs()
     {
-        $c = $this->getPacConf();
-        if (!empty($c['autocleanlogs'])) {
+        $run = false;
+        $this->patchPacConf(function (array $c) use (&$run) {
+            if (empty($c['autocleanlogs']) || !str_contains((string) $c['autocleanlogs'], '/')) {
+                return null;
+            }
             $now = time();
-            [$start, $period] = explode('/', $c['autocleanlogs']);
+            [$start, $period] = explode('/', (string) $c['autocleanlogs'], 2);
             $start  = strtotime(trim($start));
             $period = strtotime(trim($period), 0);
-
-            if (
-                !empty($start)
-                && !empty($period)
-                && $now >= $start
-            ) {
-                // ?????????, ??????? ?????? ???????? ?????? ? ??????? start
-                $elapsed = $now - $start;
-                $periodsElapsed = floor($elapsed / $period);
-
-                // ????? ????????? ???????? ??????? ?????
-                $lastScheduledClean = $start + ($periodsElapsed * $period);
-
-                // ?????????, ?????? ?? ??? ??????? ? ???? ???????
-                $lastCleanTime = $c['last_clean_logs_time'] ?? 0;
-
-                // ???? ????????? ??????? ???? ??????? ?? ?????? ???????? ??????? - ?????? ???????
-                if ($lastCleanTime < $lastScheduledClean) {
-                    $c['last_clean_logs_time'] = $now;
-                    $this->setPacConf($c);
-                    $this->cleanLog();
-                }
+            if (empty($start) || empty($period) || $now < $start) {
+                return null;
             }
+            $lastScheduledClean = $start + (floor(($now - $start) / $period) * $period);
+            if ((int) ($c['last_clean_logs_time'] ?? 0) >= $lastScheduledClean) {
+                return null;
+            }
+            $c['last_clean_logs_time'] = $now;
+            $run = true;
+
+            return $c;
+        });
+        if ($run) {
+            $this->cleanLog();
         }
     }
 
@@ -1885,18 +1869,31 @@ class Bot
     public function pinBackup($file = false)
     {
         require __DIR__ . '/config.php';
-        $conf = $this->getPacConf();
+        $previousPin = null;
+        $this->withPacFileLock(false, function ($fh) use (&$previousPin) {
+            $conf = $this->readPacFileArray($fh);
+            $previousPin = $conf['pinbackup'] ?? null;
+
+            return true;
+        });
         $bot  = preg_replace('~[\W]~iu', '_', $this->request('getMyName', [])['result']['name']);
         $json = $this->export();
         if (!empty($file)) {
             file_put_contents($file, $json);
         }
-        if (!empty($conf['pinbackup'])) {
-            $this->pinAdmin($conf['pinbackup'], 1);
+        if (!empty($previousPin)) {
+            $this->pinAdmin($previousPin, 1);
         }
-        $conf['pinbackup'] = $this->upload("{$bot}_export_" . date('d_m_Y_H_i') . '.json', $json, $c['admin'][0])['result']['message_id'];
-        $this->setPacConf($conf);
-        $this->pinAdmin($conf['pinbackup']);
+        $uploaded = $this->upload("{$bot}_export_" . date('d_m_Y_H_i') . '.json', $json, $c['admin'][0])['result']['message_id'] ?? null;
+        if (empty($uploaded)) {
+            return;
+        }
+        $this->patchPacConf(function (array $conf) use ($uploaded) {
+            $conf['pinbackup'] = $uploaded;
+
+            return $conf;
+        });
+        $this->pinAdmin($uploaded);
     }
 
     public function checkVersion()
@@ -2760,7 +2757,9 @@ class Bot
         if ($this->pacConfCache !== null) {
             return $this->pacConfCache;
         }
-        $raw = json_decode(file_get_contents($this->pac), true);
+        $raw = $this->withPacFileLock(false, function ($fh) {
+            return $this->readPacFileArray($fh);
+        });
         if (!is_array($raw)) {
             $raw = [];
         }
@@ -2868,8 +2867,75 @@ class Bot
     public function setPacConf(array $conf)
     {
         $this->invalidatePacConfCache();
+        $written = $this->withPacFileLock(true, function ($fh) use ($conf) {
+            return $this->writePacFileArray($fh, $conf);
+        });
+        $this->invalidatePacConfCache();
 
-        return file_put_contents($this->pac, json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return $written;
+    }
+
+    // Крон живёт долго и не должен сохранять снимок pac.json, прочитанный раньше.
+    // null от патча значит «на диске ничего не менять».
+    protected function patchPacConf(callable $patch)
+    {
+        $this->invalidatePacConfCache();
+        $written = $this->withPacFileLock(true, function ($fh) use ($patch) {
+            $current = $this->readPacFileArray($fh);
+            $next = $patch($current);
+            if (!is_array($next)) {
+                return true;
+            }
+
+            return $this->writePacFileArray($fh, $next);
+        });
+        $this->invalidatePacConfCache();
+
+        return $written;
+    }
+
+    protected function withPacFileLock(bool $exclusive, callable $fn)
+    {
+        $fh = @fopen($this->pac, $exclusive ? 'c+' : 'r');
+        if ($fh === false) {
+            return null;
+        }
+        try {
+            if (!flock($fh, $exclusive ? LOCK_EX : LOCK_SH)) {
+                return null;
+            }
+
+            return $fn($fh);
+        } finally {
+            flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+    }
+
+    protected function readPacFileArray($fh): array
+    {
+        rewind($fh);
+        $raw = stream_get_contents($fh);
+        if ($raw === false || trim($raw) === '') {
+            return [];
+        }
+        $data = json_decode($raw, true);
+
+        return is_array($data) ? $data : [];
+    }
+
+    protected function writePacFileArray($fh, array $conf)
+    {
+        $json = json_encode($conf, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return false;
+        }
+        rewind($fh);
+        ftruncate($fh, 0);
+        $written = fwrite($fh, $json);
+        fflush($fh);
+
+        return $written === false ? false : strlen($json);
     }
 
     /**
