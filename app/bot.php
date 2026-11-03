@@ -1020,6 +1020,10 @@ class Bot
 
     protected function xrayClientStamp(array $c): string
     {
+        // Hash the lists Xray actually loaded. Without this, inbound 0 still
+        // holds the registry while ws/xhttp/reality already hold the filtered
+        // copies, the stamp never matches, and every subscription refresh restarts Xray.
+        $this->applyBothTransportInboundClients($c);
         $ids = [];
         foreach ($c['inbounds'] ?? [] as $inbound) {
             if (!is_array($inbound)) {
