@@ -8754,9 +8754,23 @@ DNS-over-HTTPS with IP:
             $this->answer($this->input['callback_id'], 'user not found', true);
             return;
         }
-        $this->clearSubscriptionDevicePassword($xray['inbounds'][0]['settings']['clients'][$i]);
-        $this->writeXrayConfig($xray);
-        $this->answer($this->input['callback_id'], 'device delete password reset', true);
+        $client = &$xray['inbounds'][0]['settings']['clients'][$i];
+        $hadPassword = $this->hasSubscriptionDevicePassword($client);
+        if ($hadPassword) {
+            $this->clearSubscriptionDevicePassword($client);
+            $this->writeXrayConfig($xray);
+        }
+        $cleared = $this->clearSubscriptionActionRateLimit(
+            $this->getClientSubscriptionId($client),
+            'device_password_set'
+        );
+        $text = $hadPassword
+            ? 'device delete password reset'
+            : 'device delete password was not set';
+        if ($cleared > 0) {
+            $text .= '. save limit cleared';
+        }
+        $this->answer($this->input['callback_id'], $text, true);
         $this->userXr($i);
     }
 

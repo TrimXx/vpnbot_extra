@@ -115,43 +115,98 @@ trait SubscriptionSecurityTrait
         return '/config/sub_action_rl.json';
     }
 
-    protected function checkSubscriptionActionRateLimit(string $subscriptionId, string $action, int $max = 10, int $window = 300): bool
+    protected function updateSubscriptionRateLimit(callable $mutator): bool
     {
         $path = $this->getSubscriptionRateLimitPath();
-        $now = time();
-        $data = [];
-        if (is_readable($path)) {
-            $decoded = json_decode((string) file_get_contents($path), true);
-            if (is_array($decoded)) {
-                $data = $decoded;
-            }
-        }
-        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
-        $bucketKey = $subscriptionId . '|' . $action . '|' . $ip;
-        $entries = array_values(array_filter(
-            $data[$bucketKey] ?? [],
-            static fn($ts) => (int) $ts > $now - $window
-        ));
-        if (count($entries) >= $max) {
+        $fh = @fopen($path, 'c+');
+        if ($fh === false) {
             return false;
         }
-        $entries[] = $now;
-        $data[$bucketKey] = $entries;
-        foreach ($data as $key => $timestamps) {
-            if (!is_array($timestamps)) {
-                unset($data[$key]);
-                continue;
+        try {
+            if (!flock($fh, LOCK_EX)) {
+                return false;
             }
-            $filtered = array_values(array_filter($timestamps, static fn($ts) => (int) $ts > $now - $window));
-            if ($filtered === []) {
-                unset($data[$key]);
-            } else {
-                $data[$key] = $filtered;
+            rewind($fh);
+            $raw = stream_get_contents($fh);
+            $data = json_decode(is_string($raw) ? $raw : '', true);
+            if (!is_array($data)) {
+                $data = [];
             }
-        }
-        file_put_contents($path, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            $mutator($data);
+            $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if ($encoded === false) {
+                $encoded = '{}';
+            }
+            rewind($fh);
+            if (!ftruncate($fh, 0) || fwrite($fh, $encoded) === false) {
+                return false;
+            }
+            fflush($fh);
 
-        return true;
+            return true;
+        } finally {
+            flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+    }
+
+    protected function checkSubscriptionActionRateLimit(string $subscriptionId, string $action, int $max = 10, int $window = 300): bool
+    {
+        $now = time();
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $bucketKey = $subscriptionId . '|' . $action . '|' . $ip;
+        $allowed = true;
+        $updated = $this->updateSubscriptionRateLimit(function (array &$data) use ($bucketKey, $now, $window, $max, &$allowed): void {
+            $entries = array_values(array_filter(
+                is_array($data[$bucketKey] ?? null) ? $data[$bucketKey] : [],
+                static fn($ts) => (int) $ts > $now - $window
+            ));
+            if (count($entries) >= $max) {
+                $allowed = false;
+            } else {
+                $entries[] = $now;
+            }
+            $data[$bucketKey] = $entries;
+            foreach ($data as $key => $timestamps) {
+                if (!is_array($timestamps)) {
+                    unset($data[$key]);
+                    continue;
+                }
+                $filtered = array_values(array_filter($timestamps, static fn($ts) => (int) $ts > $now - $window));
+                if ($filtered === []) {
+                    unset($data[$key]);
+                } else {
+                    $data[$key] = $filtered;
+                }
+            }
+        });
+        if (!$updated) {
+            return true;
+        }
+
+        return $allowed;
+    }
+
+    protected function clearSubscriptionActionRateLimit(string $subscriptionId, string $action): int
+    {
+        $subscriptionId = trim($subscriptionId);
+        $action = trim($action);
+        if ($subscriptionId === '' || $action === '') {
+            return 0;
+        }
+        $prefix = $subscriptionId . '|' . $action . '|';
+        $removed = 0;
+        $this->updateSubscriptionRateLimit(function (array &$data) use ($prefix, &$removed): void {
+            foreach (array_keys($data) as $key) {
+                if (!is_string($key) || strncmp($key, $prefix, strlen($prefix)) !== 0) {
+                    continue;
+                }
+                unset($data[$key]);
+                $removed++;
+            }
+        });
+
+        return $removed;
     }
 
     protected function requireSubscriptionActionRateLimit(string $subscriptionId, string $action, int $max = 10, int $window = 300): void
