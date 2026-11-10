@@ -272,7 +272,7 @@ switch (true) {
         echo base64_encode($vless);
         break;
 
-    case preg_match('~^(?:FlClash|[Cc]lash-[Vv]erge|[Cc]lash-?[Mm]eta|[Mm]urge|[Cc]lashX [Mm]eta|[Mm]ihomo|[Cc]lash-nyanpasu|clash\.meta)~iu', $ua):
+    case preg_match('~^(?:FlClash|[Cc]lash-[Vv]erge|[Cc]lash-?[Mm]eta|[Mm]urge|[Cc]lashX [Mm]eta|[Mm]ihomo|[Cc]lash-nyanpasu|clash\.meta|[Rr]abbit-?[Hh]ole)~iu', $ua):
         send_profile_headers($email, $subscription_url, $supportUrl, $download, $expire, $announce, $pacConfig);
         header('Content-type: text/yaml');
         echo $configs['clash'];
