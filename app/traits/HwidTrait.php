@@ -328,15 +328,39 @@ trait HwidTrait
     protected function getRuntimeDeviceHwidSet(string $ownerSubId): array
     {
         $seen = [];
+        foreach (array_keys($this->getRuntimeDeviceClients($ownerSubId)) as $hwid) {
+            $seen[$hwid] = true;
+        }
+
+        return $seen;
+    }
+
+    /**
+     * Runtime Xray clients for a subscription, one row per HWID.
+     * The first client wins; later duplicates are still removed on delete.
+     *
+     * @return array<string, array{id:string, email:string}>
+     */
+    protected function getRuntimeDeviceClients(string $ownerSubId): array
+    {
+        $ownerSubId = trim($ownerSubId);
+        $seen = [];
+        if ($ownerSubId === '') {
+            return $seen;
+        }
         $xray = $this->getXray();
         foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $client) {
             if (!is_array($client) || (string) ($client['device_parent_id'] ?? '') !== $ownerSubId) {
                 continue;
             }
             $hwid = trim((string) ($client['device_hwid'] ?? ''));
-            if ($hwid !== '') {
-                $seen[$hwid] = true;
+            if ($hwid === '' || isset($seen[$hwid])) {
+                continue;
             }
+            $seen[$hwid] = [
+                'id' => (string) ($client['id'] ?? ''),
+                'email' => (string) ($client['email'] ?? ''),
+            ];
         }
 
         return $seen;
@@ -346,6 +370,89 @@ trait HwidTrait
     {
         $storage = $this->getHwidStorage();
         return $storage[$uid] ?? [];
+    }
+
+    /**
+     * Cards from hwid.json plus Xray clients that lost their card.
+     * Does not write those clients back into hwid.json.
+     */
+    public function listVisibleHwidDevices(string $ownerSubId): array
+    {
+        $ownerSubId = trim($ownerSubId);
+        $devices = $this->getHwidDevicesByUser($ownerSubId);
+        if (!is_array($devices)) {
+            $devices = [];
+        }
+        foreach ($this->getRuntimeDeviceClients($ownerSubId) as $hwid => $meta) {
+            if (isset($devices[$hwid]) && is_array($devices[$hwid])) {
+                if (empty($devices[$hwid]['device_uuid']) && $meta['id'] !== '') {
+                    $devices[$hwid]['device_uuid'] = $meta['id'];
+                }
+                continue;
+            }
+            $devices[$hwid] = [
+                'time' => 0,
+                'user_agent' => '',
+                'device_os' => '',
+                'os_version' => '',
+                'device_model' => '',
+                'device_name' => '',
+                'device_uuid' => $meta['id'],
+                'missing_card' => 1,
+            ];
+        }
+        uasort($devices, static function ($a, $b) {
+            $am = !empty($a['missing_card']);
+            $bm = !empty($b['missing_card']);
+            if ($am !== $bm) {
+                return $am ? -1 : 1;
+            }
+
+            return ((int) ($b['time'] ?? 0)) <=> ((int) ($a['time'] ?? 0));
+        });
+
+        return $devices;
+    }
+
+    /**
+     * Drop every runtime client of this subscription with the given HWID or UUID.
+     */
+    protected function deleteRuntimeDeviceClients(string $ownerSubId, string $hwid, string $deviceUuid = ''): void
+    {
+        $ownerSubId = trim($ownerSubId);
+        $hwid = trim($hwid);
+        $deviceUuid = trim($deviceUuid);
+        if ($ownerSubId === '' || ($hwid === '' && $deviceUuid === '')) {
+            return;
+        }
+
+        $xray = $this->getXray();
+        $removedUuids = [];
+        $changed = false;
+        foreach (($xray['inbounds'][0]['settings']['clients'] ?? []) as $idx => $client) {
+            if (!is_array($client) || (string) ($client['device_parent_id'] ?? '') !== $ownerSubId) {
+                continue;
+            }
+            $childHwid = (string) ($client['device_hwid'] ?? '');
+            $childId = (string) ($client['id'] ?? '');
+            $match = ($hwid !== '' && $childHwid === $hwid) || ($deviceUuid !== '' && $childId !== '' && $childId === $deviceUuid);
+            if (!$match) {
+                continue;
+            }
+            unset($xray['inbounds'][0]['settings']['clients'][$idx]);
+            $changed = true;
+            if ($childId !== '') {
+                $removedUuids[$childId] = true;
+            }
+        }
+        if ($changed) {
+            $this->restartXray($xray);
+        }
+        foreach (array_keys($removedUuids) as $removedUuid) {
+            $this->runInRuntimeWgContext(function () use ($removedUuid) {
+                $this->deleteDeviceWgProfileByUuid($removedUuid);
+            });
+        }
     }
 
     protected function sanitizeHwidDeviceName(string $name): string
@@ -1821,13 +1928,12 @@ trait HwidTrait
         $pac    = $this->getPacConf();
 
         $ownerSubId = $this->getClientSubscriptionId($client);
-        $devices = $this->getHwidDevicesByUser($ownerSubId);
+        $devices = $this->listVisibleHwidDevices($ownerSubId);
         $scope   = $this->getHwidTokenScope($i);
         if (!isset($_SESSION['hwidTokens'])) {
             $_SESSION['hwidTokens'] = [];
         }
         $_SESSION['hwidTokens'][$scope] = [];
-        uasort($devices, fn($a, $b) => ($b['time'] ?? 0) <=> ($a['time'] ?? 0));
         $hwids        = array_keys($devices);
         $perPage      = max(1, $this->limit ?: 5);
         $total        = count($hwids);
@@ -1904,6 +2010,9 @@ trait HwidTrait
             }
             if ($osLine !== '') {
                 $text[] = '  OS: ' . $osLine;
+            }
+            if (!empty($info['missing_card'])) {
+                $text[] = '  ' . $this->i18n('hwid missing card');
             }
             if (!empty($info['user_agent'])) {
                 $text[] = '  UA: ' . htmlspecialchars($info['user_agent'], ENT_HTML5, 'UTF-8');
@@ -2033,19 +2142,10 @@ trait HwidTrait
         $scope  = $this->getHwidTokenScope($i);
         $decoded = $this->resolveHwidToken($scope, $hwid);
         if ($decoded !== '') {
-            $devices = $this->getHwidDevicesByUser($ownerSubId);
+            $devices = $this->listVisibleHwidDevices($ownerSubId);
             $deviceUuid = (string) ($devices[$decoded]['device_uuid'] ?? '');
             $this->deleteHwidDevice($ownerSubId, $decoded);
-            if ($deviceUuid !== '') {
-                $idx = $this->findXrayClientIndexById($xray, $deviceUuid);
-                if ($idx !== null) {
-                    unset($xray['inbounds'][0]['settings']['clients'][$idx]);
-                    $this->restartXray($xray);
-                }
-                $this->runInRuntimeWgContext(function () use ($deviceUuid) {
-                    $this->deleteDeviceWgProfileByUuid($deviceUuid);
-                });
-            }
+            $this->deleteRuntimeDeviceClients($ownerSubId, $decoded, $deviceUuid);
         }
         $this->hwidUser($i, $page);
     }

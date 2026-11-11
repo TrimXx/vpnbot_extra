@@ -8486,7 +8486,7 @@ DNS-over-HTTPS with IP:
         $hash   = $this->getHashBot();
 
         $ownerSubId = $this->getClientSubscriptionId($c);
-        $devices      = $this->getHwidDevicesByUser($ownerSubId);
+        $devices      = $this->listVisibleHwidDevices($ownerSubId);
         $hwidEnabled  = !empty($pac['hwid_limit_enabled']) && empty($c['hwid_disabled']);
         $runtimeModeText = array_key_exists('hwid_runtime_mode', $c)
             ? ($this->i18n(!empty($c['hwid_runtime_mode']) ? 'on' : 'off') . ' (override)')
