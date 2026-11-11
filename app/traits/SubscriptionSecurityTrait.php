@@ -298,24 +298,13 @@ trait SubscriptionSecurityTrait
             return ['ok' => false, 'message' => 'invalid password'];
         }
 
-        $xr = $this->getXray();
-        $devices = $this->getHwidDevicesByUser($ownerSubId);
+        $devices = $this->listVisibleHwidDevices($ownerSubId);
+        if (!isset($devices[$hwid]) || !is_array($devices[$hwid])) {
+            return ['ok' => false, 'message' => 'device not found'];
+        }
         $deviceUuid = (string) ($devices[$hwid]['device_uuid'] ?? '');
         $this->deleteHwidDevice($ownerSubId, $hwid);
-        if ($deviceUuid !== '') {
-            $idx = $this->findXrayClientIndexById($xr, $deviceUuid);
-            if ($idx !== null) {
-                unset($xr['inbounds'][0]['settings']['clients'][$idx]);
-                $this->restartXray($xr);
-            } else {
-                $this->writeXrayConfig($xr);
-            }
-            $this->runInRuntimeWgContext(function () use ($deviceUuid) {
-                $this->deleteDeviceWgProfileByUuid($deviceUuid);
-            });
-        } else {
-            $this->writeXrayConfig($xr);
-        }
+        $this->deleteRuntimeDeviceClients($ownerSubId, $hwid, $deviceUuid);
 
         return ['ok' => true];
     }
