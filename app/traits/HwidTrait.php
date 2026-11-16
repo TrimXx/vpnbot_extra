@@ -1662,7 +1662,8 @@ trait HwidTrait
                 return true;
             }
 
-            $message = 'HWID device limit exceeded';
+            // Missing x-hwid is not the same as quota full — keep status explicit for clients/UI.
+            $message = 'Device HWID header (x-hwid) is required';
             header('announce: base64:' . base64_encode($message));
             header('X-HWID-Status: ' . $message);
             header('HTTP/1.1 403 Forbidden', true, 403);

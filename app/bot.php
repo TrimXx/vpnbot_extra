@@ -8989,8 +8989,15 @@ DNS-over-HTTPS with IP:
         if ($runtimeModeEnabled && !$ruleProviderRequest) {
             $deviceUuid = (string) ($_SERVER['VPNBOT_DEVICE_UUID'] ?? '');
             if ($deviceUuid === '') {
-                if (!empty($_SERVER['VPNBOT_SUBSCRIPTION_BROWSER']) && $return) {
-                    return $this->buildEmptyClashSubscription();
+                // Browser / WebView without device UUID: empty profile, not a hard 403
+                // (same as subscription page preview). Real clients must send x-hwid.
+                if (!empty($_SERVER['VPNBOT_SUBSCRIPTION_BROWSER'])) {
+                    if ($return) {
+                        return $this->buildEmptyClashSubscription();
+                    }
+                    header('Content-Type: text/yaml;charset=UTF-8');
+                    echo $this->buildEmptyClashSubscription();
+                    exit;
                 }
                 http_response_code(403);
                 header('Content-Type: text/plain; charset=utf-8');
