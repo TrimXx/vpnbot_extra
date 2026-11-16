@@ -213,6 +213,10 @@ $i = [
         'en' => 'no devices',
         'ru' => 'нет устройств',
     ],
+    'hwid missing card' => [
+        'en' => 'no card, still occupies a slot',
+        'ru' => 'нет карточки, слот занят',
+    ],
     'hwid notice' => [
         'en' => 'HWID limit works only when subscription is refreshed or added',
         'ru' => 'HWID лимит срабатывает только в момент обновления и добавления подписки',

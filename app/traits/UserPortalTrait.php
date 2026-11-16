@@ -203,7 +203,7 @@ trait UserPortalTrait
         $lines[] = $trafficLine;
 
         $ownerSubId = $session['subscription_id'];
-        $deviceCount = count($this->getHwidDevicesByUser($ownerSubId));
+        $deviceCount = count($this->listVisibleHwidDevices($ownerSubId));
         $lines[] = $this->i18n('hwid devices') . ': ' . $deviceCount;
         $lines[] = $this->i18n('user portal delete password') . ': ' . $this->i18n(
             $this->hasSubscriptionDevicePassword($client) ? 'user portal password set' : 'user portal password not set'
@@ -686,14 +686,13 @@ trait UserPortalTrait
 
         $ownerSubId = $session['subscription_id'];
         $client = $session['client'];
-        $devices = $this->getHwidDevicesByUser($ownerSubId);
+        $devices = $this->listVisibleHwidDevices($ownerSubId);
         $scope = $this->getUserPortalTokenScope();
         if (!isset($_SESSION['hwidTokens'])) {
             $_SESSION['hwidTokens'] = [];
         }
         $_SESSION['hwidTokens'][$scope] = [];
 
-        uasort($devices, fn($a, $b) => ($b['time'] ?? 0) <=> ($a['time'] ?? 0));
         $hwids = array_keys($devices);
         $perPage = max(1, $this->limit ?: 5);
         $total = count($hwids);
@@ -742,6 +741,9 @@ trait UserPortalTrait
                 if ($details !== []) {
                     $text[] = htmlspecialchars(implode(' ', $details), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
                 }
+                if (!empty($info['missing_card'])) {
+                    $text[] = $this->i18n('hwid missing card');
+                }
                 if (!empty($info['time'])) {
                     $text[] = date('d.m.Y H:i', (int) $info['time']);
                 }
@@ -749,17 +751,22 @@ trait UserPortalTrait
                 $devUp = (int) ($deviceTraffic[$hwid]['upload'] ?? 0);
                 $text[] = $this->formatTrafficDisplayLine($devDown, $devUp);
                 $token = $this->rememberHwidToken($scope, $hwid);
-                $row = [[
-                    'text'          => $this->i18n('rename') . ' ' . $number,
-                    'callback_data' => "/userPortalRename {$page}_{$token}",
-                ]];
+                $row = [];
+                if (empty($info['missing_card'])) {
+                    $row[] = [
+                        'text'          => $this->i18n('rename') . ' ' . $number,
+                        'callback_data' => "/userPortalRename {$page}_{$token}",
+                    ];
+                }
                 if ($this->hasSubscriptionDevicePassword($client)) {
                     $row[] = [
                         'text'          => $this->i18n('delete') . ' ' . $number,
                         'callback_data' => "/userPortalDel {$page}_{$token}",
                     ];
                 }
-                $data[] = $row;
+                if ($row !== []) {
+                    $data[] = $row;
+                }
             }
         }
 

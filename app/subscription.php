@@ -12,7 +12,12 @@ if (preg_match('~<a\s+href=["\']([^"\']+)["\']~i', $subscription_url, $m)) {
 }
 $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 $username = htmlspecialchars($email ?? '', ENT_QUOTES, 'UTF-8');
-$connectedDevices = method_exists($this, 'getHwidDevicesByUser') ? ($this->getHwidDevicesByUser($uid) ?: []) : [];
+$connectedDevices = [];
+if (method_exists($this, 'listVisibleHwidDevices')) {
+    $connectedDevices = $this->listVisibleHwidDevices((string) $uid) ?: [];
+} elseif (method_exists($this, 'getHwidDevicesByUser')) {
+    $connectedDevices = $this->getHwidDevicesByUser($uid) ?: [];
+}
 $deviceTrafficMap = $deviceTrafficMap ?? [];
 $hwidLimitEnabled = !empty($pacConfig['hwid_limit_enabled']);
 $defaultDeviceLimit = (int)($pacConfig['hwid_device_count'] ?? 0);
@@ -36,6 +41,7 @@ foreach ($connectedDevices as $deviceHwid => $deviceInfo) {
         'device_model' => (string)($deviceInfo['device_model'] ?? ''),
         'device_name' => (string)($deviceInfo['device_name'] ?? ''),
         'time' => (int)($deviceInfo['time'] ?? 0),
+        'missing_card' => !empty($deviceInfo['missing_card']) ? 1 : 0,
         'traffic_total' => (int)($deviceTrafficMap[$hwidKey]['total'] ?? 0),
         'traffic_upload' => (int)($deviceTrafficMap[$hwidKey]['upload'] ?? 0),
         'traffic_download' => (int)($deviceTrafficMap[$hwidKey]['download'] ?? 0),
@@ -2101,8 +2107,10 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
 
             const rows = devices.map(device => {
                 const customName = String(device.device_name || '').trim();
-                const model = escapeHtml(device.device_model || '-');
-                const title = escapeHtml(customName || model);
+                const missingCard = Number(device.missing_card) === 1;
+                const missingLabel = currentLanguage === 'ru' ? 'нет карточки, слот занят' : 'no card, still occupies a slot';
+                const model = escapeHtml(device.device_model || (missingCard ? missingLabel : '-'));
+                const title = escapeHtml(customName || (missingCard ? missingLabel : (device.device_model || '-')));
                 const os = escapeHtml(device.device_os || '-');
                 const osVersion = escapeHtml(device.os_version || '');
                 const hwid = escapeHtml(device.hwid || '-');
@@ -2126,7 +2134,7 @@ oh/uZMozC65SmDw+N5p6Su8CAwEAAQ==
                             <div class="connected-device-time">🕒 ${lastSeen}</div>
                         </div>
                         <div class="connected-device-actions">
-                            <button type="button" class="btn btn-sm" style="padding: 6px 12px;" onclick="renameDeviceByHwid('${escapeForAttribute(device.hwid || '')}', '${escapeForAttribute(customName || model)}')">✏️</button>
+                            ${missingCard ? '' : `<button type="button" class="btn btn-sm" style="padding: 6px 12px;" onclick="renameDeviceByHwid('${escapeForAttribute(device.hwid || '')}', '${escapeForAttribute(customName || model)}')">✏️</button>`}
                             <button type="button" class="btn btn-sm" style="padding: 6px 12px; border-color: var(--error); color: var(--error);" onclick="deleteDeviceByHwid('${escapeForAttribute(device.hwid || '')}')">🗑️</button>
                         </div>
                     </div>
