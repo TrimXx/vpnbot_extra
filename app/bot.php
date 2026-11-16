@@ -9202,7 +9202,7 @@ DNS-over-HTTPS with IP:
                     if (!is_array($existingNameserver)) {
                         $existingNameserver = [$existingNameserver];
                     }
-                    $mergedNameserver = array_values(array_unique(array_merge($existingNameserver, $dnsUrls)));
+                    $mergedNameserver = $this->mergeClashAdguardNameservers($existingNameserver, $dnsUrls);
                     if (!isset($c['dns']) || !is_array($c['dns'])) {
                         $c['dns'] = [];
                     }
@@ -9213,14 +9213,14 @@ DNS-over-HTTPS with IP:
         }
         if (!empty($return)) {
             if ($_GET['t'] == 'cl') {
-                return yaml_emit($c);
+                return $this->emitClashSubscriptionYaml($c);
             }
             return json_encode($c);
         }
 
         if ($_GET['t'] == 'cl') {
             header('Content-type: text/yaml');
-            echo yaml_emit($c);
+            echo $this->emitClashSubscriptionYaml($c);
             return;
         }
 
@@ -9399,6 +9399,52 @@ DNS-over-HTTPS with IP:
     public function replaceTags($subject, $tags)
     {
         return str_replace(array_keys($tags), array_values($tags), $subject);
+    }
+
+    protected function mergeClashAdguardNameservers(array $existing, array $dnsUrls): array
+    {
+        $useProxy = false;
+        foreach ($existing as $item) {
+            if (is_string($item) && preg_match('/#PROXY$/', $item)) {
+                $useProxy = true;
+                break;
+            }
+        }
+        if (!$useProxy) {
+            return array_values(array_unique(array_merge($existing, $dnsUrls)));
+        }
+
+        $proxied = [];
+        foreach ($dnsUrls as $url) {
+            $proxied[$url] = $url . '#PROXY';
+        }
+        $merged = [];
+        $seenAdguard = false;
+        foreach ($existing as $item) {
+            if (!is_string($item)) {
+                $merged[] = $item;
+                continue;
+            }
+            $bare = preg_replace('/#.*$/', '', $item);
+            if (isset($proxied[$bare])) {
+                $merged[] = $proxied[$bare];
+                $seenAdguard = true;
+                continue;
+            }
+            $merged[] = $item;
+        }
+        if (!$seenAdguard && $dnsUrls !== []) {
+            $merged[] = $dnsUrls[0] . '#PROXY';
+        }
+
+        return array_values(array_unique($merged));
+    }
+
+    protected function emitClashSubscriptionYaml(array $c): string
+    {
+        $yaml = yaml_emit($c);
+
+        return preg_replace('/^([ \t]*-[ \t]+)([^"\'\n#]+#[^\s#]+)$/m', '$1"$2"', $yaml) ?? $yaml;
     }
 
     public function addRuleSet($route)
