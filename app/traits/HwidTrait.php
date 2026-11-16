@@ -1646,7 +1646,9 @@ trait HwidTrait
         $isRuleRequest = $this->isClashRuleProviderRequest($ruleName);
 
         $hwidNotSupported = !$isRuleRequest && !$isBrowser && $hwid === '';
-        $hwidMaxReached = $occupied >= $limit;
+        // Occupied quota must not be flagged for an already-known device: clients like Prizrak drop the profile when these headers are true.
+        $isNewDevice = $hwid !== '' && !isset($devices[$hwid]) && !isset($runtimeHwids[$hwid]);
+        $hwidMaxReached = $isNewDevice && $occupied >= $limit;
         header('x-hwid-active: true');
         header('x-hwid-not-supported: ' . ($hwidNotSupported ? 'true' : 'false'));
         header('x-hwid-max-devices-reached: ' . ($hwidMaxReached ? 'true' : 'false'));
